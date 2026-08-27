@@ -45,9 +45,9 @@ fn main() {
     let reader_reports: Vec<Arc<Mutex<Option<Report>>>> = readers.iter().map(|r| r.report_handle()).collect();
 
     let mut handler = ExecutorHandler::new(topics.clone());
-    handler.add_executor(0, Box::new(writer));
-    for (i, reader) in readers.into_iter().enumerate() {
-        handler.add_executor((i + 1) as u8, Box::new(reader));
+    handler.add_executor(Box::new(writer));
+    for reader in readers {
+        handler.add_executor(Box::new(reader));
     }
     let handles = handler.run_all();
 

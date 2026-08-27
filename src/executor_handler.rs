@@ -26,10 +26,13 @@ impl ExecutorHandler {
         }
     }
 
-    /// Registers `executor` under `id`. `id` is passed to the executor's
-    /// [`Executor::init`] once it starts running.
-    pub fn add_executor(&mut self, id: u8, executor: Box<dyn Executor>) {
+    /// Registers `executor`, assigning it a unique id (in registration order,
+    /// starting at 0). The id is passed to the executor's [`Executor::init`]
+    /// once it starts running, and returned here in case the caller needs it.
+    pub fn add_executor(&mut self, executor: Box<dyn Executor>) -> u8 {
+        let id = self.executors.len() as u8;
         self.executors.push((id, executor));
+        id
     }
 
     /// Spawns one thread per registered executor, all at once: each calls
