@@ -16,7 +16,8 @@ pub trait Executor: Send {
     fn init(&mut self, id: u8);
 
     /// The executor's main loop. Should keep working until
-    /// `topics.is_running()` returns `false`, then return.
+    /// `topics.is_running(id)` (with the id given to [`init`](Self::init)) returns
+    /// `false`, then return.
     fn run(&mut self, topics: &TopicHandler);
 
     /// Enables downcasting a finished `Box<dyn Executor>` back to its concrete type,

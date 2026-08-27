@@ -26,6 +26,6 @@ mod topic;
 mod topic_handler;
 
 pub use executor::Executor;
-pub use executor_handler::ExecutorHandler;
+pub use executor_handler::{ExecutorHandler, SwitchExecutorError};
 pub use topic::{LockFreeTopic, Topic, TopicError};
 pub use topic_handler::TopicHandler;

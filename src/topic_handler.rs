@@ -1,4 +1,4 @@
-//! Owns every [`Topic`] shared between executors, plus the run/stop signal they poll.
+//! Owns every [`Topic`] shared between executors, plus the run/stop signals they poll.
 
 use crate::topic::LockFreeTopic;
 use std::any::Any;
@@ -13,12 +13,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// different types, each is stored type-erased and recovered via
 /// [`topic`](Self::topic).
 ///
-/// This is also where the shared stop signal lives: since [`crate::Executor::run`]
-/// only receives a `&TopicHandler`, an executor's run loop polls
-/// [`is_running`](Self::is_running) to know when to exit.
+/// This is also where the run/stop signals live: since [`crate::Executor::run`] only
+/// receives a `&TopicHandler`, an executor's run loop polls
+/// [`is_running`](Self::is_running) with its own id to know when to exit - either
+/// because every executor was told to stop, or because just that one was (e.g. by
+/// [`crate::ExecutorHandler::switch_executor`]).
 pub struct TopicHandler {
     topics: HashMap<String, Box<dyn Any + Send + Sync>>,
     running: AtomicBool,
+    executor_running: [AtomicBool; 256],
 }
 
 impl TopicHandler {
@@ -27,6 +30,7 @@ impl TopicHandler {
         Self {
             topics: HashMap::new(),
             running: AtomicBool::new(true),
+            executor_running: std::array::from_fn(|_| AtomicBool::new(true)),
         }
     }
 
@@ -53,14 +57,31 @@ impl TopicHandler {
             .unwrap_or_else(|| panic!("topic {name:?} was not registered with this item type"))
     }
 
-    /// Whether executors should keep running.
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
+    /// Whether the executor with this `id` should keep running: true only if every
+    /// executor was told to stop via [`stop`](Self::stop), and this particular id
+    /// wasn't individually stopped (e.g. for a [`switch_executor`]-driven swap).
+    ///
+    /// [`switch_executor`]: crate::ExecutorHandler::switch_executor
+    pub fn is_running(&self, id: u8) -> bool {
+        self.running.load(Ordering::Relaxed) && self.executor_running[id as usize].load(Ordering::Relaxed)
     }
 
     /// Signals every executor polling [`is_running`](Self::is_running) to stop.
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
+    }
+
+    /// Signals just the executor running under `id` to stop, leaving every other
+    /// executor unaffected.
+    pub(crate) fn stop_executor(&self, id: u8) {
+        self.executor_running[id as usize].store(false, Ordering::Relaxed);
+    }
+
+    /// Clears a prior [`stop_executor`](Self::stop_executor) signal for `id`, so a
+    /// newly (re)started executor with that id sees [`is_running`](Self::is_running)
+    /// as true again.
+    pub(crate) fn resume_executor(&self, id: u8) {
+        self.executor_running[id as usize].store(true, Ordering::Relaxed);
     }
 }
 

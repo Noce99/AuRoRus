@@ -49,7 +49,7 @@ fn main() {
     for reader in readers {
         handler.add_executor(Box::new(reader));
     }
-    let handles = handler.run_all();
+    handler.run_all();
 
     // Progress bar for the run; driven purely by wall-clock elapsed time,
     // independent of how many reads/writes actually happened.
@@ -64,9 +64,7 @@ fn main() {
     // Stop all executors and wait for their threads to finish.
     println!("\nStopping all threads...");
     topics.stop();
-    for handle in handles {
-        handle.join().unwrap();
-    }
+    handler.join_all();
 
     println!("\n========== FINAL REPORT ==========\n");
     println!("WRITER:");

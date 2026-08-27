@@ -49,9 +49,12 @@ impl Executor for LidarWriterExecutor {
 
     fn run(&mut self, topics: &TopicHandler) {
         let scan_topic = topics.topic::<Scan>(LIDAR_SCAN_TOPIC);
-        scan_topic
-            .set_writer(self.id)
-            .expect("lidar_scan topic already has a writer");
+        // A WriterAlreadySet error is fine if it's this executor's own id reclaiming
+        // the slot (e.g. after being restarted by ExecutorHandler::switch_executor) -
+        // anything else means a genuinely different writer beat us to it.
+        if scan_topic.set_writer(self.id).is_err() && scan_topic.writer() != Some(self.id) {
+            panic!("lidar_scan topic already has a different writer");
+        }
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut next_update = Instant::now() + interval;
@@ -59,7 +62,7 @@ impl Executor for LidarWriterExecutor {
         let mut frame = 0u64;
         let mut samples: Vec<u64> = Vec::new();
 
-        while topics.is_running() {
+        while topics.is_running(self.id) {
             let start = Instant::now();
 
             // Simulate one 360-degree LIDAR scan: a slowly wobbling wall between
@@ -136,7 +139,7 @@ impl Executor for LidarReaderExecutor {
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut samples: Vec<u64> = Vec::new();
 
-        while topics.is_running() {
+        while topics.is_running(self.id) {
             let start = Instant::now();
 
             // Read the latest scan and process it - here, sum the distances,

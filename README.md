@@ -41,7 +41,7 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   independently scheduled participant. `init(&mut self, id: u8)` is called
   once with the executor's identity; `run(&mut self, topics: &TopicHandler)`
   is its main loop, which should keep working until
-  `topics.is_running()` goes false.
+  `topics.is_running(id)` goes false.
 - **`Topic`** ([src/topic.rs](src/topic.rs)) — a trait for one named, typed
   slot of shared state with exactly one authorized writer and any number of
   readers: `set_writer(executor_id)` (fails if a writer is already set),
@@ -50,11 +50,19 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   implementation of it, built on `crossbeam-epoch`.
 - **`TopicHandler`** ([src/topic_handler.rs](src/topic_handler.rs)) — owns
   every topic in the system (registered by name, type-erased internally so
-  topics of different types can coexist) plus the shared run/stop flag every
-  executor polls. Shared read-only (via `Arc`) with every executor.
+  topics of different types can coexist) plus the run/stop signals every
+  executor polls: a global flag (`stop()`) and a per-id one, so a single
+  executor can be stopped without affecting the rest. Shared read-only (via
+  `Arc`) with every executor.
 - **`ExecutorHandler`** ([src/executor_handler.rs](src/executor_handler.rs))
-  — owns every executor; `run_all()` spawns one thread per executor, all at
-  once, each calling `init` then `run` against the shared `TopicHandler`.
+  — owns every executor. `add_executor` registers one and assigns it a
+  unique id; `run_all()` spawns a thread per registered executor, each
+  calling `init` then `run` against the shared `TopicHandler`, and can be
+  called again later for executors added afterward. `switch_executor(id,
+  new_executor)` stops whichever executor currently owns `id`, joins its
+  thread, and starts `new_executor` in its place under that same id — every
+  other running executor is unaffected. `join_all()` waits for whatever is
+  still running (typically after `TopicHandler::stop()`).
 
 ```
                      ┌───────────────────────┐

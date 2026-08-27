@@ -32,6 +32,12 @@ pub trait Topic {
     /// lifetime.
     fn set_writer(&self, executor_id: u8) -> Result<(), TopicError>;
 
+    /// The currently registered writer, if any. Lets a caller whose `set_writer` call
+    /// failed tell "I already hold this slot" (its own id, e.g. after being restarted
+    /// by `ExecutorHandler::switch_executor`) apart from "someone else holds it" (a
+    /// genuine writer conflict).
+    fn writer(&self) -> Option<u8>;
+
     /// Publishes `value` as the topic's latest value, if `executor_id` is the
     /// topic's registered writer.
     fn write(&self, executor_id: u8, value: Self::Item) -> Result<(), TopicError>;
@@ -75,6 +81,10 @@ impl<T: Clone + Send + Sync + 'static> Topic for LockFreeTopic<T> {
             .map_err(|_| TopicError::WriterAlreadySet)
     }
 
+    fn writer(&self) -> Option<u8> {
+        self.writer_id.get().copied()
+    }
+
     fn write(&self, executor_id: u8, value: T) -> Result<(), TopicError> {
         if self.writer_id.get() == Some(&executor_id) {
             self.cell.store(value);
@@ -99,6 +109,14 @@ mod tests {
         assert_eq!(topic.set_writer(1), Ok(()));
         assert_eq!(topic.set_writer(1), Err(TopicError::WriterAlreadySet));
         assert_eq!(topic.set_writer(2), Err(TopicError::WriterAlreadySet));
+    }
+
+    #[test]
+    fn writer_reports_the_registered_id_once_set() {
+        let topic = LockFreeTopic::new(0u32);
+        assert_eq!(topic.writer(), None);
+        topic.set_writer(7).unwrap();
+        assert_eq!(topic.writer(), Some(7));
     }
 
     #[test]
