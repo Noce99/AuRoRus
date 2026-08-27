@@ -1,0 +1,13 @@
+[package]
+name = "efficient_data_sharing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam-epoch = "0.9"
+crossbeam-utils = "0.8"
+
+[profile.release]
+lto = true # Link-Time Optimization: better optimization between the crates instead of single crate optimization. Slower compile time.
+codegen-units = 1 # This disable parallel compilation, LTO works better with just one codegen unit. Slower compile time.
+opt-level = 3 # Most possible agressive optimization. Slower compile time.
