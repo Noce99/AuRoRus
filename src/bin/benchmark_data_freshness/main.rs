@@ -1,4 +1,4 @@
-//! Data-freshness benchmark, built on the `efficient_data_sharing` library.
+//! Data-freshness benchmark, built on the `aurorus` library.
 //!
 //! One [`reader_writer::WriterExecutor`] publishes a timestamped payload at a fixed
 //! rate; several [`reader_writer::ReaderExecutor`]s each independently poll for the
@@ -14,7 +14,7 @@ mod reader_writer;
 mod report;
 mod verifier;
 
-use efficient_data_sharing::{Executor, Runner};
+use aurorus::{Executor, Runner};
 use reader_writer::{ReaderExecutor, TOPIC_NAME, TimestampedPayload, WriterExecutor};
 use report::{AgeReport, ExpectedAge};
 use std::sync::{Arc, Mutex};

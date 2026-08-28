@@ -1,5 +1,5 @@
 use crate::topics::{SCAN_TOPIC_NAME, Scan};
-use efficient_data_sharing::{Executor, Runner};
+use aurorus::{Executor, Runner};
 use std::thread;
 use std::time::Duration;
 

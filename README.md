@@ -1,11 +1,11 @@
-# efficient_data_sharing
+# AuRoRus
 
-A small Rust **library** for sharing periodically-updated data between
-independently scheduled threads, plus a **binary**
-(`benchmark_comunication_time`) that demonstrates and measures it: one
-executor publishes a payload at a fixed rate, and several independent reader
-executors each poll for the *latest* payload at their own rate, spread across
-several rate tiers.
+**Au**tonomous **Ro**boracer **Rus**t Project — a small Rust **library**
+(crate `aurorus`) for sharing periodically-updated data between independently
+scheduled threads, plus a **binary** (`benchmark_comunication_time`) that
+demonstrates and measures it: one executor publishes a payload at a fixed
+rate, and several independent reader executors each poll for the *latest*
+payload at their own rate, spread across several rate tiers.
 
 It exists to answer a concrete question: *what's the simplest correct way
 to share one frequently-updated, moderately-sized value between one
@@ -355,10 +355,10 @@ payload.
 ## Running it
 
 ```sh
-cargo run --release                                    # every default
-cargo run --release -- --duration 30                    # run for 30 seconds instead
-cargo run --release -- --topic_size 4000 --readers_num 20
-cargo run --release -- --help                           # usage
+cargo run --release --bin benchmark_comunication_time                                    # every default
+cargo run --release --bin benchmark_comunication_time -- --duration 30                    # run for 30 seconds instead
+cargo run --release --bin benchmark_comunication_time -- --topic_size 4000 --readers_num 20
+cargo run --release --bin benchmark_comunication_time -- --help                           # usage
 ```
 
 Prints the title and configuration, then a live progress bar for the run,
@@ -367,9 +367,10 @@ expected, timing mean ± standard deviation, and max time as a percentage of
 that block's period budget) and the integrity check. Requires no external
 services or hardware — everything is simulated in
 [src/bin/benchmark_comunication_time/reader_writer.rs](src/bin/benchmark_comunication_time/reader_writer.rs).
-Since the crate has exactly one binary target, `--bin
-benchmark_comunication_time` isn't required, but works too: `cargo run
---release --bin benchmark_comunication_time -- --duration 30`.
+The crate has more than one binary target (see
+[src/bin/](src/bin/)), so `--bin benchmark_comunication_time` is required to
+pick this one - `cargo run --release` alone will just list the available
+binaries.
 
 All four flags are optional, named, and can be given in any order; an
 unknown flag, a missing value, or a non-positive value (`--readers_num`

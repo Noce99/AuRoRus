@@ -1,7 +1,7 @@
 //! The shared payload type and the two executors that publish/consume it.
 
 use crate::report::Report;
-use efficient_data_sharing::{Captain, Executor, Topic};
+use aurorus::{Captain, Executor, Topic};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;

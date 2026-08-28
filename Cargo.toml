@@ -1,5 +1,5 @@
 [package]
-name = "efficient_data_sharing"
+name = "aurorus"
 version = "0.1.0"
 edition = "2024"
 

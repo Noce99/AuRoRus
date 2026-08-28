@@ -1,4 +1,4 @@
-//! Reader/writer communication-time benchmark, built on the `efficient_data_sharing`
+//! Reader/writer communication-time benchmark, built on the `aurorus`
 //! library.
 //!
 //! One [`reader_writer::WriterExecutor`] publishes a payload at a fixed rate; several
@@ -12,7 +12,7 @@ mod reader_writer;
 mod report;
 mod verifier;
 
-use efficient_data_sharing::{Executor, Runner};
+use aurorus::{Executor, Runner};
 use reader_writer::{Payload, ReaderExecutor, TOPIC_NAME, WriterExecutor};
 use report::Report;
 use std::sync::{Arc, Mutex};
