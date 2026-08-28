@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+csv = "1.4.0"
+fax = "0.3.0"
 rand = "0.10.2"
-time = { version = "0.3", features = ["local-offset"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+time = { version = "0.3", features = ["formatting", "local-offset"] }
+voronoice = "0.2.0"
 
 [profile.release]
 lto = true # Link-Time Optimization: better optimization between the crates instead of single crate optimization. Slower compile time.
