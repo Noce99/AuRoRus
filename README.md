@@ -1,10 +1,11 @@
 # efficient_data_sharing
 
 A small Rust **library** for sharing periodically-updated data between
-independently scheduled threads, plus a **binary** (`lidar_benchmark`) that
-demonstrates it on a simulated LIDAR sensor: one executor publishes a new
-360° scan at a fixed rate, and several independent reader executors each
-poll for the *latest* scan at their own rate.
+independently scheduled threads, plus a **binary**
+(`benchmark_comunication_time`) that demonstrates and measures it: one
+executor publishes a payload at a fixed rate, and several independent reader
+executors each poll for the *latest* payload at their own rate, spread across
+several rate tiers.
 
 It exists to answer a concrete question: *what's the simplest correct way
 to share one frequently-updated, moderately-sized value between one
@@ -17,17 +18,19 @@ enough.
 
 ## The scenario
 
-- One writer executor publishes a scan of `NUM_POINTS = 1200` `f32`
-  distances (one per angular sample) at **50 Hz** (a real or simulated
-  LIDAR's natural output rate).
-- 4 reader executors each independently consume the latest scan at their
-  own pace — this demo uses **30 / 60 / 150 / 300 Hz** to represent
-  different consumers (e.g. a slow logger, a mid-rate obstacle detector, a
-  fast control loop).
-- Readers only ever care about *the most recently published* scan. If a
-  reader polls faster than 50 Hz, it will simply read the same scan more
-  than once — that's expected and harmless, not a bug to fix. There is no
-  "have I seen this one already" tracking, by design (see
+- One writer executor publishes a payload of `--topic_size` `f32` values
+  (1000 by default) at `--writer_frequency` Hz (50 Hz by default).
+- `--readers_num` reader executors (10 by default) each independently
+  consume the latest payload at their own pace, spread across 5 fixed rate
+  tiers — **30 / 60 / 120 / 210 / 300 Hz** — to represent different
+  consumers (e.g. a slow logger, a mid-rate obstacle detector, a fast
+  control loop). Readers are split evenly across the 5 tiers, with any
+  remainder going to the lowest-frequency tiers first (e.g. 12 readers →
+  3/3/2/2/2 across 30/60/120/210/300 Hz).
+- Readers only ever care about *the most recently published* value. If a
+  reader polls faster than the writer publishes, it will simply read the
+  same value more than once — that's expected and harmless, not a bug to
+  fix. There is no "have I seen this one already" tracking, by design (see
   [Design decisions](#design-decisions-and-why)).
 
 ## Architecture
@@ -74,22 +77,21 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   to detect and panic over the conflict on its own.
 
 ```
-                     ┌───────────────────────┐
-  LidarWriterExecutor│                       │ LidarReaderExecutor (30 Hz)
-  ──────────────────▶│       Captain         │◀──────────────────────────
-  write("lidar_scan")│  "lidar_scan" topic   │ LidarReaderExecutor (60 Hz)
-  @ 50 Hz             │  (RwLockTopic<Scan>)  │◀──────────────────────────
-                     │                       │ LidarReaderExecutor (150 Hz)
-                     │                       │◀──────────────────────────
-                     │                       │ LidarReaderExecutor (300 Hz)
-                     └───────────────────────┘◀──────────────────────────
+                       ┌────────────────────────┐
+    WriterExecutor     │                        │ ReaderExecutor x N (30 Hz)
+    ──────────────────▶│        Captain         │◀───────────────────────────
+    write("shared_data")│  "shared_data" topic   │ ReaderExecutor x N (60 Hz)
+    @ 50 Hz             │ (RwLockTopic<Payload>) │◀───────────────────────────
+                       │                        │ ReaderExecutor x N (120/210/300 Hz)
+                       └────────────────────────┘◀───────────────────────────
 ```
 
-`lidar_benchmark` ([src/bin/lidar_benchmark/](src/bin/lidar_benchmark/)) is
-just one concrete use of this: `LidarWriterExecutor` and
-`LidarReaderExecutor` ([lidar.rs](src/bin/lidar_benchmark/lidar.rs)) are
-`Executor` impls that write/read a single `RwLockTopic<Scan>` registered
-under the name `"lidar_scan"`.
+`benchmark_comunication_time`
+([src/bin/benchmark_comunication_time/](src/bin/benchmark_comunication_time/))
+is just one concrete use of this: `WriterExecutor` and `ReaderExecutor`
+([reader_writer.rs](src/bin/benchmark_comunication_time/reader_writer.rs))
+are `Executor` impls that write/read a single `RwLockTopic<Payload>`
+registered under the name `"shared_data"`, where `Payload = Vec<f32>`.
 
 `RwLockTopic<T>` ([src/topic.rs](src/topic.rs)) wraps a single
 `std::sync::RwLock<T>`:
@@ -134,69 +136,85 @@ executors and topics made that feel like a trap: holding a read guard open
 for as long as arbitrary caller code takes to run means a slow or
 long-running reader delays the writer for that whole time. So
 `RwLockTopic::read` clones the value and returns it, bounding the time the
-read lock is held to just the copy. For a 4.8 KB `Scan` at ≤300 Hz this is
-negligible (see [Program output](#program-output)); for much larger
-payloads or much higher rates, this tradeoff would be worth revisiting.
+read lock is held to just the copy. For a `Payload` around a few KB at
+≤300 Hz this is negligible (see [Program output](#program-output)); for
+much larger payloads (a much bigger `--topic_size`) or much higher rates,
+this tradeoff would be worth revisiting.
 
-**Data is stored inline, updated in place per write.**
-`RwLock<T>` holds `T`'s bytes directly, so `write()` overwrites the
-existing value in place rather than allocating a new one — one write-lock
-acquisition per `write()` call, no heap allocation on the hot path at all.
+**The payload is a `Vec<f32>`, so each write allocates.**
+Because `--topic_size` is a runtime value, the payload can't be a
+fixed-size array baked in at compile time the way the original LIDAR-only
+`Scan = [f32; 1200]` was — it has to be a `Vec<f32>`. `Topic::write` takes
+its value by ownership and `RwLockTopic` has no in-place "give me my old
+buffer back" swap, so the writer builds a fresh `Vec<f32>` of `topic_size`
+values every tick rather than mutating a persistent buffer in place. This
+gives up the earlier "no heap allocation on the hot path at all" property in
+exchange for a runtime-configurable payload size — one small allocation
+(4 KB at the 1000-value default) per write, which is still cheap relative
+to a typical writer period (see [Program output](#program-output)).
 
-**No "is this scan new?" tracking on the reader side.**
+**No "is this new?" tracking on the reader side.**
 Readers deliberately do not carry a sequence number or generation counter.
-Because readers run *faster* than the writer for at least one of the four
-rates (60/150/300 Hz vs. the writer's 50 Hz), a reader will sometimes read
-the same scan twice in a row. This is intentional: the requirement for this
-use case is "always the latest available value," not "notify me exactly
-once per new value." Adding staleness detection would be needed if a
-consumer had to react only to *changes* — it isn't needed here, and adding
+Because readers run *faster* than the writer for most of the 5 rate tiers
+(60/120/210/300 Hz vs. the writer's default 50 Hz), a reader will sometimes
+read the same payload twice in a row. This is intentional: the requirement
+for this use case is "always the latest available value," not "notify me
+exactly once per new value." Adding staleness detection would be needed if
+a consumer had to react only to *changes* — it isn't needed here, and adding
 it anyway would be unrequested complexity.
 
 **The writer uses sleep + busy-wait for pacing, readers use plain sleep.**
-`LidarWriterExecutor::run` ([lidar.rs](src/bin/lidar_benchmark/lidar.rs))
-needs to hit 50 Hz precisely, so it sleeps for the bulk of its interval and
-busy-waits (`thread::yield_now`) for the last stretch to avoid OS scheduler
-granularity error. `LidarReaderExecutor::run` just uses
+`WriterExecutor::run`
+([reader_writer.rs](src/bin/benchmark_comunication_time/reader_writer.rs))
+needs to hit its target rate precisely, so it sleeps for the bulk of its
+interval and busy-waits (`thread::yield_now`) for the last stretch to avoid
+OS scheduler granularity error. `ReaderExecutor::run` just uses
 `thread::sleep(read_interval)`, which is simpler but less precise —
-observed reader throughput comes in a couple of percent under the nominal
-rate at 300 Hz. That's acceptable here because readers only need "roughly
+observed reader throughput comes in a few percent under the nominal rate at
+the higher tiers. That's acceptable here because readers only need "roughly
 this often," not an exact deadline; if a real consumer needed precise
 timing, it would want the same hybrid technique the writer uses.
 
-**Timing is recorded locally per executor, not through shared atomics.**
+**Timing is recorded locally per executor, then merged per rate tier.**
 Each writer/reader executor times its own operations into a private
 `Vec<u64>` of per-op nanosecond durations — no cross-thread counters on the
-hot path at all. Only once an executor stops does it fold its samples into
-a [`Report`](src/bin/lidar_benchmark/report.rs) (mean, standard deviation,
-max), handed back to `main` through an `Arc<Mutex<Option<Report>>>` set up
-before the executor is registered with the `Runner`, and printed
-in the final report. This is also why the live progress bar can't show
-read/write counts: nothing is shared or aggregated until every executor has
-already finished.
+hot path at all. The writer folds its samples into its own
+[`Report`](src/bin/benchmark_comunication_time/report.rs) (mean, standard
+deviation, max) once it stops, handed back to `main` through an
+`Arc<Mutex<Option<Report>>>` set up before it's registered with the
+`Runner`. Each reader instead extends a `Arc<Mutex<Vec<u64>>>` sample sink
+shared with every other reader at the same target rate, once it stops -
+`main` then builds one merged `Report` per non-empty rate tier from that
+tier's pooled samples, so a run with e.g. 3 readers at 30 Hz prints a single
+combined block rather than 3 near-identical ones. This is also why the live
+progress bar can't show read/write counts: nothing is shared or aggregated
+until every executor has already finished.
 
 ## When would this stop being enough?
 
 Two independent thresholds, not one:
 
-- **Throughput.** The write path currently spends ~11 µs per scan — mostly
-  computing the simulated 1200-point sine wave, not the lock acquisition
-  itself. At a 20 ms writer period that's under 0.1% of budget. This would
-  start to matter if the write rate grew into the low kHz range, where the
+- **Throughput.** The write path spends a few microseconds per payload at
+  the default `--topic_size 1000` — mostly generating the simulated
+  waveform and allocating the `Vec<f32>`, not the lock acquisition itself
+  (see [Program output](#program-output)). At the default 20 ms writer
+  period that's well under 1% of budget. This scales with `--topic_size`
+  and `--writer_frequency`: it would start to matter if the payload grew
+  much larger, or the write rate grew into the low kHz range, where the
   period and the per-write cost become comparable.
 - **Worst-case latency / determinism.** More relevant if this were ever
   driving a hard real-time loop: write latency has a long tail relative to
-  its average (~11 µs average vs. ~76 µs max in a typical run - see
-  [Program output](#program-output)), which for an `RwLock` is the
-  inherent risk of taking any lock at all — a writer can, in principle, be
-  delayed by however long a reader holds the read lock, or by the OS
-  scheduler preempting a lock holder. If a consumer ever needed a truly
-  *bounded* worst case rather than a good average, that's the point at
-  which the lock-free, wait-free design this project used previously (see
+  its average (see [Program output](#program-output) for a representative
+  average vs. max), which for an `RwLock` is the inherent risk of taking any
+  lock at all — a writer can, in principle, be delayed by however long a
+  reader holds the read lock, or by the OS scheduler preempting a lock
+  holder. If a consumer ever needed a truly *bounded* worst case rather than
+  a good average, that's the point at which the lock-free, wait-free design
+  this project used previously (see
   [Why not stay lock-free?](#why-not-stay-lock-free)) would be worth the
-  added complexity. At 50 Hz / ≤300 Hz this project has no such
-  requirement - every executor reports comfortably `within budget` (see
-  [Program output](#program-output)).
+  added complexity. At the defaults (50 Hz writer, ≤300 Hz readers, 1000
+  values) this project has no such requirement - every executor reports
+  comfortably `within budget` (see [Program output](#program-output)).
 
 ## Program output
 
@@ -212,24 +230,24 @@ src/
   runner.rs                  Runner struct
   topic.rs                   Topic trait, TopicError, RwLockTopic<T>
   captain.rs                 Captain struct
-src/bin/lidar_benchmark/
+src/bin/benchmark_comunication_time/
   main.rs                    wires topics + executors together, prints the report
-  lidar.rs                   Scan/NUM_POINTS, LidarWriterExecutor, LidarReaderExecutor
-  report.rs                  per-executor timing stats + format_block
+  reader_writer.rs           Payload, WriterExecutor, ReaderExecutor
+  report.rs                  timing stats (possibly merged across readers) + format_block
   verifier.rs                post-run integrity check
   progress.rs                the progress bar
-  cli.rs                     [DURATION_SECS] argument parsing
+  cli.rs                     --topic_size/--readers_num/--writer_frequency/--duration parsing
 ```
 
 ### 1-2. Banner and progress bar
 
 ```
-=== LIDAR Shared Scan Demo (RwLock) ===
+=== Reader/Writer Communication Benchmark (RwLock) ===
 
 Configuration:
-  - Scan size: 1200 distances (f32, 4800 bytes)
-  - Update rate: 50 Hz (20ms interval)
-  - Readers: 4 threads at 30/60/150/300 Hz
+  - Topic size: 1000 f32 values (4000 bytes)
+  - Writer rate: 50.0 Hz (20.0ms interval)
+  - Readers: 10 threads across 30Hz=2 60Hz=2 120Hz=2 210Hz=2 300Hz=2
   - Duration: 10.0 seconds
 
 Starting threads...
@@ -238,18 +256,20 @@ Starting threads...
 ```
 
 The bar (`print_progress_bar` in
-[progress.rs](src/bin/lidar_benchmark/progress.rs)) redraws in place with
-`\r` and is driven purely by wall-clock elapsed time versus the requested
-duration — it doesn't read from any executor, so it stays accurate even
-though (per the next section) nothing is aggregated across executors until
-they've all stopped. `Duration` in the banner reflects whatever
-`[DURATION_SECS]` was passed on the command line (see
-[Running it](#running-it)), not a fixed 10s.
+[progress.rs](src/bin/benchmark_comunication_time/progress.rs)) redraws in
+place with `\r` and is driven purely by wall-clock elapsed time versus the
+requested duration — it doesn't read from any executor, so it stays
+accurate even though (per the next section) nothing is aggregated across
+executors until they've all stopped. Every line of the banner reflects the
+actual `--topic_size`/`--writer_frequency`/`--readers_num`/`--duration`
+values passed on the command line (see [Running it](#running-it)), not
+fixed defaults.
 
-### 3. Per-executor final report
+### 3. Per-tier final report
 
-From a representative 10-second run, 1 writer executor (id 0) at 50 Hz and
-4 reader executors (ids 1-4) at 30/60/150/300 Hz:
+From a representative 10-second run at every default (`--topic_size 1000
+--readers_num 10 --writer_frequency 50 --duration 10`, i.e. 2 readers per
+rate tier):
 
 ```
 ========== FINAL REPORT ==========
@@ -257,60 +277,69 @@ From a representative 10-second run, 1 writer executor (id 0) at 50 Hz and
 WRITER:
   Writer 0 - target 50 Hz (period 20.000 ms)
     writes    :   500 (  500 expected)
-    avg time  :   11.38 us +-   7.98 us
-    max time  :   76.11 us  (0.4% of period, within budget)
+    avg time  :   13.34 us +-  11.78 us
+    max time  :  117.40 us  (0.6% of period, within budget)
 
 READERS:
-  Reader 1 - target 30 Hz (period 33.333 ms)
-    reads     :   300 (  300 expected)
-    avg time  :    2.76 us +-   2.90 us
-    max time  :   19.90 us  (0.1% of period, within budget)
+  Readers @ 30 Hz (x2) - target 30 Hz (period 33.333 ms)
+    reads     :   600 (  600 expected)
+    avg time  :    3.34 us +-   5.39 us
+    max time  :   98.51 us  (0.3% of period, within budget)
 
-  Reader 2 - target 60 Hz (period 16.667 ms)
-    reads     :   596 (  600 expected)
-    avg time  :    3.36 us +-   3.52 us
-    max time  :   17.76 us  (0.1% of period, within budget)
+  Readers @ 60 Hz (x2) - target 60 Hz (period 16.667 ms)
+    reads     :  1193 ( 1200 expected)
+    avg time  :    2.79 us +-   4.70 us
+    max time  :  124.53 us  (0.7% of period, within budget)
 
-  Reader 3 - target 150 Hz (period 6.667 ms)
-    reads     :  1467 ( 1500 expected)
-    avg time  :    3.16 us +-   3.58 us
-    max time  :   53.63 us  (0.8% of period, within budget)
+  Readers @ 120 Hz (x2) - target 120 Hz (period 8.333 ms)
+    reads     :  2365 ( 2400 expected)
+    avg time  :    2.72 us +-   3.90 us
+    max time  :  118.56 us  (1.4% of period, within budget)
 
-  Reader 4 - target 300 Hz (period 3.333 ms)
-    reads     :  2887 ( 3000 expected)
-    avg time  :    3.76 us +-   3.93 us
-    max time  :   41.08 us  (1.2% of period, within budget)
+  Readers @ 210 Hz (x2) - target 210 Hz (period 4.762 ms)
+    reads     :  4080 ( 4200 expected)
+    avg time  :    3.04 us +-   3.32 us
+    max time  :   30.75 us  (0.6% of period, within budget)
+
+  Readers @ 300 Hz (x2) - target 300 Hz (period 3.333 ms)
+    reads     :  5786 ( 6000 expected)
+    avg time  :    3.26 us +-   3.81 us
+    max time  :   96.78 us  (2.9% of period, within budget)
 
 ===================================
 ```
 
-Each block ([`Report::format_block`](src/bin/lidar_benchmark/report.rs))
+Each block ([`Report::format_block`](src/bin/benchmark_comunication_time/report.rs))
 reports:
 
 - **operations vs. expected** — actual count, and in parentheses
-  `rate_hz * run_duration`, the count the executor would hit if it ran at
-  exactly its target rate the whole time. Readers consistently land a
-  little under it (`thread::sleep` pacing, not a correctness issue — see
+  `rate_hz * group_size * run_duration` (`group_size` is 1 for the writer,
+  or the number of readers pooled into that tier's block), the count the
+  executor(s) would hit if each ran at exactly its target rate the whole
+  time. Readers consistently land a little under it (`thread::sleep`
+  pacing, not a correctness issue — see
   [Design decisions](#design-decisions-and-why)); the writer's precise
   sleep+busy-wait pacing hits its target exactly.
-- **avg time ± standard deviation** — computed from that executor's own
-  private sample buffer once it stops (see the timing note in
-  [Design decisions](#design-decisions-and-why)).
+- **avg time ± standard deviation** — computed from the pooled sample
+  buffer for that block: the writer's own private samples, or every reader
+  in that tier's samples merged together once they've all stopped (see the
+  timing note in [Design decisions](#design-decisions-and-why)).
 - **max time as % of period** — "period" is `1 / rate_hz`, the time budget
   for one operation to stay on schedule (e.g. a 300 Hz reader must finish
   each read within 3.333 ms). The max line shows the single slowest
-  operation as a percentage of that budget, with a trailing `within budget`
-  / `OVER BUDGET` flag — the latter would mean that executor's own pacing
-  loop could no longer keep up even in isolation, ignoring contention from
-  anything else running on the machine.
+  operation across the block as a percentage of that budget, with a
+  trailing `within budget` / `OVER BUDGET` flag — the latter would mean
+  that block's readers could no longer keep up even in isolation, ignoring
+  contention from anything else running on the machine.
 
-Write cost here is dominated by generating the synthetic scan (1200 `sin()`
-calls per update) rather than by publishing it — in a real system this
-would be replaced by however long it takes to read the actual sensor, and
-the topic write itself would still be a small, constant addition on top.
-The write time's tail (max ~76 µs vs. an ~11 µs average) reflects the
-occasional run where the writer's lock acquisition is delayed by a reader
-holding the read lock or by OS scheduler jitter, as discussed above.
+Write cost here is dominated by generating the synthetic waveform and
+allocating its `Vec<f32>` (1000 values by default) rather than by
+publishing it — in a real system this would be replaced by however long it
+takes to read the actual producer, and the topic write itself would still
+be a small, constant addition on top. The write time's tail (max ~117 µs vs.
+an ~13 µs average in the run above) reflects the occasional case where the
+writer's lock acquisition is delayed by a reader holding the read lock or
+by OS scheduler jitter, as discussed above.
 
 ### 4. Integrity check
 
@@ -318,48 +347,51 @@ holding the read lock or by OS scheduler jitter, as discussed above.
 Data integrity check: PASSED ✓
 ```
 
-Confirms every distance in the last published scan is finite and within a
-plausible range (`0.0..20.0` meters — a placeholder bound for this
-simulator; swap in your real sensor's documented range).
+Confirms the last published payload is non-empty and every value in it is
+finite — there's no real sensor behind this benchmark, so there's no
+physically-motivated range to check, just that the writer produced a sane
+payload.
 
 ## Running it
 
 ```sh
-cargo run --release              # default: 10-second run
-cargo run --release -- 30        # run for 30 seconds instead
-cargo run --release -- --help    # usage
+cargo run --release                                    # every default
+cargo run --release -- --duration 30                    # run for 30 seconds instead
+cargo run --release -- --topic_size 4000 --readers_num 20
+cargo run --release -- --help                           # usage
 ```
 
 Prints the title and configuration, then a live progress bar for the run,
-then a per-executor final report block (operation count vs. expected, timing
-mean ± standard deviation, and max time as a percentage of that executor's
-period budget) and the integrity check. Requires no external services or
-hardware — the "LIDAR" is fully simulated in
-[src/bin/lidar_benchmark/lidar.rs](src/bin/lidar_benchmark/lidar.rs). Since
-the crate has exactly one binary target, `--bin lidar_benchmark` isn't
-required, but works too: `cargo run --release --bin lidar_benchmark -- 30`.
+then a final report block per writer/reader-tier (operation count vs.
+expected, timing mean ± standard deviation, and max time as a percentage of
+that block's period budget) and the integrity check. Requires no external
+services or hardware — everything is simulated in
+[src/bin/benchmark_comunication_time/reader_writer.rs](src/bin/benchmark_comunication_time/reader_writer.rs).
+Since the crate has exactly one binary target, `--bin
+benchmark_comunication_time` isn't required, but works too: `cargo run
+--release --bin benchmark_comunication_time -- --duration 30`.
 
-The optional positional argument is the benchmark duration in seconds
-(must be a positive number; defaults to 10 if omitted). An invalid value
-prints a usage message to stderr and exits with status 1.
+All four flags are optional, named, and can be given in any order; an
+unknown flag, a missing value, or a non-positive value (`--readers_num`
+alone also accepts `0`, for a writer-only run) prints a usage message to
+stderr and exits with status 1.
 
 ### Configuration
 
-Everything is currently a constant in `main()`, meant to be edited directly
-rather than passed as CLI flags (this is a demo, not a tool):
+| Flag                  | What                                                    | Default  |
+|------------------------|---------------------------------------------------------|----------|
+| `--topic_size N`       | `f32` values per topic payload                          | 1000     |
+| `--readers_num N`      | total reader threads, spread across 5 rate tiers (30/60/120/210/300 Hz) | 10 |
+| `--writer_frequency HZ`| writer publish rate                                      | 50 Hz    |
+| `--duration SECS`      | benchmark run length                                     | 10 s     |
 
-| What                    | Where                                                  | Current value                   |
-|-------------------------|---------------------------------------------------------|----------------------------------|
-| Scan size               | `NUM_POINTS` (`src/bin/lidar_benchmark/lidar.rs`)      | 1200 points                      |
-| Writer rate             | `WRITER_HZ` in `main()`                                | 50 Hz                            |
-| Reader count/rates      | `READER_RATES_HZ` in `main()`                          | `[30.0, 60.0, 150.0, 300.0]` Hz  |
-| Benchmark duration      | `DEFAULT_DURATION_SECS`, or `[DURATION_SECS]` CLI arg  | 10 s (default) |
-| Progress bar width      | `BAR_WIDTH` in `main()`                                | 40 characters                    |
-| Integrity check bounds  | `verifier::verify_consistency`                          | `0.0 < d < 20.0` m               |
-
-Note the title/configuration banner at the top of `main()` is printed as
-plain hardcoded text, not interpolated from these constants — if you change
-a value above, update the corresponding banner line too.
+Other constants are still edited directly in
+[src/bin/benchmark_comunication_time/main.rs](src/bin/benchmark_comunication_time/main.rs)
+rather than exposed as flags: `TIER_RATES_HZ` (the 5 fixed reader rates) and
+`BAR_WIDTH` (the progress bar's width in characters). The title/configuration
+banner at the top of `main()` is interpolated from the parsed `Config` and
+the computed tier distribution, so it always reflects the flags actually
+passed.
 
 ## Code documentation
 

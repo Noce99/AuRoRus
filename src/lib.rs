@@ -16,9 +16,9 @@
 //! [`Runner`] owns every topic and every executor, and starts them all running in
 //! parallel once everything is registered.
 //!
-//! See the `lidar_benchmark` binary for a complete example: one executor publishes a
-//! simulated LIDAR scan at a fixed rate, and several more each independently read the
-//! latest scan at their own rate.
+//! See the `benchmark_comunication_time` binary for a complete example: one executor
+//! publishes a payload at a fixed rate, and several more each independently read the
+//! latest payload at their own rate.
 
 mod captain;
 mod executor;

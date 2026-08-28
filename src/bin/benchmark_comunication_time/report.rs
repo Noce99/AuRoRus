@@ -1,17 +1,25 @@
-//! Per-executor timing summary, built once a writer or reader executor stops.
+//! Timing summary for a writer or (possibly several combined) reader executors,
+//! built once they've all stopped.
 
 use std::time::Duration;
 
-/// Timing summary for one executor's whole run, computed from the individual
-/// per-operation durations (in nanoseconds) it recorded locally while running.
+/// Timing summary computed from a set of individual per-operation durations (in
+/// nanoseconds), pooled from one or more executors that share the same target
+/// rate.
 ///
 /// Every executor times its own operations locally (no shared atomics on the hot
-/// path) and folds the samples into a `Report` only when it exits, which is also
-/// where mean/standard-deviation/max are computed.
+/// path) and only hands its samples off once it exits - either into its own
+/// `Report` directly (the writer), or into a shared sample sink merged with its
+/// tier-mates once every reader has stopped (readers) - which is also where
+/// mean/standard-deviation/max are computed.
 pub struct Report {
     pub label: String,
     pub verb: &'static str,
     pub rate_hz: f64,
+    /// How many executors' samples were merged into this one report (e.g. 3 for a
+    /// report combining 3 reader threads that share the same target rate). 1 for a
+    /// report built from a single executor, such as the writer's.
+    pub group_size: u64,
     pub count: u64,
     pub mean_ns: f64,
     pub std_dev_ns: f64,
@@ -19,12 +27,15 @@ pub struct Report {
 }
 
 impl Report {
-    /// Builds a report from `label`/`verb` (e.g. `"Writer 0"` / `"writes"`) and the
-    /// raw per-operation durations recorded over the executor's lifetime.
+    /// Builds a report from `label`/`verb` (e.g. `"Writer 0"` / `"writes"`), the raw
+    /// per-operation durations recorded over the executor's lifetime (or, for a
+    /// merged report, over every executor's lifetime combined), and `group_size` -
+    /// how many executors those samples were pooled from.
     pub fn from_samples(
         label: impl Into<String>,
         verb: &'static str,
         rate_hz: f64,
+        group_size: u64,
         samples: &[u64],
     ) -> Self {
         let count = samples.len() as u64;
@@ -52,6 +63,7 @@ impl Report {
             label: label.into(),
             verb,
             rate_hz,
+            group_size,
             count,
             mean_ns,
             std_dev_ns,
@@ -59,10 +71,12 @@ impl Report {
         }
     }
 
-    /// How many operations this executor should have completed over `duration` if it
-    /// had run at exactly its target rate the whole time.
+    /// How many operations this report's executor(s) should have completed over
+    /// `duration` if each had run at exactly its target rate the whole time - scaled
+    /// by [`group_size`](Self::group_size) for a report merged from several
+    /// executors.
     pub fn expected_count(&self, duration: Duration) -> u64 {
-        (self.rate_hz * duration.as_secs_f64()).round() as u64
+        (self.rate_hz * duration.as_secs_f64()).round() as u64 * self.group_size
     }
 
     /// The time budget for one operation at this executor's target rate: e.g. a
