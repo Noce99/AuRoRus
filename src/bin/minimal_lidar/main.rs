@@ -1,12 +1,12 @@
-use efficient_data_sharing::{ExecutorHandler, TopicHandler};
-use std::sync::{Arc};
+use crate::topics::{SCAN_TOPIC_NAME, Scan};
+use efficient_data_sharing::{Executor, ExecutorHandler, TopicHandler};
+use std::sync::Arc;
 use std::thread;
-use std::time::{Duration};
-use crate::topics::{Scan, SCAN_TOPIC_NAME};
+use std::time::Duration;
 
-mod topics;
 mod lidar;
 mod reader;
+mod topics;
 
 // Same rates used by the lidar_benchmark binary, minus the 300 Hz reader (there are
 // only 3 readers here).
@@ -25,16 +25,16 @@ fn main() {
     topics.register_topic::<Scan>(SCAN_TOPIC_NAME, Scan::new());
     let topics = Arc::new(topics);
 
-    let lidar = lidar::Lidar{id:0, rate_hz: WRITER_HZ};
-    let reader_1 = reader::Reader{id:0, rate_hz: READER_RATES_HZ[0]};
-    let reader_2 = reader::Reader{id:0, rate_hz: READER_RATES_HZ[1]};
-    let reader_3 = reader::Reader{id:0, rate_hz: READER_RATES_HZ[2]};
+    let lidar = lidar::Lidar::new(WRITER_HZ);
+    let reader_1 = reader::Reader::new(READER_RATES_HZ[0]);
+    let reader_2 = reader::Reader::new(READER_RATES_HZ[1]);
+    let reader_3 = reader::Reader::new(READER_RATES_HZ[2]);
 
     let mut handler = ExecutorHandler::new(topics.clone());
-    let lidar_id = handler.add_executor(Box::new(lidar));
-    let reader_1_id = handler.add_executor(Box::new(reader_1));
-    handler.add_executor(Box::new(reader_2));
-    handler.add_executor(Box::new(reader_3));
+    let lidar_id = handler.add_executor(lidar.boxed());
+    let reader_1_id = handler.add_executor(reader_1.boxed());
+    handler.add_executor(reader_2.boxed());
+    handler.add_executor(reader_3.boxed());
     handler.run_all();
 
     thread::sleep(Duration::from_millis(500));
@@ -43,14 +43,14 @@ fn main() {
     // disturbing the lidar or the other two readers.
     println!("Switching executor [{}]...", reader_1_id);
     handler
-        .switch_executor(reader_1_id, Box::new(reader::Reader { id: 0, rate_hz: READER_RATES_HZ[0] }))
+        .switch_executor(reader_1_id, reader::Reader::new(READER_RATES_HZ[0]).boxed())
         .expect("reader_1 should still be running");
 
     thread::sleep(Duration::from_millis(500));
 
     println!("Switching executor [{}]...", lidar_id);
     handler
-        .switch_executor(lidar_id, Box::new(lidar::Lidar{id:0, rate_hz: WRITER_HZ}))
+        .switch_executor(lidar_id, lidar::Lidar::new(WRITER_HZ).boxed())
         .expect("lidar should still be running");
 
     thread::sleep(Duration::from_millis(500));

@@ -21,7 +21,12 @@ pub struct Report {
 impl Report {
     /// Builds a report from `label`/`verb` (e.g. `"Writer 0"` / `"writes"`) and the
     /// raw per-operation durations recorded over the executor's lifetime.
-    pub fn from_samples(label: impl Into<String>, verb: &'static str, rate_hz: f64, samples: &[u64]) -> Self {
+    pub fn from_samples(
+        label: impl Into<String>,
+        verb: &'static str,
+        rate_hz: f64,
+        samples: &[u64],
+    ) -> Self {
         let count = samples.len() as u64;
         let mean_ns = if count > 0 {
             samples.iter().sum::<u64>() as f64 / count as f64

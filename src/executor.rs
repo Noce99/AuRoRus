@@ -24,4 +24,14 @@ pub trait Executor: Send {
     /// e.g. to read out implementation-specific results after
     /// [`crate::ExecutorHandler::run_all`] joins it.
     fn as_any(&self) -> &dyn Any;
+
+    /// Boxes this executor as a `Box<dyn Executor>`, e.g. for
+    /// [`crate::ExecutorHandler::add_executor`] or
+    /// [`crate::ExecutorHandler::switch_executor`].
+    fn boxed(self) -> Box<dyn Executor>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
 }

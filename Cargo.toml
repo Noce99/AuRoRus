@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-crossbeam-epoch = "0.9"
-crossbeam-utils = "0.8"
 
 [profile.release]
 lto = true # Link-Time Optimization: better optimization between the crates instead of single crate optimization. Slower compile time.

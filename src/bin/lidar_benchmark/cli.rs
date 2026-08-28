@@ -6,7 +6,9 @@ pub const DEFAULT_DURATION_SECS: f64 = 10.0;
 /// back to [`DEFAULT_DURATION_SECS`]. Prints usage and exits the process on
 /// `-h`/`--help` or an invalid value.
 pub fn parse_duration_secs(mut args: impl Iterator<Item = String>) -> f64 {
-    let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
+    let program = args
+        .next()
+        .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
     let usage = format!(
         "Usage: {program} [DURATION_SECS]\n\n\
          Runs the benchmark for DURATION_SECS seconds (default: {DEFAULT_DURATION_SECS})."

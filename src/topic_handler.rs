@@ -1,6 +1,6 @@
 //! Owns every [`Topic`] shared between executors, plus the run/stop signals they poll.
 
-use crate::topic::LockFreeTopic;
+use crate::topic::RwLockTopic;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,9 +37,13 @@ impl TopicHandler {
     /// Registers a new topic under `name`, seeded with `initial`. Call during setup,
     /// before executors are started - topics can't be added once executors are
     /// running against a shared (`Arc`'d) handler.
-    pub fn register_topic<T: Send + Sync + 'static>(&mut self, name: impl Into<String>, initial: T) {
+    pub fn register_topic<T: Send + Sync + 'static>(
+        &mut self,
+        name: impl Into<String>,
+        initial: T,
+    ) {
         self.topics
-            .insert(name.into(), Box::new(LockFreeTopic::new(initial)));
+            .insert(name.into(), Box::new(RwLockTopic::new(initial)));
     }
 
     /// Looks up a previously registered topic.
@@ -49,11 +53,11 @@ impl TopicHandler {
     /// Panics if no topic is registered under `name`, or if it was registered with a
     /// different item type than `T`. Both are programmer errors (a mismatch between
     /// how a topic was registered and how it's used), not runtime data conditions.
-    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> &LockFreeTopic<T> {
+    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> &RwLockTopic<T> {
         self.topics
             .get(name)
             .unwrap_or_else(|| panic!("no topic registered named {name:?}"))
-            .downcast_ref::<LockFreeTopic<T>>()
+            .downcast_ref::<RwLockTopic<T>>()
             .unwrap_or_else(|| panic!("topic {name:?} was not registered with this item type"))
     }
 
@@ -63,7 +67,8 @@ impl TopicHandler {
     ///
     /// [`switch_executor`]: crate::ExecutorHandler::switch_executor
     pub fn is_running(&self, id: u8) -> bool {
-        self.running.load(Ordering::Relaxed) && self.executor_running[id as usize].load(Ordering::Relaxed)
+        self.running.load(Ordering::Relaxed)
+            && self.executor_running[id as usize].load(Ordering::Relaxed)
     }
 
     /// Signals every executor polling [`is_running`](Self::is_running) to stop.

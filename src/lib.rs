@@ -1,5 +1,6 @@
 //! A tiny framework for sharing periodically-updated data between independently
-//! scheduled threads without locking.
+//! scheduled threads, one writer and many readers per topic, behind a small
+//! `RwLock`-based abstraction.
 //!
 //! The model has two kinds of pieces:
 //!
@@ -21,11 +22,10 @@
 
 mod executor;
 mod executor_handler;
-mod lock_free_cell;
 mod topic;
 mod topic_handler;
 
 pub use executor::Executor;
 pub use executor_handler::{ExecutorHandler, SwitchExecutorError};
-pub use topic::{LockFreeTopic, Topic, TopicError};
+pub use topic::{RwLockTopic, Topic, TopicError};
 pub use topic_handler::TopicHandler;

@@ -1,6 +1,6 @@
 //! Sanity-checks the final state of the LIDAR scan topic after a run.
 
-use crate::lidar::{Scan, LIDAR_SCAN_TOPIC};
+use crate::lidar::{LIDAR_SCAN_TOPIC, Scan};
 use efficient_data_sharing::{Topic, TopicHandler};
 
 /// Checks that the latest scan on [`LIDAR_SCAN_TOPIC`] is fully consistent: every

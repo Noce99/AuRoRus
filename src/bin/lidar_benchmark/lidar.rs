@@ -49,12 +49,9 @@ impl Executor for LidarWriterExecutor {
 
     fn run(&mut self, topics: &TopicHandler) {
         let scan_topic = topics.topic::<Scan>(LIDAR_SCAN_TOPIC);
-        // A WriterAlreadySet error is fine if it's this executor's own id reclaiming
-        // the slot (e.g. after being restarted by ExecutorHandler::switch_executor) -
-        // anything else means a genuinely different writer beat us to it.
-        if scan_topic.set_writer(self.id).is_err() && scan_topic.writer() != Some(self.id) {
-            panic!("lidar_scan topic already has a different writer");
-        }
+        scan_topic
+            .set_writer(self.id)
+            .expect("lidar_scan topic already has a different writer");
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut next_update = Instant::now() + interval;
@@ -94,7 +91,12 @@ impl Executor for LidarWriterExecutor {
         }
 
         let label = format!("Writer {}", self.id);
-        *self.report.lock().unwrap() = Some(Report::from_samples(label, "writes", self.rate_hz, &samples));
+        *self.report.lock().unwrap() = Some(Report::from_samples(
+            label,
+            "writes",
+            self.rate_hz,
+            &samples,
+        ));
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -153,7 +155,8 @@ impl Executor for LidarReaderExecutor {
         }
 
         let label = format!("Reader {}", self.id);
-        *self.report.lock().unwrap() = Some(Report::from_samples(label, "reads", self.rate_hz, &samples));
+        *self.report.lock().unwrap() =
+            Some(Report::from_samples(label, "reads", self.rate_hz, &samples));
     }
 
     fn as_any(&self) -> &dyn Any {

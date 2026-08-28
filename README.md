@@ -1,21 +1,19 @@
 # efficient_data_sharing
 
 A small Rust **library** for sharing periodically-updated data between
-independently scheduled threads without locking, plus a **binary**
-(`lidar_benchmark`) that demonstrates it on a simulated LIDAR sensor: one
-executor publishes a new 360° scan at a fixed rate, and several independent
-reader executors each poll for the *latest* scan at their own rate — no
-mutexes, no reader blocking the writer, no readers blocking each other.
+independently scheduled threads, plus a **binary** (`lidar_benchmark`) that
+demonstrates it on a simulated LIDAR sensor: one executor publishes a new
+360° scan at a fixed rate, and several independent reader executors each
+poll for the *latest* scan at their own rate.
 
 It exists to answer a concrete question: *what's the simplest correct way
 to share one frequently-updated, moderately-sized value between one
-producer and several independent consumers running at different rates,
-without anyone taking a lock?* The answer implemented here is
-[`crossbeam-epoch`](https://docs.rs/crossbeam-epoch)-based epoch reclamation,
-wrapped in a small `Executor`/`Topic` framework general enough to grow
-beyond this one demo. This README explains the framework, why epoch
-reclamation is the right tool underneath it, what it costs, and when it
-would stop being enough.
+producer and several independent consumers running at different rates?*
+The answer implemented here is a `std::sync::RwLock`-protected slot, wrapped
+in a small `Executor`/`Topic` framework general enough to grow beyond this
+one demo. This README explains the framework, why a plain `RwLock` is
+enough for this workload, what it costs, and when it would stop being
+enough.
 
 ## The scenario
 
@@ -46,8 +44,8 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   slot of shared state with exactly one authorized writer and any number of
   readers: `set_writer(executor_id)` (fails if a writer is already set),
   `write(executor_id, value)` (fails unless `executor_id` is the registered
-  writer), and `read() -> Item`. `LockFreeTopic<T>` is the lock-free
-  implementation of it, built on `crossbeam-epoch`.
+  writer), and `read() -> Item`. `RwLockTopic<T>` is the implementation of
+  it, built directly on `std::sync::RwLock`.
 - **`TopicHandler`** ([src/topic_handler.rs](src/topic_handler.rs)) — owns
   every topic in the system (registered by name, type-erased internally so
   topics of different types can coexist) plus the run/stop signals every
@@ -69,7 +67,7 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   LidarWriterExecutor│                       │ LidarReaderExecutor (30 Hz)
   ──────────────────▶│     TopicHandler      │◀──────────────────────────
   write("lidar_scan")│  "lidar_scan" topic   │ LidarReaderExecutor (60 Hz)
-  @ 50 Hz             │  (LockFreeTopic<Scan>)│◀──────────────────────────
+  @ 50 Hz             │  (RwLockTopic<Scan>)  │◀──────────────────────────
                      │                       │ LidarReaderExecutor (150 Hz)
                      │                       │◀──────────────────────────
                      │                       │ LidarReaderExecutor (300 Hz)
@@ -79,64 +77,60 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
 `lidar_benchmark` ([src/bin/lidar_benchmark/](src/bin/lidar_benchmark/)) is
 just one concrete use of this: `LidarWriterExecutor` and
 `LidarReaderExecutor` ([lidar.rs](src/bin/lidar_benchmark/lidar.rs)) are
-`Executor` impls that write/read a single `LockFreeTopic<Scan>` registered
+`Executor` impls that write/read a single `RwLockTopic<Scan>` registered
 under the name `"lidar_scan"`.
 
-Underneath `LockFreeTopic<T>`, [src/lock_free_cell.rs](src/lock_free_cell.rs)
-wraps a single `crossbeam_epoch::Atomic<T>` — a word-sized,
-atomically-swappable pointer to a heap-allocated `T`:
+`RwLockTopic<T>` ([src/topic.rs](src/topic.rs)) wraps a single
+`std::sync::RwLock<T>`:
 
-- **`store(&self, value: T)`** — the writer heap-allocates a new `T`,
-  atomically swaps the shared pointer to point at it, and hands the *old*
-  pointer to the epoch collector via `guard.defer_destroy`. The old value's
-  memory isn't freed immediately; it's freed once every thread that might
-  still be reading it has since left its `load_and` call.
-- **`load_and<F, R>(&self, f: F) -> R`** — a reader "pins" the current
-  epoch, loads whatever pointer is currently published, and runs its
-  closure against it (used internally by `LockFreeTopic::read` to clone the
-  value before returning it). Pinning is what tells the writer's deferred
-  destructor "don't free this yet, I might still be looking at it." Reading
-  never blocks the writer, and readers never block each other.
+- **`write(&self, executor_id, value)`** — after checking `executor_id` is
+  the registered writer, takes the lock's write guard and overwrites the
+  value in place: `*self.data.write().expect(...) = value`.
+- **`read(&self)`** — takes the lock's read guard and clones the value out
+  before returning it, so the guard (and the lock) is released as soon as
+  the clone completes rather than being held open for however long the
+  caller keeps the reference.
 
 This gives every reader a consistent, torn-free view of one full value
-(never half of an old scan and half of a new one) with no locks anywhere on
-the hot path.
+(never half of an old scan and half of a new one). Any number of readers
+can hold the read lock concurrently; a writer takes the lock exclusively,
+so it briefly excludes every reader (and vice versa) for the duration of
+one `write`/`read` call.
 
-### Why not just a `Mutex<Scan>` / `RwLock<Scan>`?
+### Why not stay lock-free?
 
-It would also be correct, and honestly for a 50 Hz writer and ≤300 Hz
-readers, a `RwLock` would very likely never show up as a bottleneck either
-— this project's actual numbers (below) leave 1000x+ headroom under either
-approach. `crossbeam-epoch` is used here specifically because it's a good
-vehicle for understanding lock-free reclamation, and because it gives
-*wait-free* reads: a reader is never at the mercy of the OS scheduler
-preempting a lock holder. If you're adapting this code, a plain `RwLock`
-is a perfectly reasonable simpler alternative unless you specifically need
-that guarantee.
+An earlier version of this project used `crossbeam-epoch`-based epoch
+reclamation instead: readers and the writer never blocked each other at
+all, at the cost of one small heap allocation per write, `unsafe` code, and
+a materially larger amount of code to reason about. For a 50 Hz writer and
+≤300 Hz readers, a `RwLock` never shows up as a bottleneck either — this
+project's actual numbers (below) leave 1000x+ headroom under both
+approaches — so the simpler, dependency-free, `unsafe`-free `RwLock`
+version won out. The one thing it gives up is the wait-free guarantee: a
+reader here is, in principle, at the mercy of the OS scheduler preempting
+a lock holder, whereas the epoch-based version's readers and writer could
+never block on each other at all. If you need that guarantee (e.g. a hard
+real-time control loop that cannot tolerate even a rare priority
+inversion), lock-free reclamation is worth the added complexity; this
+project's actual workload doesn't need it.
 
 ## Design decisions (and why)
 
 **`Topic::read()` returns an owned clone, not a reference or a closure.**
-The earlier, LIDAR-only version of this code had readers pass a
-`FnOnce(&Scan) -> R` closure into `read`, running it while pinned to the
-current epoch. Generalizing to arbitrary executors and topics made that
-feel like a trap: holding the epoch pin open for as long as arbitrary
-caller code takes to run means a slow or long-running reader delays
-reclamation of every value the writer has superseded in the meantime. So
-`LockFreeTopic::read` now clones the value and returns it, bounding the
-pinned section to just the copy. For a 4.8 KB `Scan` at ≤300 Hz this is
+An earlier, LIDAR-only version of this code had readers pass a
+`FnOnce(&Scan) -> R` closure into `read`. Generalizing to arbitrary
+executors and topics made that feel like a trap: holding a read guard open
+for as long as arbitrary caller code takes to run means a slow or
+long-running reader delays the writer for that whole time. So
+`RwLockTopic::read` clones the value and returns it, bounding the time the
+read lock is held to just the copy. For a 4.8 KB `Scan` at ≤300 Hz this is
 negligible (see [Program output](#program-output)); for much larger
 payloads or much higher rates, this tradeoff would be worth revisiting.
 
-**Data is heap-allocated per write, not stored inline.**
-`Atomic<T>` is a *pointer*; a topic's value lives in a separate heap
-allocation, one new allocation per `write()` call. This is inherent to how
-`crossbeam-epoch` reclaims memory for multiple concurrent readers — and at
-50 Hz, one ~4.8 KB allocation every 20 ms is nowhere close to being a
-bottleneck (see [Program output](#program-output)). The
-`#[repr(align(64))]` on `LockFreeCell` only guards the pointer field itself
-against false sharing; it's not claiming the value's bytes are
-cache-resident.
+**Data is stored inline, updated in place per write.**
+`RwLock<T>` holds `T`'s bytes directly, so `write()` overwrites the
+existing value in place rather than allocating a new one — one write-lock
+acquisition per `write()` call, no heap allocation on the hot path at all.
 
 **No "is this scan new?" tracking on the reader side.**
 Readers deliberately do not carry a sequence number or generation counter.
@@ -174,22 +168,24 @@ already finished.
 
 Two independent thresholds, not one:
 
-- **Throughput.** The write path currently spends ~16 µs per scan — mostly
-  computing the simulated 1200-point sine wave, not the allocation itself.
-  At a 20 ms writer period that's under 0.1% of budget. This would start to
-  matter if the write rate grew into the low kHz range, where the period
-  and the per-write cost become comparable.
+- **Throughput.** The write path currently spends ~11 µs per scan — mostly
+  computing the simulated 1200-point sine wave, not the lock acquisition
+  itself. At a 20 ms writer period that's under 0.1% of budget. This would
+  start to matter if the write rate grew into the low kHz range, where the
+  period and the per-write cost become comparable.
 - **Worst-case latency / determinism.** More relevant if this were ever
   driving a hard real-time loop: write latency has a long tail relative to
-  its average (~16 µs average vs. ~88 µs max in a typical run - see
-  [Program output](#program-output)), almost certainly from
-  `crossbeam-epoch` batching deferred frees rather than reclaiming one at a
-  time. If a consumer ever needed a *bounded* worst case rather than a good
-  average, that's the point at which a hand-rolled, pre-allocated
-  reference-counted buffer pool (no per-update heap allocation, no batched
-  reclamation bursts) would be worth the added complexity. At 50 Hz / ≤300 Hz
-  this project has no such requirement - every executor reports comfortably
-  `within budget` (see [Program output](#program-output)).
+  its average (~11 µs average vs. ~76 µs max in a typical run - see
+  [Program output](#program-output)), which for an `RwLock` is the
+  inherent risk of taking any lock at all — a writer can, in principle, be
+  delayed by however long a reader holds the read lock, or by the OS
+  scheduler preempting a lock holder. If a consumer ever needed a truly
+  *bounded* worst case rather than a good average, that's the point at
+  which the lock-free, wait-free design this project used previously (see
+  [Why not stay lock-free?](#why-not-stay-lock-free)) would be worth the
+  added complexity. At 50 Hz / ≤300 Hz this project has no such
+  requirement - every executor reports comfortably `within budget` (see
+  [Program output](#program-output)).
 
 ## Program output
 
@@ -203,9 +199,8 @@ src/
   lib.rs                    crate docs, module wiring, public re-exports
   executor.rs                Executor trait
   executor_handler.rs        ExecutorHandler struct
-  topic.rs                   Topic trait, TopicError, LockFreeTopic<T>
+  topic.rs                   Topic trait, TopicError, RwLockTopic<T>
   topic_handler.rs           TopicHandler struct
-  lock_free_cell.rs          internal epoch-based single-writer/multi-reader cell
 src/bin/lidar_benchmark/
   main.rs                    wires topics + executors together, prints the report
   lidar.rs                   Scan/NUM_POINTS, LidarWriterExecutor, LidarReaderExecutor
@@ -218,7 +213,7 @@ src/bin/lidar_benchmark/
 ### 1-2. Banner and progress bar
 
 ```
-=== LIDAR Shared Scan Demo with crossbeam-epoch ===
+=== LIDAR Shared Scan Demo (RwLock) ===
 
 Configuration:
   - Scan size: 1200 distances (f32, 4800 bytes)
@@ -251,29 +246,29 @@ From a representative 10-second run, 1 writer executor (id 0) at 50 Hz and
 WRITER:
   Writer 0 - target 50 Hz (period 20.000 ms)
     writes    :   500 (  500 expected)
-    avg time  :   15.65 us +-  13.43 us
-    max time  :   87.77 us  (0.4% of period, within budget)
+    avg time  :   11.38 us +-   7.98 us
+    max time  :   76.11 us  (0.4% of period, within budget)
 
 READERS:
   Reader 1 - target 30 Hz (period 33.333 ms)
     reads     :   300 (  300 expected)
-    avg time  :    4.76 us +-   4.91 us
-    max time  :   39.55 us  (0.1% of period, within budget)
+    avg time  :    2.76 us +-   2.90 us
+    max time  :   19.90 us  (0.1% of period, within budget)
 
   Reader 2 - target 60 Hz (period 16.667 ms)
-    reads     :   597 (  600 expected)
-    avg time  :    4.02 us +-   6.19 us
-    max time  :  130.76 us  (0.8% of period, within budget)
+    reads     :   596 (  600 expected)
+    avg time  :    3.36 us +-   3.52 us
+    max time  :   17.76 us  (0.1% of period, within budget)
 
   Reader 3 - target 150 Hz (period 6.667 ms)
-    reads     :  1473 ( 1500 expected)
-    avg time  :    4.42 us +-   4.24 us
-    max time  :   35.05 us  (0.5% of period, within budget)
+    reads     :  1467 ( 1500 expected)
+    avg time  :    3.16 us +-   3.58 us
+    max time  :   53.63 us  (0.8% of period, within budget)
 
   Reader 4 - target 300 Hz (period 3.333 ms)
-    reads     :  2904 ( 3000 expected)
-    avg time  :    4.79 us +-   4.67 us
-    max time  :   41.65 us  (1.2% of period, within budget)
+    reads     :  2887 ( 3000 expected)
+    avg time  :    3.76 us +-   3.93 us
+    max time  :   41.08 us  (1.2% of period, within budget)
 
 ===================================
 ```
@@ -302,9 +297,9 @@ Write cost here is dominated by generating the synthetic scan (1200 `sin()`
 calls per update) rather than by publishing it — in a real system this
 would be replaced by however long it takes to read the actual sensor, and
 the topic write itself would still be a small, constant addition on top.
-The write time's large standard deviation and tail (max ~88 µs vs. a
-~16 µs average) is consistent with `crossbeam-epoch` occasionally batching
-several deferred frees into one write, as discussed above.
+The write time's tail (max ~76 µs vs. an ~11 µs average) reflects the
+occasional run where the writer's lock acquisition is delayed by a reader
+holding the read lock or by OS scheduler jitter, as discussed above.
 
 ### 4. Integrity check
 
@@ -366,7 +361,5 @@ cargo doc --no-deps --open
 
 ## Dependencies
 
-- [`crossbeam-epoch`](https://docs.rs/crossbeam-epoch) — the epoch-based
-  memory reclamation this whole design is built on.
-- [`crossbeam-utils`](https://docs.rs/crossbeam-utils) — pulled in
-  transitively by `crossbeam-epoch`; not used directly in this crate today.
+None beyond the Rust standard library — `RwLockTopic` is built directly on
+`std::sync::RwLock`.

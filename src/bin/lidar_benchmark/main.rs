@@ -11,8 +11,8 @@ mod progress;
 mod report;
 mod verifier;
 
-use efficient_data_sharing::{ExecutorHandler, TopicHandler};
-use lidar::{LidarReaderExecutor, LidarWriterExecutor, Scan, LIDAR_SCAN_TOPIC, NUM_POINTS};
+use efficient_data_sharing::{Executor, ExecutorHandler, TopicHandler};
+use lidar::{LIDAR_SCAN_TOPIC, LidarReaderExecutor, LidarWriterExecutor, NUM_POINTS, Scan};
 use report::Report;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -26,9 +26,13 @@ fn main() {
     let duration_secs = cli::parse_duration_secs(std::env::args());
     let duration = Duration::from_secs_f64(duration_secs);
 
-    println!("=== LIDAR Shared Scan Demo with crossbeam-epoch ===\n");
+    println!("=== LIDAR Shared Scan Demo (RwLock) ===\n");
     println!("Configuration:");
-    println!("  - Scan size: {} distances (f32, {} bytes)", NUM_POINTS, NUM_POINTS * 4);
+    println!(
+        "  - Scan size: {} distances (f32, {} bytes)",
+        NUM_POINTS,
+        NUM_POINTS * 4
+    );
     println!("  - Update rate: 50 Hz (20ms interval)");
     println!("  - Readers: 4 threads at 30/60/150/300 Hz");
     println!("  - Duration: {:.1} seconds", duration_secs);
@@ -41,13 +45,17 @@ fn main() {
     let writer = LidarWriterExecutor::new(WRITER_HZ);
     let writer_report: Arc<Mutex<Option<Report>>> = writer.report_handle();
 
-    let readers: Vec<LidarReaderExecutor> = READER_RATES_HZ.iter().map(|&hz| LidarReaderExecutor::new(hz)).collect();
-    let reader_reports: Vec<Arc<Mutex<Option<Report>>>> = readers.iter().map(|r| r.report_handle()).collect();
+    let readers: Vec<LidarReaderExecutor> = READER_RATES_HZ
+        .iter()
+        .map(|&hz| LidarReaderExecutor::new(hz))
+        .collect();
+    let reader_reports: Vec<Arc<Mutex<Option<Report>>>> =
+        readers.iter().map(|r| r.report_handle()).collect();
 
     let mut handler = ExecutorHandler::new(topics.clone());
-    handler.add_executor(Box::new(writer));
+    handler.add_executor(writer.boxed());
     for reader in readers {
-        handler.add_executor(Box::new(reader));
+        handler.add_executor(reader.boxed());
     }
     handler.run_all();
 
@@ -68,15 +76,38 @@ fn main() {
 
     println!("\n========== FINAL REPORT ==========\n");
     println!("WRITER:");
-    println!("{}\n", writer_report.lock().unwrap().as_ref().unwrap().format_block(duration));
+    println!(
+        "{}\n",
+        writer_report
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .format_block(duration)
+    );
     println!("READERS:");
     for report in &reader_reports {
-        println!("{}\n", report.lock().unwrap().as_ref().unwrap().format_block(duration));
+        println!(
+            "{}\n",
+            report
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .format_block(duration)
+        );
     }
     println!("===================================");
 
     let consistent = verifier::verify_consistency(&topics);
-    println!("\nData integrity check: {}", if consistent { "PASSED ✓" } else { "FAILED ✗" });
+    println!(
+        "\nData integrity check: {}",
+        if consistent {
+            "PASSED ✓"
+        } else {
+            "FAILED ✗"
+        }
+    );
 
     println!("\nBenchmark completed!");
 }
