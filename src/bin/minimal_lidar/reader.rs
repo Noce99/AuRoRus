@@ -1,5 +1,5 @@
 use crate::topics::{SCAN_TOPIC_NAME, Scan};
-use aurorus::{Captain, Executor, Topic};
+use aurorus::{Captain, Executor};
 
 use std::any::Any;
 use std::thread;

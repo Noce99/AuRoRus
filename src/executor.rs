@@ -1,5 +1,5 @@
 //! An [`Executor`] is one independently scheduled unit of work that reads and/or
-//! writes [`crate::Topic`]s through a shared [`crate::Captain`].
+//! writes [`crate::RwLockTopic`]s through a shared [`crate::Captain`].
 
 use crate::captain::Captain;
 use std::any::Any;

@@ -6,7 +6,7 @@
 //!
 //! - An [`Executor`] is one participant - e.g. a sensor driver or a consumer - that
 //!   runs on its own thread at its own pace.
-//! - A [`Topic`] is a single named, typed slot of shared state with exactly one
+//! - A [`RwLockTopic`] is a single named, typed slot of shared state with exactly one
 //!   authorized writer and any number of readers. Readers always see the most
 //!   recently published value; there is no notion of "unread" data, so reading faster
 //!   than the writer publishes simply re-observes the same value.
@@ -29,4 +29,4 @@ mod topic;
 pub use captain::Captain;
 pub use executor::Executor;
 pub use runner::{Runner, SwitchExecutorError};
-pub use topic::{RwLockTopic, Topic, TopicError};
+pub use topic::{RwLockTopic, TopicError};

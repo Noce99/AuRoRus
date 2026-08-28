@@ -1,7 +1,7 @@
 //! The shared, timestamped payload type and the two executors that publish/consume
 //! it.
 
-use aurorus::{Captain, Executor, Topic};
+use aurorus::{Captain, Executor};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;

@@ -1,7 +1,7 @@
 //! The shared payload type and the two executors that publish/consume it.
 
 use crate::report::Report;
-use aurorus::{Captain, Executor, Topic};
+use aurorus::{Captain, Executor};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -57,7 +57,7 @@ impl Executor for WriterExecutor {
             let start = Instant::now();
 
             // Simulate one producer tick: a slowly wobbling waveform across
-            // `topic_size` values, standing in for real producer work. `Topic::write`
+            // `topic_size` values, standing in for real producer work. `RwLockTopic::write`
             // takes the payload by value, so a fresh `Vec` is built each tick rather
             // than mutating a persistent buffer in place.
             let phase = frame as f32 * 0.02;

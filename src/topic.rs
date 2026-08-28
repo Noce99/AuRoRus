@@ -1,21 +1,25 @@
-//! A [`Topic`] is a single, typed slot of shared state with exactly one authorized
-//! writer and any number of readers.
+//! A [`RwLockTopic`] is a single, typed slot of shared state with exactly one
+//! authorized writer and any number of readers.
 
 use std::sync::{OnceLock, RwLock};
 
-/// Errors returned by [`Topic::set_writer`] and [`Topic::write`].
+/// Errors returned by [`RwLockTopic::set_writer`] and [`RwLockTopic::write`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TopicError {
-    /// [`Topic::set_writer`] was called on a topic that already has a *different*
-    /// writer. Reclaiming the slot with the same `executor_id` that already holds
-    /// it is not an error - see [`Topic::set_writer`].
+    /// [`RwLockTopic::set_writer`] was called on a topic that already has a
+    /// *different* writer. Reclaiming the slot with the same `executor_id` that
+    /// already holds it is not an error - see [`RwLockTopic::set_writer`].
     WriterAlreadySet,
-    /// [`Topic::write`] was called with an executor id that isn't the topic's
-    /// registered writer (including the case where no writer has been set yet).
+    /// [`RwLockTopic::write`] was called with an executor id that isn't the
+    /// topic's registered writer (including the case where no writer has been set
+    /// yet).
     UnauthorizedWriter,
 }
 
-/// A named, typed channel of the latest-value-wins shared state between executors.
+/// A named, typed channel of the latest-value-wins shared state between executors,
+/// backed by a [`RwLock`]: any number of readers may hold the lock concurrently,
+/// but a writer briefly excludes every reader (and vice versa) for the duration of
+/// one [`write`](Self::write)/[`read`](Self::read) call.
 ///
 /// Exactly one executor may claim the right to write a topic, via
 /// [`set_writer`](Self::set_writer); any executor may [`read`](Self::read) it.
@@ -25,41 +29,14 @@ pub enum TopicError {
 /// sensor-style data (e.g. a LIDAR scan), always having the latest reading matters far
 /// more than never repeating one.
 ///
-/// [`write`](Self::write) and [`read`](Self::read) may briefly block: an
-/// implementation is free to use a lock internally, so a slow reader can delay a
-/// writer (and vice versa) for as long as it holds that lock.
-pub trait Topic {
-    /// The type of value carried by this topic.
-    type Item;
-
-    /// Claims this topic for writing by `executor_id`. Succeeds - idempotently - if
-    /// no writer is claimed yet, or if `executor_id` already holds the slot (e.g.
-    /// after being restarted by `Runner::switch_executor`). Fails only if a
-    /// *different* `executor_id` already holds it.
-    fn set_writer(&self, executor_id: u8) -> Result<(), TopicError>;
-
-    /// The currently registered writer, if any.
-    fn writer(&self) -> Option<u8>;
-
-    /// Publishes `value` as the topic's latest value, if `executor_id` is the
-    /// topic's registered writer.
-    fn write(&self, executor_id: u8, value: Self::Item) -> Result<(), TopicError>;
-
-    /// Returns a clone of the topic's latest published value. Any executor may call
-    /// this at any time.
-    fn read(&self) -> Self::Item;
-}
-
-/// The [`RwLock`]-backed [`Topic`] implementation: any number of readers may hold
-/// the lock concurrently, but a writer briefly excludes every reader (and vice
-/// versa) for the duration of one `write`/`read` call.
-///
-/// `read` returns an owned clone of `Item` rather than a reference into the topic.
-/// This bounds how long a read holds the lock - if it instead handed callers a
-/// reference (or a closure over one), slow or long-running caller code would keep
-/// the lock held, and delay the writer, for as long as it kept running. For small
-/// `Item` types published at modest rates (e.g. a LIDAR scan, a few KB at a few
-/// hundred Hz) the clone is cheap; for large payloads or very high rates, that
+/// [`write`](Self::write) and [`read`](Self::read) may briefly block on that
+/// internal lock, so a slow reader can delay a writer (and vice versa) for as long
+/// as it holds it. `read` returns an owned clone of `T` rather than a reference into
+/// the topic, which bounds how long a read holds the lock - if it instead handed
+/// callers a reference (or a closure over one), slow or long-running caller code
+/// would keep the lock held, and delay the writer, for as long as it kept running.
+/// For small `T` types published at modest rates (e.g. a LIDAR scan, a few KB at a
+/// few hundred Hz) the clone is cheap; for large payloads or very high rates, that
 /// tradeoff should be revisited.
 pub struct RwLockTopic<T> {
     data: RwLock<T>,
@@ -74,12 +51,12 @@ impl<T: Send + Sync + 'static> RwLockTopic<T> {
             writer_id: OnceLock::new(),
         }
     }
-}
 
-impl<T: Clone + Send + Sync + 'static> Topic for RwLockTopic<T> {
-    type Item = T;
-
-    fn set_writer(&self, executor_id: u8) -> Result<(), TopicError> {
+    /// Claims this topic for writing by `executor_id`. Succeeds - idempotently - if
+    /// no writer is claimed yet, or if `executor_id` already holds the slot (e.g.
+    /// after being restarted by `Runner::switch_executor`). Fails only if a
+    /// *different* `executor_id` already holds it.
+    pub fn set_writer(&self, executor_id: u8) -> Result<(), TopicError> {
         match self.writer_id.set(executor_id) {
             Ok(()) => Ok(()),
             Err(_) if self.writer_id.get() == Some(&executor_id) => Ok(()),
@@ -87,11 +64,16 @@ impl<T: Clone + Send + Sync + 'static> Topic for RwLockTopic<T> {
         }
     }
 
-    fn writer(&self) -> Option<u8> {
+    /// The currently registered writer, if any.
+    pub fn writer(&self) -> Option<u8> {
         self.writer_id.get().copied()
     }
+}
 
-    fn write(&self, executor_id: u8, value: T) -> Result<(), TopicError> {
+impl<T: Clone + Send + Sync + 'static> RwLockTopic<T> {
+    /// Publishes `value` as the topic's latest value, if `executor_id` is the
+    /// topic's registered writer.
+    pub fn write(&self, executor_id: u8, value: T) -> Result<(), TopicError> {
         if self.writer_id.get() == Some(&executor_id) {
             *self.data.write().expect("RwLockTopic: lock poisoned") = value;
             Ok(())
@@ -100,7 +82,9 @@ impl<T: Clone + Send + Sync + 'static> Topic for RwLockTopic<T> {
         }
     }
 
-    fn read(&self) -> T {
+    /// Returns a clone of the topic's latest published value. Any executor may call
+    /// this at any time.
+    pub fn read(&self) -> T {
         self.data
             .read()
             .expect("RwLockTopic: lock poisoned")

@@ -1,7 +1,7 @@
 //! [`Captain`] is what each running [`crate::Executor`] answers to: it owns every
 //! topic plus the run/stop signals an executor polls to know when to exit.
 
-use crate::topic::{RwLockTopic, Topic};
+use crate::topic::RwLockTopic;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,7 +87,7 @@ impl Captain {
     }
 
     /// Claims `topic_name`'s writer slot for `executor_id` (see
-    /// [`Topic::set_writer`]). If a *different* executor already holds it, this
+    /// [`RwLockTopic::set_writer`]). If a *different* executor already holds it, this
     /// is a fatal misconfiguration - two executors must never both write the
     /// same topic - so this prints a clear explanation (naming both executors,
     /// looked up via [`set_name`](Self::set_name)) and terminates the whole
