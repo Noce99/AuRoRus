@@ -6,7 +6,7 @@ use std::path::PathBuf;
 /// directory - a gitignored folder at the repo root.
 const DEFAULT_OUTPUT_ROOT: &str = "maps";
 
-/// Every tunable parameter for [`crate::simulator::environment::generate`].
+/// Every tunable parameter for [`crate::environment::simulator::generate`].
 /// Construct via [`Default`] and override only the fields that matter, e.g.
 /// `GenerationConfig { seed: 42, ..Default::default() }`.
 #[derive(Debug, Clone)]

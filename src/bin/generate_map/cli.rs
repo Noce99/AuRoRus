@@ -1,6 +1,6 @@
 //! Command-line argument parsing for the map generator demo.
 
-use aurorus::simulator::environment::GenerationConfig;
+use aurorus::environment::GenerationConfig;
 use std::path::PathBuf;
 
 /// The demo's full configuration: a [`GenerationConfig`] plus the output

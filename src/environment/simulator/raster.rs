@@ -5,7 +5,8 @@
 //! computation entirely, instead of the `O(pixels x points)` a brute-force
 //! nearest-point search would cost.
 
-use crate::simulator::environment::smoothing::Point2;
+use crate::environment::raster::Raster;
+use crate::environment::simulator::smoothing::Point2;
 
 /// Maps between pixel coordinates and world coordinates. World coordinates
 /// share the same axis directions as pixel columns/rows (x rightward, y
@@ -26,21 +27,6 @@ impl ImageTransform {
             x: self.origin_x_m + (col as f64 + 0.5) * self.resolution_m_per_px,
             y: self.origin_y_m + (row as f64 + 0.5) * self.resolution_m_per_px,
         }
-    }
-}
-
-/// A 1-bit-per-pixel raster: `true` means white, i.e. drivable track area.
-pub struct Raster {
-    pub width_px: u32,
-    pub height_px: u32,
-    white: Vec<bool>,
-}
-
-impl Raster {
-    /// The pixels of row `y`, left to right.
-    pub fn row(&self, y: u32) -> &[bool] {
-        let start = (y as usize) * (self.width_px as usize);
-        &self.white[start..start + self.width_px as usize]
     }
 }
 
@@ -125,7 +111,7 @@ pub fn rasterize(centerline: &[Point2], track_width_m: f64, transform: &ImageTra
         }
     }
 
-    Raster { width_px: transform.width_px, height_px: transform.height_px, white }
+    Raster::new(transform.width_px, transform.height_px, white)
 }
 
 #[cfg(test)]

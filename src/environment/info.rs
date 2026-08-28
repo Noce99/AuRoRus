@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 /// A point in world coordinates (meters).
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct WorldPoint {
     pub x: f64,
     pub y: f64,
@@ -19,7 +19,7 @@ pub struct WorldPoint {
 /// [`MapInfo::resolution_m_per_px`], never an axis flip. `theta_rad` is
 /// always `0.0` today; kept for schema parity with a possible future
 /// rotated origin.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ImageOrigin {
     pub x: f64,
     pub y: f64,
@@ -27,7 +27,7 @@ pub struct ImageOrigin {
 }
 
 /// The two endpoints of the start/finish line, in world coordinates.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct StartFinishLine {
     pub a: WorldPoint,
     pub b: WorldPoint,
@@ -37,7 +37,7 @@ pub struct StartFinishLine {
 /// Only [`MapSource::Random`] is producible today; kept as an enum (rather
 /// than always writing a fixed literal) so a future `Real` source can gain
 /// its own fields without an incompatible schema change.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MapSource {
     Random,
@@ -45,7 +45,7 @@ pub enum MapSource {
 }
 
 /// The full contents of a generated map's `info.json`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MapInfo {
     pub resolution_m_per_px: f64,
     pub width_px: u32,
@@ -107,6 +107,42 @@ pub fn write(info: &MapInfo, path: &Path) -> Result<(), InfoWriteError> {
     let json = serde_json::to_string_pretty(info)?;
     std::fs::write(path, json)?;
     Ok(())
+}
+
+/// Error returned by [`read`].
+#[derive(Debug)]
+pub enum InfoReadError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for InfoReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "failed to read info.json: {err}"),
+            Self::Json(err) => write!(f, "failed to parse info.json: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for InfoReadError {}
+
+impl From<std::io::Error> for InfoReadError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for InfoReadError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err)
+    }
+}
+
+/// Reads back `info.json` written by [`write`].
+pub fn read(path: &Path) -> Result<MapInfo, InfoReadError> {
+    let text = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&text)?)
 }
 
 #[cfg(test)]

@@ -11,7 +11,8 @@
 //! approach used by `github.com/gerkone/voronoiTrack` (confirmed against
 //! its actual source, not just its README).
 
-use crate::simulator::environment::smoothing::Point2;
+use crate::environment::simulator::smoothing::Point2;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use voronoice::{BoundingBox, ClipBehavior, Point, Voronoi, VoronoiBuilder};
 
@@ -309,7 +310,7 @@ mod tests {
     fn build_loop_produces_a_simple_polygon_across_several_seeds() {
         for seed in 0u64..10 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let sites = crate::simulator::environment::points::sample(&mut rng, 40, 40.0, 40.0, 2.5);
+            let sites = crate::environment::simulator::points::sample(&mut rng, 40, 40.0, 40.0, 2.5);
             let Ok(sites) = sites else { continue };
 
             match build_loop(sites, 40.0, 40.0, 0.35) {

@@ -1,4 +1,4 @@
-use aurorus::simulator::environment::generate;
+use aurorus::environment::generate;
 use std::time::Instant;
 
 mod cli;

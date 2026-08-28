@@ -1,15 +1,8 @@
 //! Per-point speed profile from local curvature: sharper turns get a lower
 //! target speed. See [`assign_speeds`].
 
-use crate::simulator::environment::smoothing::Point2;
-
-/// One race-line point paired with its target speed.
-#[derive(Debug, Clone, Copy)]
-pub struct SpeedPoint {
-    pub x: f64,
-    pub y: f64,
-    pub speed_mps: f64,
-}
+use crate::environment::race_line::SpeedPoint;
+use crate::environment::simulator::smoothing::Point2;
 
 /// Assigns a target speed to every point of a closed, evenly-spaced
 /// centerline, from local curvature: `v = min(max_speed_mps,

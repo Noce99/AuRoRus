@@ -3,30 +3,20 @@
 //! `race_lines/centerline.csv`, and `info.json` into a new folder under
 //! [`GenerationConfig::output_root`].
 
-use crate::simulator::environment::config::GenerationConfig;
-use crate::simulator::environment::dynamics::{self, SpeedPoint};
-use crate::simulator::environment::info::{self, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint};
-use crate::simulator::environment::points::{self, PointSamplingError};
-use crate::simulator::environment::race_line;
-use crate::simulator::environment::raster::{self, ImageTransform};
-use crate::simulator::environment::smoothing;
-use crate::simulator::environment::start_finish;
-use crate::simulator::environment::tiff;
-use crate::simulator::environment::voronoi_loop::{self, LoopConstructionError};
+use crate::environment::info::{self, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint};
+use crate::environment::map::{CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, RACE_LINES_DIR_NAME};
+use crate::environment::race_line::{self, SpeedPoint};
+use crate::environment::simulator::config::GenerationConfig;
+use crate::environment::simulator::dynamics;
+use crate::environment::simulator::points::{self, PointSamplingError};
+use crate::environment::simulator::raster::{self, ImageTransform};
+use crate::environment::simulator::smoothing;
+use crate::environment::simulator::start_finish;
+use crate::environment::simulator::voronoi_loop::{self, LoopConstructionError};
+use crate::environment::tiff;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::path::PathBuf;
-
-/// Name of the raster file inside a generated map's folder.
-pub const MAP_TIFF_FILE_NAME: &str = "map.tiff";
-/// Name of the race lines folder inside a generated map's folder.
-pub const RACE_LINES_DIR_NAME: &str = "race_lines";
-/// Name of the (only, for now) race line file - the folder is designed so
-/// more can be added later (e.g. an optimized racing line alongside the
-/// centerline) without a format change.
-pub const CENTERLINE_FILE_NAME: &str = "centerline.csv";
-/// Name of the metadata file inside a generated map's folder.
-pub const INFO_FILE_NAME: &str = "info.json";
 
 /// Error returned by [`generate`].
 #[derive(Debug)]
@@ -207,6 +197,22 @@ mod tests {
         let tiff_a = std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap();
         let tiff_b = std::fs::read(second.folder.join(MAP_TIFF_FILE_NAME)).unwrap();
         assert_eq!(tiff_a, tiff_b);
+
+        std::fs::remove_dir_all(&config.output_root).ok();
+    }
+
+    #[test]
+    fn generated_map_loads_back_correctly() {
+        let config = scratch_config("load");
+        let generated = generate(&config, Some("run")).expect("generation should succeed with these params");
+
+        let map = crate::environment::Map::load(&generated.folder).expect("loading a freshly generated map should succeed");
+
+        assert_eq!(map.info.width_px, generated.width_px);
+        assert_eq!(map.info.height_px, generated.height_px);
+        assert_eq!(map.raster.width_px, generated.width_px);
+        assert_eq!(map.raster.height_px, generated.height_px);
+        assert_eq!(map.race_line.len(), generated.num_race_line_points);
 
         std::fs::remove_dir_all(&config.output_root).ok();
     }

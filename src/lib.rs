@@ -25,6 +25,6 @@ mod core;
 pub use core::{Captain, Executor, Runner, RwLockTopic, SwitchExecutorError, TopicError};
 
 pub mod algorithms;
+pub mod environment;
 pub mod sensors;
-pub mod simulator;
 pub mod topics;

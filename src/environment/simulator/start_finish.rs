@@ -1,7 +1,7 @@
 //! The start/finish line: a segment perpendicular to the track direction at
 //! the race line's first point, spanning the track width.
 
-use crate::simulator::environment::smoothing::Point2;
+use crate::environment::simulator::smoothing::Point2;
 
 /// The two endpoints of the start/finish line.
 #[derive(Debug, Clone, Copy)]

@@ -1,5 +1,5 @@
 //! Turns the raw, irregularly-spaced closed loop from
-//! [`crate::simulator::environment::voronoi_loop`] into a smooth, evenly
+//! [`crate::environment::simulator::voronoi_loop`] into a smooth, evenly
 //! arc-length-spaced closed curve: [`densify`] interpolates it with a
 //! centripetal Catmull-Rom spline, then [`resample_even_spacing`] walks the
 //! result at fixed arc-length steps.
