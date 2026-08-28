@@ -20,13 +20,10 @@
 //! publishes a payload at a fixed rate, and several more each independently read the
 //! latest payload at their own rate.
 
-mod captain;
-mod executor;
-mod log;
-mod runner;
-mod topic;
+mod core;
 
-pub use captain::Captain;
-pub use executor::Executor;
-pub use runner::{Runner, SwitchExecutorError};
-pub use topic::{RwLockTopic, TopicError};
+pub use core::{Captain, Executor, Runner, RwLockTopic, SwitchExecutorError, TopicError};
+
+pub mod algorithms;
+pub mod sensors;
+pub mod topics;

@@ -20,8 +20,11 @@ impl Executor for Lidar {
     fn init(&mut self, id: u8) {
         self.id = id
     }
+    fn claim_writing_topics(&mut self, captain: &Captain) {
+        captain.claim_writer::<Scan>(SCAN_TOPIC_NAME, self.id, Scan::new);
+    }
     fn run(&mut self, captain: &Captain) {
-        let scan_topic = captain.claim_writer::<Scan>(SCAN_TOPIC_NAME, self.id);
+        let scan_topic = captain.topic::<Scan>(SCAN_TOPIC_NAME);
 
         println!("{} Started!", self.name);
 

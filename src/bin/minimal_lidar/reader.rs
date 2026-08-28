@@ -22,12 +22,7 @@ impl Executor for Reader {
         self.id = id
     }
     fn run(&mut self, captain: &Captain) {
-        let scan_topic = if self.id != 1 {
-            captain.topic::<Scan>(SCAN_TOPIC_NAME)
-        } else {
-            // captain.claim_writer::<Scan>(SCAN_TOPIC_NAME, self.id)
-            captain.topic::<Scan>(SCAN_TOPIC_NAME)
-        };
+        let scan_topic = captain.topic::<Scan>(SCAN_TOPIC_NAME);
 
         println!("{} [id = {}] Started!", self.name, self.id);
 

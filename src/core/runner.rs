@@ -1,10 +1,10 @@
 //! [`Runner`] owns every [`Executor`] and every topic, and runs the executors in
 //! parallel against a shared [`Captain`].
 
-use crate::captain::Captain;
-use crate::executor::Executor;
-use crate::log::{self, LogColor};
-use crate::topic::RwLockTopic;
+use crate::core::captain::Captain;
+use crate::core::executor::Executor;
+use crate::core::log::{self, LogColor};
+use crate::core::topic::RwLockTopic;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -62,6 +62,7 @@ impl Runner {
     /// it did. Off by default; there's no way to turn it back off.
     pub fn activate_verbose(&mut self) {
         self.verbose = true;
+        self.captain.set_verbose(true);
     }
 
     /// Prints `message` with the `[Runner hh:mm:ss] - ` prefix, in bold `color`,
@@ -72,14 +73,10 @@ impl Runner {
         }
     }
 
-    /// Registers a new topic under `name`, seeded with `initial`. Call during
-    /// setup, before [`run_all`](Self::run_all)/[`switch_executor`](Self::switch_executor)
-    /// have spawned any thread.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called after a thread has already been spawned - topics can't be
-    /// added once executors are running against the shared, `Arc`'d `Captain`.
+    /// Registers a new topic under `name`, seeded with `initial`. Usually
+    /// unnecessary now that [`crate::Executor::claim_writing_topics`] auto-registers
+    /// a topic the first time its writer claims it - use this only to pre-seed a
+    /// topic that has no writer.
     pub fn register_topic<T: Send + Sync + 'static>(
         &mut self,
         name: impl Into<String>,
@@ -87,14 +84,12 @@ impl Runner {
     ) {
         let name = name.into();
         self.log(LogColor::Pink, format!("registered topic {name:?}"));
-        Arc::get_mut(&mut self.captain)
-            .expect("Runner: cannot register a topic after executors have started")
-            .register_topic(name, initial);
+        self.captain.register_topic(name, initial);
     }
 
     /// Looks up a previously registered topic, e.g. to read it after every
     /// executor has stopped. See [`Captain::topic`] for panic conditions.
-    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> &RwLockTopic<T> {
+    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
         self.captain.topic(name)
     }
 
@@ -187,6 +182,7 @@ impl Runner {
         executor.init(id);
         let name = executor.name();
         captain.set_name(id, name.clone());
+        executor.claim_writing_topics(captain);
         let captain = captain.clone();
         thread::Builder::new()
             .name(name)

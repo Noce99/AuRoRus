@@ -1,7 +1,7 @@
 //! An [`Executor`] is one independently scheduled unit of work that reads and/or
 //! writes [`crate::RwLockTopic`]s through a shared [`crate::Captain`].
 
-use crate::captain::Captain;
+use crate::core::captain::Captain;
 use std::any::Any;
 
 /// One participant in the system: given an identity and a [`Captain`], it reads
@@ -14,6 +14,17 @@ pub trait Executor: Send {
     /// Called once, before [`run`](Self::run), with this executor's identity. Used
     /// e.g. to claim a topic's writer slot or to tag published values.
     fn init(&mut self, id: u8);
+
+    /// Called once, after [`init`](Self::init) and before this executor's thread is
+    /// spawned. Executors that write to a topic must claim it here, via
+    /// `captain.claim_writer::<T>(...)`, rather than from inside [`run`](Self::run):
+    /// [`crate::Runner`] calls this synchronously, on its own thread, for every
+    /// executor before spawning any of their threads, so a writer-slot conflict
+    /// between two executors is caught deterministically up front instead of
+    /// racing on whichever of their threads happens to run first.
+    ///
+    /// Default: does nothing, for executors that only read topics.
+    fn claim_writing_topics(&mut self, _captain: &Captain) {}
 
     /// The executor's main loop. Should keep working until
     /// `captain.is_running(id)` (with the id given to [`init`](Self::init)) returns

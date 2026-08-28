@@ -13,7 +13,7 @@ mod report;
 mod verifier;
 
 use aurorus::{Executor, Runner};
-use reader_writer::{Payload, ReaderExecutor, TOPIC_NAME, WriterExecutor};
+use reader_writer::{ReaderExecutor, WriterExecutor};
 use report::Report;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -62,7 +62,6 @@ fn main() {
     println!("\nStarting threads...\n");
 
     let mut runner = Runner::new();
-    runner.register_topic::<Payload>(TOPIC_NAME, vec![0.0f32; config.topic_size]);
 
     let writer = WriterExecutor::new(config.writer_frequency_hz, config.topic_size);
     let writer_report = writer.report_handle();

@@ -15,8 +15,8 @@ pub const TOPIC_NAME: &str = "shared_data";
 
 /// Publishes a payload of `topic_size` `f32`s on [`TOPIC_NAME`] at a fixed rate.
 ///
-/// Claims the topic's writer slot for its own id in [`Executor::run`], so it must be
-/// the first (and only) executor that ever writes that topic.
+/// Claims the topic's writer slot for its own id in [`Executor::claim_writing_topics`],
+/// so it must be the first (and only) executor that ever writes that topic.
 pub struct WriterExecutor {
     id: u8,
     rate_hz: f64,
@@ -45,8 +45,13 @@ impl Executor for WriterExecutor {
         self.id = id;
     }
 
+    fn claim_writing_topics(&mut self, captain: &Captain) {
+        let topic_size = self.topic_size;
+        captain.claim_writer::<Payload>(TOPIC_NAME, self.id, move || vec![0.0f32; topic_size]);
+    }
+
     fn run(&mut self, captain: &Captain) {
-        let topic = captain.claim_writer::<Payload>(TOPIC_NAME, self.id);
+        let topic = captain.topic::<Payload>(TOPIC_NAME);
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut next_update = Instant::now() + interval;

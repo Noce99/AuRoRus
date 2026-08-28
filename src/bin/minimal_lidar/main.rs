@@ -1,4 +1,3 @@
-use crate::topics::{SCAN_TOPIC_NAME, Scan};
 use aurorus::{Executor, Runner};
 use std::thread;
 use std::time::Duration;
@@ -7,15 +6,12 @@ mod lidar;
 mod reader;
 mod topics;
 
-// Same rates used by the lidar_benchmark binary, minus the 300 Hz reader (there are
-// only 3 readers here).
 const WRITER_HZ: f64 = 50.0;
 const READER_RATES_HZ: [f64; 3] = [30.0, 60.0, 150.0];
 
 fn main() {
     let mut runner = Runner::new();
     runner.activate_verbose();
-    runner.register_topic::<Scan>(SCAN_TOPIC_NAME, Scan::new());
 
     let lidar = lidar::Lidar::new(WRITER_HZ, String::from("Lidar"));
     let reader_1 = reader::Reader::new(READER_RATES_HZ[0], format!("Reader {}Hz", READER_RATES_HZ[0]));
