@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+time = { version = "0.3", features = ["local-offset"] }
 
 [profile.release]
 lto = true # Link-Time Optimization: better optimization between the crates instead of single crate optimization. Slower compile time.

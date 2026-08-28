@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
+use time::OffsetDateTime;
 
 /// Error returned by [`Runner::switch_executor`].
 #[derive(Debug)]
@@ -27,6 +28,30 @@ impl fmt::Display for SwitchExecutorError {
 
 impl std::error::Error for SwitchExecutorError {}
 
+/// Colors used to tag each kind of verbose log line - see [`Runner::log`].
+/// Values are ANSI SGR parameters (without the leading `\x1b[` or trailing
+/// `m`), always paired with bold.
+#[derive(Clone, Copy)]
+enum LogColor {
+    Pink,
+    Orange,
+    Green,
+    Purple,
+    Yellow,
+}
+
+impl LogColor {
+    fn sgr(self) -> &'static str {
+        match self {
+            Self::Pink => "38;5;213",
+            Self::Orange => "38;5;208",
+            Self::Green => "32",
+            Self::Purple => "38;5;129",
+            Self::Yellow => "33",
+        }
+    }
+}
+
 /// Owns every topic and every registered [`Executor`], and drives them all.
 ///
 /// Register topics with [`register_topic`](Self::register_topic) and executors
@@ -40,17 +65,48 @@ pub struct Runner {
     next_id: u8,
     pending: Vec<(u8, Box<dyn Executor>)>,
     running: HashMap<u8, thread::JoinHandle<Box<dyn Executor>>>,
+    verbose: bool,
 }
 
 impl Runner {
     /// Creates an empty runner with no topics or executors registered yet.
+    /// Verbose logging is off by default - see [`activate_verbose`](Self::activate_verbose).
     pub fn new() -> Self {
         Self {
             captain: Arc::new(Captain::new()),
             next_id: 0,
             pending: Vec::new(),
             running: HashMap::new(),
+            verbose: false,
         }
+    }
+
+    /// Turns on verbose logging: every subsequent call to a method below prints
+    /// one `[Runner hh:mm:ss] - ...` line (local time) to stdout describing what
+    /// it did. Off by default; there's no way to turn it back off.
+    pub fn activate_verbose(&mut self) {
+        self.verbose = true;
+    }
+
+    /// Prints `message` with the `[Runner hh:mm:ss] - ` prefix, in bold `color`,
+    /// if verbose logging is on.
+    fn log(&self, color: LogColor, message: impl fmt::Display) {
+        if self.verbose {
+            println!(
+                "\x1b[{};1m[Runner {}] - {message}\x1b[0m",
+                color.sgr(),
+                Self::now_hhmmss()
+            );
+        }
+    }
+
+    /// The current local time as `hh:mm:ss`. Falls back to UTC if the local UTC
+    /// offset can't be determined (`OffsetDateTime::now_local` can fail e.g. on
+    /// Unix in a multi-threaded process, for soundness reasons outside our
+    /// control).
+    fn now_hhmmss() -> String {
+        let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
     }
 
     /// Registers a new topic under `name`, seeded with `initial`. Call during
@@ -66,6 +122,8 @@ impl Runner {
         name: impl Into<String>,
         initial: T,
     ) {
+        let name = name.into();
+        self.log(LogColor::Pink, format!("registered topic {name:?}"));
         Arc::get_mut(&mut self.captain)
             .expect("Runner: cannot register a topic after executors have started")
             .register_topic(name, initial);
@@ -79,6 +137,7 @@ impl Runner {
 
     /// Signals every executor to stop.
     pub fn stop(&self) {
+        self.log(LogColor::Yellow, "stop requested");
         self.captain.stop();
     }
 
@@ -91,6 +150,10 @@ impl Runner {
             .next_id
             .checked_add(1)
             .expect("Runner: exceeded u8::MAX executors (id space exhausted)");
+        self.log(
+            LogColor::Orange,
+            format!("added executor {:?} (id {id})", executor.name()),
+        );
         self.pending.push((id, executor));
         id
     }
@@ -103,6 +166,7 @@ impl Runner {
             let handle = Self::spawn(&self.captain, id, executor);
             self.running.insert(id, handle);
         }
+        self.log(LogColor::Green, "all executors started");
     }
 
     /// Stops the executor currently running under `id`, waits for its thread to
@@ -121,6 +185,15 @@ impl Runner {
             .remove(&id)
             .ok_or(SwitchExecutorError::NotRunning(id))?;
 
+        self.log(
+            LogColor::Purple,
+            format!(
+                "switching executor [id={id}] [{}->{}]...",
+                self.captain.name_of(id),
+                new_executor.name()
+            ),
+        );
+
         self.captain.stop_executor(id);
         let old_executor = old_handle.join().expect("executor thread panicked");
         self.captain.resume_executor(id);
@@ -134,10 +207,13 @@ impl Runner {
     /// Waits for every currently running executor to finish, returning each one.
     /// Typically called after [`stop`](Self::stop) has signaled them all to exit.
     pub fn join_all(&mut self) -> Vec<Box<dyn Executor>> {
-        self.running
+        let executors = self
+            .running
             .drain()
             .map(|(_, handle)| handle.join().expect("executor thread panicked"))
-            .collect()
+            .collect();
+        self.log(LogColor::Green, "all executors stopped successfully");
+        executors
     }
 
     fn spawn(
@@ -145,11 +221,13 @@ impl Runner {
         id: u8,
         mut executor: Box<dyn Executor>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
+        executor.init(id);
+        let name = executor.name();
+        captain.set_name(id, name.clone());
         let captain = captain.clone();
         thread::Builder::new()
-            .name(format!("executor-{id}"))
+            .name(name)
             .spawn(move || {
-                executor.init(id);
                 executor.run(&captain);
                 executor
             })
@@ -189,6 +267,10 @@ mod tests {
                 thread::sleep(Duration::from_millis(1));
             }
             self.finished.store(true, Ordering::Relaxed);
+        }
+
+        fn name(&self) -> String {
+            format!("Counting {}", self.id)
         }
 
         fn as_any(&self) -> &dyn Any {

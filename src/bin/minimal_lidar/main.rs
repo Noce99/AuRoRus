@@ -13,20 +13,14 @@ const WRITER_HZ: f64 = 50.0;
 const READER_RATES_HZ: [f64; 3] = [30.0, 60.0, 150.0];
 
 fn main() {
-    println!("Executor frequencies:");
-    println!("  Lidar (writer) - {WRITER_HZ} Hz");
-    for (i, hz) in READER_RATES_HZ.iter().enumerate() {
-        println!("  Reader {} - {hz} Hz", i + 1);
-    }
-    println!();
-
     let mut runner = Runner::new();
+    runner.activate_verbose();
     runner.register_topic::<Scan>(SCAN_TOPIC_NAME, Scan::new());
 
-    let lidar = lidar::Lidar::new(WRITER_HZ);
-    let reader_1 = reader::Reader::new(READER_RATES_HZ[0]);
-    let reader_2 = reader::Reader::new(READER_RATES_HZ[1]);
-    let reader_3 = reader::Reader::new(READER_RATES_HZ[2]);
+    let lidar = lidar::Lidar::new(WRITER_HZ, String::from("Lidar"));
+    let reader_1 = reader::Reader::new(READER_RATES_HZ[0], format!("Reader {}Hz", READER_RATES_HZ[0]));
+    let reader_2 = reader::Reader::new(READER_RATES_HZ[1], format!("Reader {}Hz", READER_RATES_HZ[1]));
+    let reader_3 = reader::Reader::new(READER_RATES_HZ[2], format!("Reader {}Hz", READER_RATES_HZ[2]));
 
     let lidar_id = runner.add_executor(lidar.boxed());
     let reader_1_id = runner.add_executor(reader_1.boxed());
@@ -38,16 +32,17 @@ fn main() {
 
     // Swap reader_1 out for a fresh Reader instance under the same id, without
     // disturbing the lidar or the other two readers.
-    println!("Switching executor [{}]...", reader_1_id);
+    let new_reader_1 =
+        reader::Reader::new(READER_RATES_HZ[0], format!("New Reader {}Hz", READER_RATES_HZ[0]));
     runner
-        .switch_executor(reader_1_id, reader::Reader::new(READER_RATES_HZ[0]).boxed())
+        .switch_executor(reader_1_id, new_reader_1.boxed())
         .expect("reader_1 should still be running");
 
     thread::sleep(Duration::from_millis(500));
 
-    println!("Switching executor [{}]...", lidar_id);
+    let new_lidar = lidar::Lidar::new(WRITER_HZ, String::from("New Lidar"));
     runner
-        .switch_executor(lidar_id, lidar::Lidar::new(WRITER_HZ).boxed())
+        .switch_executor(lidar_id, new_lidar.boxed())
         .expect("lidar should still be running");
 
     thread::sleep(Duration::from_millis(500));

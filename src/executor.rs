@@ -20,6 +20,11 @@ pub trait Executor: Send {
     /// `false`, then return.
     fn run(&mut self, captain: &Captain);
 
+    /// A short, human-readable name for this executor (e.g. `"Writer 0"`,
+    /// `"Reader 2"`), used for thread naming and diagnostic messages - never
+    /// parsed, just displayed.
+    fn name(&self) -> String;
+
     /// Enables downcasting a finished `Box<dyn Executor>` back to its concrete type,
     /// e.g. to read out implementation-specific results after
     /// [`crate::Runner::run_all`] joins it.

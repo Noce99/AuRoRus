@@ -48,10 +48,7 @@ impl Executor for LidarWriterExecutor {
     }
 
     fn run(&mut self, captain: &Captain) {
-        let scan_topic = captain.topic::<Scan>(LIDAR_SCAN_TOPIC);
-        scan_topic
-            .set_writer(self.id)
-            .expect("lidar_scan topic already has a different writer");
+        let scan_topic = captain.claim_writer::<Scan>(LIDAR_SCAN_TOPIC, self.id);
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut next_update = Instant::now() + interval;
@@ -90,13 +87,16 @@ impl Executor for LidarWriterExecutor {
             }
         }
 
-        let label = format!("Writer {}", self.id);
         *self.report.lock().unwrap() = Some(Report::from_samples(
-            label,
+            self.name(),
             "writes",
             self.rate_hz,
             &samples,
         ));
+    }
+
+    fn name(&self) -> String {
+        format!("Writer {}", self.id)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -154,9 +154,16 @@ impl Executor for LidarReaderExecutor {
             thread::sleep(interval);
         }
 
-        let label = format!("Reader {}", self.id);
-        *self.report.lock().unwrap() =
-            Some(Report::from_samples(label, "reads", self.rate_hz, &samples));
+        *self.report.lock().unwrap() = Some(Report::from_samples(
+            self.name(),
+            "reads",
+            self.rate_hz,
+            &samples,
+        ));
+    }
+
+    fn name(&self) -> String {
+        format!("Reader {}", self.id)
     }
 
     fn as_any(&self) -> &dyn Any {

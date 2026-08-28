@@ -7,11 +7,12 @@ use std::time::Duration;
 pub struct Lidar {
     pub id: u8,
     pub rate_hz: f64,
+    pub name: String,
 }
 
 impl Lidar {
-    pub fn new(rate_hz: f64) -> Self {
-        Self { id: 0, rate_hz }
+    pub fn new(rate_hz: f64, name: String) -> Self {
+        Self { id: 0, rate_hz, name }
     }
 }
 
@@ -20,12 +21,9 @@ impl Executor for Lidar {
         self.id = id
     }
     fn run(&mut self, captain: &Captain) {
-        let scan_topic = captain.topic::<Scan>(SCAN_TOPIC_NAME);
-        scan_topic
-            .set_writer(self.id)
-            .expect("scan topic already has a different writer");
+        let scan_topic = captain.claim_writer::<Scan>(SCAN_TOPIC_NAME, self.id);
 
-        println!("Lidar Started!");
+        println!("{} Started!", self.name);
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         while captain.is_running(self.id) {
@@ -35,7 +33,10 @@ impl Executor for Lidar {
             thread::sleep(interval);
         }
 
-        println!("Lidar Finished!");
+        println!("{} Finished!", self.name);
+    }
+    fn name(&self) -> String {
+        self.name.clone()
     }
     fn as_any(&self) -> &dyn Any {
         self

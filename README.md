@@ -39,7 +39,9 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   independently scheduled participant. `init(&mut self, id: u8)` is called
   once with the executor's identity; `run(&mut self, captain: &Captain)`
   is its main loop, which should keep working until
-  `captain.is_running(id)` goes false.
+  `captain.is_running(id)` goes false. `name()` returns a short
+  human-readable label (e.g. `"Writer 0"`) used for the executor's thread
+  name and in diagnostic messages.
 - **`Topic`** ([src/topic.rs](src/topic.rs)) — a trait for one named, typed
   slot of shared state with exactly one authorized writer and any number of
   readers: `set_writer(executor_id)` (fails if a writer is already set),
@@ -63,6 +65,13 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
   type-erased internally so topics of different types can coexist) plus the
   run/stop signals every executor polls: a global flag and a per-id one, so
   a single executor can be stopped without affecting the rest.
+  `claim_writer(topic_name, executor_id)` is the executor-facing way to claim
+  a topic's writer slot: it wraps `Topic::set_writer`, but if a *different*
+  executor already holds it, that's treated as a fatal misconfiguration — it
+  prints one clear diagnostic naming both executors (looked up by id, from
+  the names `Runner` records via `set_name` as each executor is spawned) and
+  terminates the whole program immediately, instead of leaving each executor
+  to detect and panic over the conflict on its own.
 
 ```
                      ┌───────────────────────┐
@@ -363,5 +372,8 @@ cargo doc --no-deps --open
 
 ## Dependencies
 
-None beyond the Rust standard library — `RwLockTopic` is built directly on
-`std::sync::RwLock`.
+`RwLockTopic` is built directly on `std::sync::RwLock` - no dependency there.
+The one dependency in the tree is [`time`](https://docs.rs/time) (with its
+`local-offset` feature), used solely by `Runner`'s verbose logging
+(`activate_verbose`) to timestamp each line in local time - getting the local
+UTC offset isn't something `std` can do safely on its own.
