@@ -22,6 +22,7 @@
 
 mod captain;
 mod executor;
+mod log;
 mod runner;
 mod topic;
 

@@ -3,12 +3,12 @@
 
 use crate::captain::Captain;
 use crate::executor::Executor;
+use crate::log::{self, LogColor};
 use crate::topic::RwLockTopic;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
-use time::OffsetDateTime;
 
 /// Error returned by [`Runner::switch_executor`].
 #[derive(Debug)]
@@ -27,30 +27,6 @@ impl fmt::Display for SwitchExecutorError {
 }
 
 impl std::error::Error for SwitchExecutorError {}
-
-/// Colors used to tag each kind of verbose log line - see [`Runner::log`].
-/// Values are ANSI SGR parameters (without the leading `\x1b[` or trailing
-/// `m`), always paired with bold.
-#[derive(Clone, Copy)]
-enum LogColor {
-    Pink,
-    Orange,
-    Green,
-    Purple,
-    Yellow,
-}
-
-impl LogColor {
-    fn sgr(self) -> &'static str {
-        match self {
-            Self::Pink => "38;5;213",
-            Self::Orange => "38;5;208",
-            Self::Green => "32",
-            Self::Purple => "38;5;129",
-            Self::Yellow => "33",
-        }
-    }
-}
 
 /// Owns every topic and every registered [`Executor`], and drives them all.
 ///
@@ -92,21 +68,8 @@ impl Runner {
     /// if verbose logging is on.
     fn log(&self, color: LogColor, message: impl fmt::Display) {
         if self.verbose {
-            println!(
-                "\x1b[{};1m[Runner {}] - {message}\x1b[0m",
-                color.sgr(),
-                Self::now_hhmmss()
-            );
+            println!("{}", log::format_line(color, message));
         }
-    }
-
-    /// The current local time as `hh:mm:ss`. Falls back to UTC if the local UTC
-    /// offset can't be determined (`OffsetDateTime::now_local` can fail e.g. on
-    /// Unix in a multi-threaded process, for soundness reasons outside our
-    /// control).
-    fn now_hhmmss() -> String {
-        let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
-        format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
     }
 
     /// Registers a new topic under `name`, seeded with `initial`. Call during

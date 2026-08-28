@@ -103,11 +103,18 @@ impl Captain {
         if topic.set_writer(executor_id).is_err() {
             let holder_id = topic.writer().expect("a writer must be set if set_writer failed");
             eprintln!(
-                "fatal: executor {:?} (id {executor_id}) tried to become the writer of topic \
-                 {topic_name:?}, but executor {:?} (id {holder_id}) already holds it - two \
-                 different executors must not both write the same topic. Stopping.",
-                self.name_of(executor_id),
-                self.name_of(holder_id),
+                "{}",
+                crate::log::format_line(
+                    crate::log::LogColor::Red,
+                    format!(
+                        "fatal: executor {:?} (id {executor_id}) tried to become the writer of \
+                         topic {topic_name:?}, but executor {:?} (id {holder_id}) already holds \
+                         it - two different executors must not both write the same topic. \
+                         Stopping.",
+                        self.name_of(executor_id),
+                        self.name_of(holder_id),
+                    ),
+                )
             );
             std::process::exit(1);
         }
