@@ -1,18 +1,19 @@
-//! Owns every [`Executor`] and runs them all in parallel against a shared
-//! [`TopicHandler`].
+//! [`Runner`] owns every [`Executor`] and every topic, and runs the executors in
+//! parallel against a shared [`Captain`].
 
+use crate::captain::Captain;
 use crate::executor::Executor;
-use crate::topic_handler::TopicHandler;
+use crate::topic::RwLockTopic;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
 
-/// Error returned by [`ExecutorHandler::switch_executor`].
+/// Error returned by [`Runner::switch_executor`].
 #[derive(Debug)]
 pub enum SwitchExecutorError {
     /// No executor is currently running under this id - either it was never
-    /// registered, or [`ExecutorHandler::run_all`] hasn't started it yet.
+    /// registered, or [`Runner::run_all`] hasn't started it yet.
     NotRunning(u8),
 }
 
@@ -26,30 +27,59 @@ impl fmt::Display for SwitchExecutorError {
 
 impl std::error::Error for SwitchExecutorError {}
 
-/// A collection of executors sharing one [`TopicHandler`], started together.
+/// Owns every topic and every registered [`Executor`], and drives them all.
 ///
-/// Register every executor with [`add_executor`](Self::add_executor), then call
-/// [`run_all`](Self::run_all) once everything is ready. Each executor runs on its own
-/// thread until the `TopicHandler` it was given reports
-/// [`is_running`](TopicHandler::is_running) as `false` for its id. Once running, a
-/// specific executor can be replaced in place with [`switch_executor`](Self::switch_executor);
-/// call [`join_all`](Self::join_all) to wait for whatever is still running.
-pub struct ExecutorHandler {
-    topics: Arc<TopicHandler>,
+/// Register topics with [`register_topic`](Self::register_topic) and executors
+/// with [`add_executor`](Self::add_executor), then call [`run_all`](Self::run_all)
+/// once everything is ready. Each executor runs on its own thread until
+/// [`stop`](Self::stop) (or [`switch_executor`](Self::switch_executor), for just
+/// one executor) tells it to. Call [`join_all`](Self::join_all) to wait for
+/// whatever is still running.
+pub struct Runner {
+    captain: Arc<Captain>,
     next_id: u8,
     pending: Vec<(u8, Box<dyn Executor>)>,
     running: HashMap<u8, thread::JoinHandle<Box<dyn Executor>>>,
 }
 
-impl ExecutorHandler {
-    /// Creates a handler that will run its executors against `topics`.
-    pub fn new(topics: Arc<TopicHandler>) -> Self {
+impl Runner {
+    /// Creates an empty runner with no topics or executors registered yet.
+    pub fn new() -> Self {
         Self {
-            topics,
+            captain: Arc::new(Captain::new()),
             next_id: 0,
             pending: Vec::new(),
             running: HashMap::new(),
         }
+    }
+
+    /// Registers a new topic under `name`, seeded with `initial`. Call during
+    /// setup, before [`run_all`](Self::run_all)/[`switch_executor`](Self::switch_executor)
+    /// have spawned any thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called after a thread has already been spawned - topics can't be
+    /// added once executors are running against the shared, `Arc`'d `Captain`.
+    pub fn register_topic<T: Send + Sync + 'static>(
+        &mut self,
+        name: impl Into<String>,
+        initial: T,
+    ) {
+        Arc::get_mut(&mut self.captain)
+            .expect("Runner: cannot register a topic after executors have started")
+            .register_topic(name, initial);
+    }
+
+    /// Looks up a previously registered topic, e.g. to read it after every
+    /// executor has stopped. See [`Captain::topic`] for panic conditions.
+    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> &RwLockTopic<T> {
+        self.captain.topic(name)
+    }
+
+    /// Signals every executor to stop.
+    pub fn stop(&self) {
+        self.captain.stop();
     }
 
     /// Registers `executor`, assigning it a unique id (in registration order,
@@ -60,7 +90,7 @@ impl ExecutorHandler {
         self.next_id = self
             .next_id
             .checked_add(1)
-            .expect("ExecutorHandler: exceeded u8::MAX executors (id space exhausted)");
+            .expect("Runner: exceeded u8::MAX executors (id space exhausted)");
         self.pending.push((id, executor));
         id
     }
@@ -70,14 +100,14 @@ impl ExecutorHandler {
     /// start executors added afterward.
     pub fn run_all(&mut self) {
         for (id, executor) in self.pending.drain(..) {
-            let handle = Self::spawn(&self.topics, id, executor);
+            let handle = Self::spawn(&self.captain, id, executor);
             self.running.insert(id, handle);
         }
     }
 
     /// Stops the executor currently running under `id`, waits for its thread to
-    /// finish, and starts `new_executor` in its place under that same id. Every other
-    /// running executor is unaffected.
+    /// finish, and starts `new_executor` in its place under that same id. Every
+    /// other running executor is unaffected.
     ///
     /// Returns the outgoing executor, e.g. to downcast via [`Executor::as_any`] and
     /// inspect its final state. Fails if no executor is currently running under `id`.
@@ -91,18 +121,18 @@ impl ExecutorHandler {
             .remove(&id)
             .ok_or(SwitchExecutorError::NotRunning(id))?;
 
-        self.topics.stop_executor(id);
+        self.captain.stop_executor(id);
         let old_executor = old_handle.join().expect("executor thread panicked");
-        self.topics.resume_executor(id);
+        self.captain.resume_executor(id);
 
-        let handle = Self::spawn(&self.topics, id, new_executor);
+        let handle = Self::spawn(&self.captain, id, new_executor);
         self.running.insert(id, handle);
 
         Ok(old_executor)
     }
 
     /// Waits for every currently running executor to finish, returning each one.
-    /// Typically called after [`TopicHandler::stop`] has signaled them all to exit.
+    /// Typically called after [`stop`](Self::stop) has signaled them all to exit.
     pub fn join_all(&mut self) -> Vec<Box<dyn Executor>> {
         self.running
             .drain()
@@ -111,19 +141,25 @@ impl ExecutorHandler {
     }
 
     fn spawn(
-        topics: &Arc<TopicHandler>,
+        captain: &Arc<Captain>,
         id: u8,
         mut executor: Box<dyn Executor>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
-        let topics = topics.clone();
+        let captain = captain.clone();
         thread::Builder::new()
             .name(format!("executor-{id}"))
             .spawn(move || {
                 executor.init(id);
-                executor.run(&topics);
+                executor.run(&captain);
                 executor
             })
             .expect("failed to spawn executor thread")
+    }
+}
+
+impl Default for Runner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -147,8 +183,8 @@ mod tests {
             self.id = id;
         }
 
-        fn run(&mut self, topics: &TopicHandler) {
-            while topics.is_running(self.id) {
+        fn run(&mut self, captain: &Captain) {
+            while captain.is_running(self.id) {
                 self.iterations.fetch_add(1, Ordering::Relaxed);
                 thread::sleep(Duration::from_millis(1));
             }
@@ -162,30 +198,29 @@ mod tests {
 
     #[test]
     fn switch_executor_replaces_only_the_targeted_id() {
-        let topics = Arc::new(TopicHandler::new());
-        let mut handler = ExecutorHandler::new(topics.clone());
+        let mut runner = Runner::new();
 
         let old_iterations = Arc::new(AtomicUsize::new(0));
         let old_finished = Arc::new(AtomicBool::new(false));
         let other_iterations = Arc::new(AtomicUsize::new(0));
 
-        let target_id = handler.add_executor(Box::new(CountingExecutor {
+        let target_id = runner.add_executor(Box::new(CountingExecutor {
             id: 0,
             iterations: old_iterations.clone(),
             finished: old_finished.clone(),
         }));
-        let other_id = handler.add_executor(Box::new(CountingExecutor {
+        let other_id = runner.add_executor(Box::new(CountingExecutor {
             id: 0,
             iterations: other_iterations.clone(),
             finished: Arc::new(AtomicBool::new(false)),
         }));
 
-        handler.run_all();
+        runner.run_all();
         thread::sleep(Duration::from_millis(20));
 
         let new_iterations = Arc::new(AtomicUsize::new(0));
         let new_finished = Arc::new(AtomicBool::new(false));
-        handler
+        runner
             .switch_executor(
                 target_id,
                 Box::new(CountingExecutor {
@@ -202,8 +237,8 @@ mod tests {
         assert!(other_iterations.load(Ordering::Relaxed) > 0);
 
         thread::sleep(Duration::from_millis(20));
-        topics.stop();
-        handler.join_all();
+        runner.stop();
+        runner.join_all();
 
         // The new instance under target_id actually ran, under the same id.
         assert!(new_iterations.load(Ordering::Relaxed) > 0);
@@ -213,10 +248,9 @@ mod tests {
 
     #[test]
     fn switch_executor_fails_for_an_id_that_is_not_running() {
-        let topics = Arc::new(TopicHandler::new());
-        let mut handler = ExecutorHandler::new(topics);
+        let mut runner = Runner::new();
 
-        let result = handler.switch_executor(
+        let result = runner.switch_executor(
             0,
             Box::new(CountingExecutor {
                 id: 0,

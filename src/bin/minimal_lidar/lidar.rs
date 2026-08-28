@@ -1,5 +1,5 @@
 use crate::topics::{SCAN_TOPIC_NAME, Scan};
-use efficient_data_sharing::{Executor, Topic, TopicHandler};
+use efficient_data_sharing::{Captain, Executor, Topic};
 use std::any::Any;
 use std::thread;
 use std::time::Duration;
@@ -19,8 +19,8 @@ impl Executor for Lidar {
     fn init(&mut self, id: u8) {
         self.id = id
     }
-    fn run(&mut self, topics: &TopicHandler) {
-        let scan_topic = topics.topic::<Scan>(SCAN_TOPIC_NAME);
+    fn run(&mut self, captain: &Captain) {
+        let scan_topic = captain.topic::<Scan>(SCAN_TOPIC_NAME);
         scan_topic
             .set_writer(self.id)
             .expect("scan topic already has a different writer");
@@ -28,7 +28,7 @@ impl Executor for Lidar {
         println!("Lidar Started!");
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
-        while topics.is_running(self.id) {
+        while captain.is_running(self.id) {
             scan_topic
                 .write(self.id, Scan::new())
                 .expect("lost writer authorization for lidar_scan topic");

@@ -34,7 +34,7 @@ pub trait Topic {
 
     /// Claims this topic for writing by `executor_id`. Succeeds - idempotently - if
     /// no writer is claimed yet, or if `executor_id` already holds the slot (e.g.
-    /// after being restarted by `ExecutorHandler::switch_executor`). Fails only if a
+    /// after being restarted by `Runner::switch_executor`). Fails only if a
     /// *different* `executor_id` already holds it.
     fn set_writer(&self, executor_id: u8) -> Result<(), TopicError>;
 

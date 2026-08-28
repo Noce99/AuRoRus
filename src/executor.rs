@@ -1,13 +1,13 @@
 //! An [`Executor`] is one independently scheduled unit of work that reads and/or
-//! writes [`crate::Topic`]s through a shared [`crate::TopicHandler`].
+//! writes [`crate::Topic`]s through a shared [`crate::Captain`].
 
-use crate::topic_handler::TopicHandler;
+use crate::captain::Captain;
 use std::any::Any;
 
-/// One participant in the system: given an identity and a [`TopicHandler`], it reads
+/// One participant in the system: given an identity and a [`Captain`], it reads
 /// and/or writes whatever topics it needs until told to stop.
 ///
-/// [`crate::ExecutorHandler`] owns a heterogeneous collection of executors and runs
+/// [`crate::Runner`] owns a heterogeneous collection of executors and runs
 /// each one on its own thread, calling [`init`](Self::init) once and then
 /// [`run`](Self::run) for the executor's whole lifetime.
 pub trait Executor: Send {
@@ -16,18 +16,18 @@ pub trait Executor: Send {
     fn init(&mut self, id: u8);
 
     /// The executor's main loop. Should keep working until
-    /// `topics.is_running(id)` (with the id given to [`init`](Self::init)) returns
+    /// `captain.is_running(id)` (with the id given to [`init`](Self::init)) returns
     /// `false`, then return.
-    fn run(&mut self, topics: &TopicHandler);
+    fn run(&mut self, captain: &Captain);
 
     /// Enables downcasting a finished `Box<dyn Executor>` back to its concrete type,
     /// e.g. to read out implementation-specific results after
-    /// [`crate::ExecutorHandler::run_all`] joins it.
+    /// [`crate::Runner::run_all`] joins it.
     fn as_any(&self) -> &dyn Any;
 
     /// Boxes this executor as a `Box<dyn Executor>`, e.g. for
-    /// [`crate::ExecutorHandler::add_executor`] or
-    /// [`crate::ExecutorHandler::switch_executor`].
+    /// [`crate::Runner::add_executor`] or
+    /// [`crate::Runner::switch_executor`].
     fn boxed(self) -> Box<dyn Executor>
     where
         Self: Sized + 'static,

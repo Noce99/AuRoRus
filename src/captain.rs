@@ -1,32 +1,34 @@
-//! Owns every [`Topic`] shared between executors, plus the run/stop signals they poll.
+//! [`Captain`] is what each running [`crate::Executor`] answers to: it owns every
+//! topic plus the run/stop signals an executor polls to know when to exit.
 
 use crate::topic::RwLockTopic;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A registry of named, typed topics, shared (read-only, via `Arc`) with every
-/// running executor.
+/// The object [`crate::Runner`] hands to every executor's [`crate::Executor::run`]:
+/// a registry of named, typed topics plus the run/stop signals every executor
+/// polls.
 ///
-/// Build one, [`register_topic`](Self::register_topic) every topic executors will
-/// use, then hand it to [`crate::ExecutorHandler`]. Because different topics can hold
+/// Built and owned by [`crate::Runner`] - there's no public constructor, since a
+/// `Captain` only ever exists as part of one. Because different topics can hold
 /// different types, each is stored type-erased and recovered via
 /// [`topic`](Self::topic).
 ///
-/// This is also where the run/stop signals live: since [`crate::Executor::run`] only
-/// receives a `&TopicHandler`, an executor's run loop polls
+/// This is also where the run/stop signals live: since [`crate::Executor::run`]
+/// only receives a `&Captain`, an executor's run loop polls
 /// [`is_running`](Self::is_running) with its own id to know when to exit - either
 /// because every executor was told to stop, or because just that one was (e.g. by
-/// [`crate::ExecutorHandler::switch_executor`]).
-pub struct TopicHandler {
+/// [`crate::Runner::switch_executor`]).
+pub struct Captain {
     topics: HashMap<String, Box<dyn Any + Send + Sync>>,
     running: AtomicBool,
     executor_running: [AtomicBool; 256],
 }
 
-impl TopicHandler {
-    /// Creates an empty, running handler.
-    pub fn new() -> Self {
+impl Captain {
+    /// Creates an empty, running captain.
+    pub(crate) fn new() -> Self {
         Self {
             topics: HashMap::new(),
             running: AtomicBool::new(true),
@@ -36,8 +38,8 @@ impl TopicHandler {
 
     /// Registers a new topic under `name`, seeded with `initial`. Call during setup,
     /// before executors are started - topics can't be added once executors are
-    /// running against a shared (`Arc`'d) handler.
-    pub fn register_topic<T: Send + Sync + 'static>(
+    /// running against a shared (`Arc`'d) captain.
+    pub(crate) fn register_topic<T: Send + Sync + 'static>(
         &mut self,
         name: impl Into<String>,
         initial: T,
@@ -65,14 +67,14 @@ impl TopicHandler {
     /// executor was told to stop via [`stop`](Self::stop), and this particular id
     /// wasn't individually stopped (e.g. for a [`switch_executor`]-driven swap).
     ///
-    /// [`switch_executor`]: crate::ExecutorHandler::switch_executor
+    /// [`switch_executor`]: crate::Runner::switch_executor
     pub fn is_running(&self, id: u8) -> bool {
         self.running.load(Ordering::Relaxed)
             && self.executor_running[id as usize].load(Ordering::Relaxed)
     }
 
     /// Signals every executor polling [`is_running`](Self::is_running) to stop.
-    pub fn stop(&self) {
+    pub(crate) fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
     }
 
@@ -87,11 +89,5 @@ impl TopicHandler {
     /// as true again.
     pub(crate) fn resume_executor(&self, id: u8) {
         self.executor_running[id as usize].store(true, Ordering::Relaxed);
-    }
-}
-
-impl Default for TopicHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }

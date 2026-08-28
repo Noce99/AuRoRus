@@ -37,35 +37,37 @@ it knows nothing about LIDARs or scans. It's built from four pieces:
 
 - **`Executor`** ([src/executor.rs](src/executor.rs)) — a trait for one
   independently scheduled participant. `init(&mut self, id: u8)` is called
-  once with the executor's identity; `run(&mut self, topics: &TopicHandler)`
+  once with the executor's identity; `run(&mut self, captain: &Captain)`
   is its main loop, which should keep working until
-  `topics.is_running(id)` goes false.
+  `captain.is_running(id)` goes false.
 - **`Topic`** ([src/topic.rs](src/topic.rs)) — a trait for one named, typed
   slot of shared state with exactly one authorized writer and any number of
   readers: `set_writer(executor_id)` (fails if a writer is already set),
   `write(executor_id, value)` (fails unless `executor_id` is the registered
   writer), and `read() -> Item`. `RwLockTopic<T>` is the implementation of
   it, built directly on `std::sync::RwLock`.
-- **`TopicHandler`** ([src/topic_handler.rs](src/topic_handler.rs)) — owns
-  every topic in the system (registered by name, type-erased internally so
-  topics of different types can coexist) plus the run/stop signals every
-  executor polls: a global flag (`stop()`) and a per-id one, so a single
-  executor can be stopped without affecting the rest. Shared read-only (via
-  `Arc`) with every executor.
-- **`ExecutorHandler`** ([src/executor_handler.rs](src/executor_handler.rs))
-  — owns every executor. `add_executor` registers one and assigns it a
-  unique id; `run_all()` spawns a thread per registered executor, each
-  calling `init` then `run` against the shared `TopicHandler`, and can be
-  called again later for executors added afterward. `switch_executor(id,
-  new_executor)` stops whichever executor currently owns `id`, joins its
-  thread, and starts `new_executor` in its place under that same id — every
-  other running executor is unaffected. `join_all()` waits for whatever is
-  still running (typically after `TopicHandler::stop()`).
+- **`Runner`** ([src/runner.rs](src/runner.rs)) — the single object a binary
+  constructs and drives. Owns every topic (`register_topic(name, initial)`)
+  and every executor (`add_executor` registers one and assigns it a unique
+  id). `run_all()` spawns a thread per registered executor, each calling
+  `init` then `run` against a shared `Captain`, and can be called again
+  later for executors added afterward. `switch_executor(id, new_executor)`
+  stops whichever executor currently owns `id`, joins its thread, and starts
+  `new_executor` in its place under that same id — every other running
+  executor is unaffected. `stop()` signals every executor to stop;
+  `join_all()` waits for whatever is still running. `topic(name)` reads a
+  topic directly, e.g. for a post-run integrity check.
+- **`Captain`** ([src/captain.rs](src/captain.rs)) — owned by `Runner` and
+  shared read-only (via `Arc`) with every executor as the `&Captain` passed
+  into `run`. Holds every topic in the system (registered by name,
+  type-erased internally so topics of different types can coexist) plus the
+  run/stop signals every executor polls: a global flag and a per-id one, so
+  a single executor can be stopped without affecting the rest.
 
 ```
                      ┌───────────────────────┐
   LidarWriterExecutor│                       │ LidarReaderExecutor (30 Hz)
-  ──────────────────▶│     TopicHandler      │◀──────────────────────────
+  ──────────────────▶│       Captain         │◀──────────────────────────
   write("lidar_scan")│  "lidar_scan" topic   │ LidarReaderExecutor (60 Hz)
   @ 50 Hz             │  (RwLockTopic<Scan>)  │◀──────────────────────────
                      │                       │ LidarReaderExecutor (150 Hz)
@@ -159,7 +161,7 @@ Each writer/reader executor times its own operations into a private
 hot path at all. Only once an executor stops does it fold its samples into
 a [`Report`](src/bin/lidar_benchmark/report.rs) (mean, standard deviation,
 max), handed back to `main` through an `Arc<Mutex<Option<Report>>>` set up
-before the executor is registered with the `ExecutorHandler`, and printed
+before the executor is registered with the `Runner`, and printed
 in the final report. This is also why the live progress bar can't show
 read/write counts: nothing is shared or aggregated until every executor has
 already finished.
@@ -198,9 +200,9 @@ bar, a per-executor final report, and the integrity check.
 src/
   lib.rs                    crate docs, module wiring, public re-exports
   executor.rs                Executor trait
-  executor_handler.rs        ExecutorHandler struct
+  runner.rs                  Runner struct
   topic.rs                   Topic trait, TopicError, RwLockTopic<T>
-  topic_handler.rs           TopicHandler struct
+  captain.rs                 Captain struct
 src/bin/lidar_benchmark/
   main.rs                    wires topics + executors together, prints the report
   lidar.rs                   Scan/NUM_POINTS, LidarWriterExecutor, LidarReaderExecutor

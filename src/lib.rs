@@ -11,21 +11,21 @@
 //!   recently published value; there is no notion of "unread" data, so reading faster
 //!   than the writer publishes simply re-observes the same value.
 //!
-//! Executors don't talk to topics directly - they go through a [`TopicHandler`],
-//! which owns every topic in the system and is shared (read-only) with every
-//! executor. An [`ExecutorHandler`] owns every executor and starts them all running
-//! in parallel once everything is registered.
+//! Executors don't talk to topics directly - they go through a [`Captain`], which
+//! owns every topic in the system and is shared (read-only) with every executor. A
+//! [`Runner`] owns every topic and every executor, and starts them all running in
+//! parallel once everything is registered.
 //!
 //! See the `lidar_benchmark` binary for a complete example: one executor publishes a
 //! simulated LIDAR scan at a fixed rate, and several more each independently read the
 //! latest scan at their own rate.
 
+mod captain;
 mod executor;
-mod executor_handler;
+mod runner;
 mod topic;
-mod topic_handler;
 
+pub use captain::Captain;
 pub use executor::Executor;
-pub use executor_handler::{ExecutorHandler, SwitchExecutorError};
+pub use runner::{Runner, SwitchExecutorError};
 pub use topic::{RwLockTopic, Topic, TopicError};
-pub use topic_handler::TopicHandler;

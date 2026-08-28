@@ -11,7 +11,7 @@ mod progress;
 mod report;
 mod verifier;
 
-use efficient_data_sharing::{Executor, ExecutorHandler, TopicHandler};
+use efficient_data_sharing::{Executor, Runner};
 use lidar::{LIDAR_SCAN_TOPIC, LidarReaderExecutor, LidarWriterExecutor, NUM_POINTS, Scan};
 use report::Report;
 use std::sync::{Arc, Mutex};
@@ -38,9 +38,8 @@ fn main() {
     println!("  - Duration: {:.1} seconds", duration_secs);
     println!("\nStarting threads...\n");
 
-    let mut topics = TopicHandler::new();
-    topics.register_topic::<Scan>(LIDAR_SCAN_TOPIC, [0.0f32; NUM_POINTS]);
-    let topics = Arc::new(topics);
+    let mut runner = Runner::new();
+    runner.register_topic::<Scan>(LIDAR_SCAN_TOPIC, [0.0f32; NUM_POINTS]);
 
     let writer = LidarWriterExecutor::new(WRITER_HZ);
     let writer_report: Arc<Mutex<Option<Report>>> = writer.report_handle();
@@ -52,12 +51,11 @@ fn main() {
     let reader_reports: Vec<Arc<Mutex<Option<Report>>>> =
         readers.iter().map(|r| r.report_handle()).collect();
 
-    let mut handler = ExecutorHandler::new(topics.clone());
-    handler.add_executor(writer.boxed());
+    runner.add_executor(writer.boxed());
     for reader in readers {
-        handler.add_executor(reader.boxed());
+        runner.add_executor(reader.boxed());
     }
-    handler.run_all();
+    runner.run_all();
 
     // Progress bar for the run; driven purely by wall-clock elapsed time,
     // independent of how many reads/writes actually happened.
@@ -71,8 +69,8 @@ fn main() {
 
     // Stop all executors and wait for their threads to finish.
     println!("\nStopping all threads...");
-    topics.stop();
-    handler.join_all();
+    runner.stop();
+    runner.join_all();
 
     println!("\n========== FINAL REPORT ==========\n");
     println!("WRITER:");
@@ -99,7 +97,7 @@ fn main() {
     }
     println!("===================================");
 
-    let consistent = verifier::verify_consistency(&topics);
+    let consistent = verifier::verify_consistency(&runner);
     println!(
         "\nData integrity check: {}",
         if consistent {

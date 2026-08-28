@@ -1,7 +1,7 @@
 //! The LIDAR scan type and the two executors that publish/consume it.
 
 use crate::report::Report;
-use efficient_data_sharing::{Executor, Topic, TopicHandler};
+use efficient_data_sharing::{Captain, Executor, Topic};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -47,8 +47,8 @@ impl Executor for LidarWriterExecutor {
         self.id = id;
     }
 
-    fn run(&mut self, topics: &TopicHandler) {
-        let scan_topic = topics.topic::<Scan>(LIDAR_SCAN_TOPIC);
+    fn run(&mut self, captain: &Captain) {
+        let scan_topic = captain.topic::<Scan>(LIDAR_SCAN_TOPIC);
         scan_topic
             .set_writer(self.id)
             .expect("lidar_scan topic already has a different writer");
@@ -59,7 +59,7 @@ impl Executor for LidarWriterExecutor {
         let mut frame = 0u64;
         let mut samples: Vec<u64> = Vec::new();
 
-        while topics.is_running(self.id) {
+        while captain.is_running(self.id) {
             let start = Instant::now();
 
             // Simulate one 360-degree LIDAR scan: a slowly wobbling wall between
@@ -136,12 +136,12 @@ impl Executor for LidarReaderExecutor {
         self.id = id;
     }
 
-    fn run(&mut self, topics: &TopicHandler) {
-        let scan_topic = topics.topic::<Scan>(LIDAR_SCAN_TOPIC);
+    fn run(&mut self, captain: &Captain) {
+        let scan_topic = captain.topic::<Scan>(LIDAR_SCAN_TOPIC);
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
         let mut samples: Vec<u64> = Vec::new();
 
-        while topics.is_running(self.id) {
+        while captain.is_running(self.id) {
             let start = Instant::now();
 
             // Read the latest scan and process it - here, sum the distances,

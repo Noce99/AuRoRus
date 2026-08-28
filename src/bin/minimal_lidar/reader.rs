@@ -1,5 +1,5 @@
 use crate::topics::{SCAN_TOPIC_NAME, Scan};
-use efficient_data_sharing::{Executor, Topic, TopicHandler};
+use efficient_data_sharing::{Captain, Executor, Topic};
 
 use std::any::Any;
 use std::thread;
@@ -20,13 +20,13 @@ impl Executor for Reader {
     fn init(&mut self, id: u8) {
         self.id = id
     }
-    fn run(&mut self, topics: &TopicHandler) {
-        let scan_topic = topics.topic::<Scan>(SCAN_TOPIC_NAME);
+    fn run(&mut self, captain: &Captain) {
+        let scan_topic = captain.topic::<Scan>(SCAN_TOPIC_NAME);
 
         println!("Executor [{}] Started!", self.id);
 
         let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
-        while topics.is_running(self.id) {
+        while captain.is_running(self.id) {
             let _scan = scan_topic.read();
             // Just sleeping but the work should go there
             thread::sleep(interval);
