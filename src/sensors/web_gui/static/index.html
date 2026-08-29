@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AuRoRus</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <div id="sidebar-toggle">
+    <button id="sidebar-toggle-btn" title="Show/hide map list" aria-label="Show/hide map list">&#9664;</button>
+  </div>
+
+  <aside id="sidebar">
+    <h1>Maps</h1>
+    <ul id="map-list"></ul>
+    <button id="generate-btn">Generate Map</button>
+  </aside>
+
+  <main id="canvas-area">
+    <canvas id="map-canvas"></canvas>
+
+    <div id="status-bar">
+      <span id="status-map-name">No map loaded</span>
+      <span id="status-vertical-size"></span>
+    </div>
+
+    <div id="zoom-controls">
+      <button id="home-btn" title="Center start/finish, zoom to 10 m" aria-label="Home">&#8962;</button>
+      <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+    </div>
+  </main>
+
+  <div id="generate-overlay" hidden>
+    <div id="generate-modal">
+      <h2>Generate Map</h2>
+      <form id="generate-form">
+        <div class="field-grid">
+          <label>Seed <input type="number" name="seed" step="1" min="0" /></label>
+          <label>Name (optional) <input type="text" name="name" placeholder="auto" /></label>
+          <label>Area width (m) <input type="number" name="area_width_m" step="any" min="0.01" /></label>
+          <label>Area height (m) <input type="number" name="area_height_m" step="any" min="0.01" /></label>
+          <label>Resolution (m/px) <input type="number" name="resolution_m_per_px" step="any" min="0.001" /></label>
+          <label>Number of sites <input type="number" name="num_sites" step="1" min="8" /></label>
+          <label>Min site spacing (m) <input type="number" name="min_site_spacing_m" step="any" min="0.01" /></label>
+          <label>Target area fraction <input type="number" name="target_area_fraction" step="any" min="0.01" max="0.99" /></label>
+          <label>Track width (m) <input type="number" name="track_width_m" step="any" min="0.01" /></label>
+          <label>Race line point spacing (m) <input type="number" name="point_spacing_m" step="any" min="0.01" /></label>
+          <label>Smoothing samples/segment <input type="number" name="smoothing_samples_per_segment" step="1" min="1" /></label>
+          <label>Max speed (m/s) <input type="number" name="max_speed_mps" step="any" min="0.01" /></label>
+          <label>Max lateral accel (m/s&sup2;) <input type="number" name="max_lateral_accel_mps2" step="any" min="0.01" /></label>
+        </div>
+        <p id="generate-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" id="generate-cancel-btn">Cancel</button>
+          <button type="submit" id="generate-confirm-btn">Generate</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -87,7 +87,8 @@ pub fn generate(config: &GenerationConfig, folder_name: Option<&str>) -> Result<
     .map_err(MapGenerationError::LoopConstruction)?;
 
     let dense = smoothing::densify(&loop_points, config.smoothing_samples_per_segment);
-    let closed_points = smoothing::resample_even_spacing(&dense, config.point_spacing_m);
+    let mut closed_points = smoothing::resample_even_spacing(&dense, config.point_spacing_m);
+    start_finish::rotate_to_straightest(&mut closed_points, config.track_width_m);
 
     let speeds: Vec<SpeedPoint> =
         dynamics::assign_speeds(&closed_points, config.max_speed_mps, config.max_lateral_accel_mps2);

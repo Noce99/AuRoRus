@@ -77,3 +77,10 @@ impl Map {
         Ok(Map { folder: folder.to_path_buf(), info, raster, race_line })
     }
 }
+
+/// Reads back just a map folder's `info.json`, without touching its raster
+/// or race line - cheaper than [`Map::load`] when only the metadata is
+/// needed, e.g. to list many maps.
+pub fn read_info(folder: &Path) -> Result<MapInfo, InfoReadError> {
+    info::read(&folder.join(INFO_FILE_NAME))
+}

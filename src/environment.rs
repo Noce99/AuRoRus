@@ -14,7 +14,7 @@ pub mod simulator;
 mod tiff;
 
 pub use info::{ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint};
-pub use map::{Map, MapLoadError};
+pub use map::{Map, MapLoadError, read_info};
 pub use race_line::SpeedPoint;
 pub use raster::Raster;
 pub use simulator::{GeneratedMap, GenerationConfig, MapGenerationError, generate};
