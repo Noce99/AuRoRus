@@ -1,13 +1,19 @@
 //! [`WebGui`]: an [`Executor`] that serves a local web UI for browsing and
-//! generating maps, on [`BIND_ADDR`]. Claims no topic today - it only reads
-//! and writes map folders on disk - but lives here (rather than as a plain
-//! binary) so a future version can also read live topics through the same
-//! `Captain` every other executor uses.
+//! generating maps, and for driving the vehicle - WASD control, live map
+//! and vehicle status - on [`BIND_ADDR`]. Claims the writer slot for
+//! `human_vesc_command` and `map_selection` (see [`live_api`]); reads
+//! `map` and `vehicle_status`, which some other executor in the same
+//! [`crate::Runner`] (e.g. [`crate::sensors::MapServer`],
+//! [`crate::actuators::SimulatedVehicle`]) is expected to be writing.
 
 mod assets;
 mod handlers;
+mod live_api;
 mod maps_api;
 
+use crate::topics::{
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, VescCommand,
+};
 use crate::{Captain, Executor};
 use std::any::Any;
 use std::path::PathBuf;
@@ -51,6 +57,11 @@ impl Executor for WebGui {
         self.id = id;
     }
 
+    fn claim_writing_topics(&mut self, captain: &Captain) {
+        captain.claim_writer::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME, self.id, VescCommand::default);
+        captain.claim_writer::<MapSelection>(MAP_SELECTION_TOPIC_NAME, self.id, MapSelection::default);
+    }
+
     fn run(&mut self, captain: &Captain) {
         let server = match tiny_http::Server::http(BIND_ADDR) {
             Ok(server) => Arc::new(server),
@@ -69,7 +80,7 @@ impl Executor for WebGui {
                 scope.spawn(move || {
                     while captain.is_running(id) {
                         match server.recv_timeout(POLL_INTERVAL) {
-                            Ok(Some(request)) => handlers::handle(request, maps_root),
+                            Ok(Some(request)) => handlers::handle(request, maps_root, captain, id),
                             Ok(None) => continue,
                             Err(err) => eprintln!("web_gui: connection error: {err}"),
                         }

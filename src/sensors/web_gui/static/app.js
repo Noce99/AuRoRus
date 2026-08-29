@@ -7,6 +7,14 @@
 /** @type {{name:string, info:object, offscreen:HTMLCanvasElement}|null} */
 let currentMap = null;
 
+/** Name of the map the `map` topic currently holds (server-side selection),
+ *  or null - tracked separately from `currentMap.name` so polling can tell
+ *  when the live selection has actually changed. */
+let liveMapName = null;
+
+/** @type {{x_m:number, y_m:number, heading_rad:number, speed_mps:number}|null} */
+let vehicleStatus = null;
+
 /** World-space view: how many meters of world height are visible, and
  *  which world point (in meters, same frame as MapInfo) is centered. */
 const view = {
@@ -119,8 +127,47 @@ function draw() {
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
 
+  drawVehicle();
   updateStatusBar();
   syncZoomSlider();
+}
+
+// ---------------------------------------------------------------------
+// Vehicle
+// ---------------------------------------------------------------------
+
+const VEHICLE_LENGTH_M = 0.45;
+const VEHICLE_WIDTH_M = 0.25;
+
+function drawVehicle() {
+  if (!vehicleStatus) return;
+
+  const { x, y } = worldToScreen(vehicleStatus.x_m, vehicleStatus.y_m);
+  const scale = scalePxPerMeter();
+  const lengthPx = VEHICLE_LENGTH_M * scale;
+  const widthPx = VEHICLE_WIDTH_M * scale;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(x, y);
+  ctx.rotate(vehicleStatus.heading_rad);
+
+  ctx.fillStyle = "#ffb020";
+  ctx.fillRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
+  ctx.strokeStyle = "#101418";
+  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+  ctx.strokeRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
+
+  // Small triangle marking the front, so heading is visible at a glance.
+  ctx.beginPath();
+  ctx.moveTo(lengthPx / 2, 0);
+  ctx.lineTo(lengthPx / 2 - widthPx * 0.4, -widthPx * 0.35);
+  ctx.lineTo(lengthPx / 2 - widthPx * 0.4, widthPx * 0.35);
+  ctx.closePath();
+  ctx.fillStyle = "#101418";
+  ctx.fill();
+
+  ctx.restore();
 }
 
 function frame() {
@@ -134,10 +181,12 @@ function frame() {
 
 const statusName = document.getElementById("status-map-name");
 const statusVerticalSize = document.getElementById("status-vertical-size");
+const statusSpeed = document.getElementById("status-speed");
 
 function updateStatusBar() {
   statusName.textContent = currentMap ? currentMap.name : "No map loaded";
   statusVerticalSize.textContent = `Vertical size: ${view.verticalSizeM.toFixed(2)} m`;
+  statusSpeed.textContent = vehicleStatus ? `Speed: ${vehicleStatus.speed_mps.toFixed(2)} m/s` : "";
 }
 
 // ---------------------------------------------------------------------
@@ -265,25 +314,35 @@ function buildImageData(bytes, width, height) {
   return new ImageData(rgba, width, height);
 }
 
-async function loadMap(name) {
+// The sidebar only ever *requests* a map via `/api/map_selection` -
+// `map_server` is the one that actually reads it off disk and republishes
+// the `map` topic, which `pollLiveMap` below picks up and renders via this.
+async function loadLiveMap(name, widthPx, heightPx) {
   const info = await fetchJSON(`/api/maps/${encodeURIComponent(name)}/info`);
-  const rasterResponse = await fetch(`/api/maps/${encodeURIComponent(name)}/raster`);
-  if (!rasterResponse.ok) throw new Error(`failed to load raster for ${name}`);
+  const rasterResponse = await fetch("/api/map/raster");
+  if (!rasterResponse.ok) throw new Error(`failed to load live raster for ${name}`);
   const bytes = new Uint8Array(await rasterResponse.arrayBuffer());
 
   const offscreen = document.createElement("canvas");
-  offscreen.width = info.width_px;
-  offscreen.height = info.height_px;
-  offscreen.getContext("2d").putImageData(buildImageData(bytes, info.width_px, info.height_px), 0, 0);
+  offscreen.width = widthPx;
+  offscreen.height = heightPx;
+  offscreen.getContext("2d").putImageData(buildImageData(bytes, widthPx, heightPx), 0, 0);
 
   currentMap = { name, info, offscreen };
   const line = info.start_finish_line;
   view.centerX = (line.a.x + line.b.x) / 2;
   view.centerY = (line.a.y + line.b.y) / 2;
   setVerticalSize(10);
+}
 
-  renderMapList(await fetchJSON("/api/maps"), name);
-  frame();
+// Writes the wanted map folder to `map_selection` - `map_server` picks it
+// up on its own poll cycle, `pollLiveMap` then reflects it here.
+async function selectMap(name) {
+  await fetchJSON("/api/map_selection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
 }
 
 function renderMapList(maps, selectedName) {
@@ -300,15 +359,43 @@ function renderMapList(maps, selectedName) {
     li.textContent = map.name;
     li.title = `${map.width_px}x${map.height_px} px, seed ${map.seed}`;
     if (map.name === selectedName) li.classList.add("selected");
-    li.addEventListener("click", () => loadMap(map.name).catch((err) => console.error(err)));
+    li.addEventListener("click", () => {
+      renderMapList(maps, map.name); // optimistic highlight; pollLiveMap confirms it
+      selectMap(map.name).catch((err) => console.error(err));
+    });
     mapListEl.appendChild(li);
   }
 }
 
 async function refreshMapList() {
   const maps = await fetchJSON("/api/maps");
-  renderMapList(maps, currentMap ? currentMap.name : null);
+  renderMapList(maps, liveMapName);
   return maps;
+}
+
+// Polls the `map` topic (via `/api/map`) and reloads the canvas whenever the
+// live selection actually changes - driven by `map_selection`, written by
+// `selectMap` above (sidebar clicks, or a freshly generated map).
+async function pollLiveMap() {
+  const live = await fetchJSON("/api/map");
+  if (live.name === liveMapName) return;
+
+  liveMapName = live.name;
+  if (live.name) {
+    await loadLiveMap(live.name, live.width_px, live.height_px);
+  } else {
+    currentMap = null;
+  }
+  renderMapList(await fetchJSON("/api/maps"), liveMapName);
+  frame();
+}
+
+const LIVE_MAP_POLL_MS = 500;
+const VEHICLE_STATUS_POLL_MS = 50;
+
+async function pollVehicleStatus() {
+  vehicleStatus = await fetchJSON("/api/vehicle_status");
+  frame();
 }
 
 // ---------------------------------------------------------------------
@@ -370,7 +457,7 @@ form.addEventListener("submit", async (event) => {
     });
     closeGenerateModal();
     await refreshMapList();
-    await loadMap(generated.name);
+    await selectMap(generated.name);
   } catch (err) {
     showError(err.message);
   } finally {
@@ -379,15 +466,75 @@ form.addEventListener("submit", async (event) => {
 });
 
 // ---------------------------------------------------------------------
+// WASD human control -> human_vesc_command
+// ---------------------------------------------------------------------
+
+const HUMAN_MAX_SPEED_MPS = 3.0;
+const HUMAN_MAX_STEERING_RAD = 0.35;
+const HUMAN_COMMAND_POST_MS = 50;
+
+const keys = { w: false, a: false, s: false, d: false };
+
+function isTypingTarget(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+}
+
+window.addEventListener("keydown", (event) => {
+  if (isTypingTarget(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (!(key in keys)) return;
+  keys[key] = true;
+  event.preventDefault();
+});
+
+window.addEventListener("keyup", (event) => {
+  const key = event.key.toLowerCase();
+  if (!(key in keys)) return;
+  keys[key] = false;
+});
+
+// Also release every key when focus leaves the window/tab, so the car
+// doesn't keep driving after e.g. alt-tabbing away mid-turn.
+window.addEventListener("blur", () => {
+  keys.w = keys.a = keys.s = keys.d = false;
+});
+
+function currentHumanCommand() {
+  const speed = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  // Positive steering_angle_rad is a right turn (heading rotates clockwise
+  // in this world frame - see bicycle.rs) - D is the right key, so D is
+  // positive and A is negative.
+  const steer = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
+  return {
+    servo_position_rad: steer * HUMAN_MAX_STEERING_RAD,
+    speed_mps: speed * HUMAN_MAX_SPEED_MPS,
+  };
+}
+
+setInterval(() => {
+  fetch("/api/human_vesc_command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(currentHumanCommand()),
+  }).catch((err) => console.error(err));
+}, HUMAN_COMMAND_POST_MS);
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
 new ResizeObserver(frame).observe(canvas.parentElement);
 window.addEventListener("resize", frame);
 
+setInterval(() => pollLiveMap().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
+setInterval(() => pollVehicleStatus().catch((err) => console.error(err)), VEHICLE_STATUS_POLL_MS);
+
 refreshMapList()
-  .then((maps) => {
-    if (maps.length > 0) return loadMap(maps[0].name);
+  .then(async (maps) => {
+    const live = await fetchJSON("/api/map");
+    if (!live.name && maps.length > 0) {
+      await selectMap(maps[0].name);
+    }
     frame();
   })
   .catch((err) => console.error(err));

@@ -64,11 +64,9 @@ pub fn raster(name: &str, maps_root: &Path) -> ResponseBox {
         Err(_) => return not_found(),
     };
 
-    let mut bytes = Vec::with_capacity((map.raster.width_px as usize) * (map.raster.height_px as usize));
-    for y in 0..map.raster.height_px {
-        bytes.extend(map.raster.row(y).iter().map(|&white| if white { 255u8 } else { 0u8 }));
-    }
-    Response::from_data(bytes).with_header(super::header("Content-Type", "application/octet-stream")).boxed()
+    Response::from_data(map.raster.to_bytes())
+        .with_header(super::header("Content-Type", "application/octet-stream"))
+        .boxed()
 }
 
 /// `GET /api/generate/defaults` - [`GenerationConfig::default`]'s values,
@@ -215,14 +213,14 @@ fn random_seed() -> u64 {
 /// Validates `name` as a map folder name: non-empty, and free of any path
 /// separator or `..` component, so it can never escape `maps_root` - unlike
 /// `generate_map`'s CLI flag, this one comes from an arbitrary HTTP client.
-fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
+pub(super) fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
     if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
         return None;
     }
     Some(maps_root.join(name))
 }
 
-fn json_response<T: serde::Serialize>(value: &T, status: u16) -> ResponseBox {
+pub(super) fn json_response<T: serde::Serialize>(value: &T, status: u16) -> ResponseBox {
     let body = serde_json::to_string(value).expect("serializing a well-formed API response never fails");
     Response::from_string(body)
         .with_status_code(status)
@@ -239,7 +237,7 @@ fn error_response(status: u16, message: &str) -> ResponseBox {
     json_response(&ErrorBody { error: message.to_string() }, status)
 }
 
-fn bad_request(message: &str) -> ResponseBox {
+pub(super) fn bad_request(message: &str) -> ResponseBox {
     error_response(400, message)
 }
 

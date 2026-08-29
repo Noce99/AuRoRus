@@ -2,12 +2,16 @@
 //! response.
 
 use super::assets;
+use super::live_api;
 use super::maps_api;
+use crate::Captain;
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
 
 /// Handles one request end to end: routes it, then sends the response.
-pub fn handle(mut request: Request, maps_root: &Path) {
+/// `writer_id` is this `WebGui`'s own executor id, used to authorize its
+/// writes to `human_vesc_command`/`map_selection`.
+pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8) {
     let method = request.method().clone();
     let path = request.url().split('?').next().unwrap_or("/").to_string();
 
@@ -19,6 +23,11 @@ pub fn handle(mut request: Request, maps_root: &Path) {
         (Method::Get, "/api/generate/defaults") => maps_api::generate_defaults(),
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
         (Method::Get, path) if path.starts_with("/api/maps/") => route_map_get(path, maps_root),
+        (Method::Get, "/api/map") => live_api::map(captain),
+        (Method::Get, "/api/map/raster") => live_api::raster(captain),
+        (Method::Post, "/api/map_selection") => live_api::select_map(&mut request, captain, writer_id, maps_root),
+        (Method::Get, "/api/vehicle_status") => live_api::vehicle_status(captain),
+        (Method::Post, "/api/human_vesc_command") => live_api::human_vesc_command(&mut request, captain, writer_id),
         _ => maps_api::not_found(),
     };
 

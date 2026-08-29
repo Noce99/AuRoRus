@@ -149,6 +149,10 @@ body:has(#sidebar.collapsed) #sidebar-toggle-btn {
   pointer-events: none;
 }
 
+#status-hint {
+  color: #9aa4b2;
+}
+
 /* ---------- zoom controls ---------- */
 
 #zoom-controls {

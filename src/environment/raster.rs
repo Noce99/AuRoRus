@@ -20,4 +20,11 @@ impl Raster {
         let start = (y as usize) * (self.width_px as usize);
         &self.white[start..start + self.width_px as usize]
     }
+
+    /// The whole raster as one byte per pixel, row-major: `255` for
+    /// drivable (white), `0` otherwise - no image codec needed, a consumer
+    /// (e.g. a browser) can build an `ImageData` directly from these.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.white.iter().map(|&white| if white { 255u8 } else { 0u8 }).collect()
+    }
 }
