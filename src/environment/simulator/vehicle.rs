@@ -5,10 +5,12 @@
 //! per tick. Starts with [`bicycle`], a kinematic bicycle model with slip
 //! angle, [`dynamic_bicycle`], a dynamic model with a linear tire model,
 //! [`nonlinear_bicycle`], which adds tire saturation, load transfer, and
-//! combined slip on top of that via a simplified Pacejka-style curve, and
+//! combined slip on top of that via a simplified Pacejka-style curve,
 //! [`pacejka_bicycle`], which upgrades that curve to the full Pacejka Magic
-//! Formula with independently-tuned front/rear axles; more models are
-//! expected to join them over time. See
+//! Formula with independently-tuned front/rear axles, and [`two_track`],
+//! which treats all four wheels individually instead of collapsing each
+//! axle into one, adding lateral load transfer and per-wheel asymmetry;
+//! more models are expected to join them over time. See
 //! `src/environment/simulator/vehicle/README.md` for the modeling
 //! background and equations.
 //!
@@ -25,8 +27,10 @@ mod bicycle;
 mod dynamic_bicycle;
 mod nonlinear_bicycle;
 mod pacejka_bicycle;
+mod two_track;
 
 pub use bicycle::{BicycleParams, BicycleState, step};
 pub use dynamic_bicycle::{DynamicParams, DynamicState, step as dynamic_step};
 pub use nonlinear_bicycle::{NonlinearBicycleState, NonlinearTireParams, step as nonlinear_step};
 pub use pacejka_bicycle::{PacejkaBicycleState, PacejkaTireParams, step as pacejka_step};
+pub use two_track::{TwoTrackParams, TwoTrackState, step as two_track_step};

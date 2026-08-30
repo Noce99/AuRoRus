@@ -32,6 +32,10 @@ pub enum VehicleModelKind {
     /// lateral tire force - see
     /// [`crate::environment::simulator::vehicle::pacejka_bicycle`].
     PacejkaBicycle,
+    /// A two-track (four-wheel) model with lateral load transfer and
+    /// per-wheel asymmetry - see
+    /// [`crate::environment::simulator::vehicle::two_track`].
+    TwoTrack,
 }
 
 /// The vehicle model kind a driver of the selection (e.g. `web_gui`)

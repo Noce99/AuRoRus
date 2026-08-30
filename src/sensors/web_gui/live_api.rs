@@ -125,6 +125,11 @@ const VEHICLE_MODEL_OPTIONS: &[(VehicleModelKind, &str, &str)] = &[
         "pacejka_bicycle",
         "Pacejka bicycle (full Magic Formula)",
     ),
+    (
+        VehicleModelKind::TwoTrack,
+        "two_track",
+        "Two-track (four-wheel, lateral load transfer)",
+    ),
 ];
 
 /// The API string for `kind` - the inverse of [`parse_kind`].

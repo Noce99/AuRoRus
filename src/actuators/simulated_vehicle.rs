@@ -8,7 +8,8 @@
 
 use crate::environment::simulator::vehicle::{
     BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState, NonlinearTireParams,
-    PacejkaBicycleState, PacejkaTireParams, dynamic_step, nonlinear_step, pacejka_step, step as bicycle_step,
+    PacejkaBicycleState, PacejkaTireParams, TwoTrackParams, TwoTrackState, dynamic_step, nonlinear_step,
+    pacejka_step, step as bicycle_step, two_track_step,
 };
 use crate::topics::{
     HUMAN_VESC_COMMAND_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
@@ -104,6 +105,13 @@ pub enum VehicleModel {
         params: PacejkaTireParams,
         limits: ActuatorLimits,
     },
+    /// A two-track (four-wheel) model with lateral load transfer and
+    /// per-wheel asymmetry - see
+    /// [`crate::environment::simulator::vehicle::two_track`].
+    TwoTrack {
+        params: TwoTrackParams,
+        limits: ActuatorLimits,
+    },
 }
 
 /// The state a [`VehicleModel`] is advancing, in the same variant as the
@@ -115,6 +123,7 @@ pub enum VehicleState {
     DynamicBicycle(DynamicState),
     NonlinearBicycle(NonlinearBicycleState),
     PacejkaBicycle(PacejkaBicycleState),
+    TwoTrack(TwoTrackState),
 }
 
 impl VehicleState {
@@ -126,6 +135,7 @@ impl VehicleState {
             Self::DynamicBicycle(s) => s.x_m,
             Self::NonlinearBicycle(s) => s.x_m,
             Self::PacejkaBicycle(s) => s.x_m,
+            Self::TwoTrack(s) => s.x_m,
         }
     }
 
@@ -137,6 +147,7 @@ impl VehicleState {
             Self::DynamicBicycle(s) => s.y_m,
             Self::NonlinearBicycle(s) => s.y_m,
             Self::PacejkaBicycle(s) => s.y_m,
+            Self::TwoTrack(s) => s.y_m,
         }
     }
 
@@ -147,20 +158,22 @@ impl VehicleState {
             Self::DynamicBicycle(s) => s.heading_rad,
             Self::NonlinearBicycle(s) => s.heading_rad,
             Self::PacejkaBicycle(s) => s.heading_rad,
+            Self::TwoTrack(s) => s.heading_rad,
         }
     }
 
     /// The vehicle's ground speed, in meters/second - a single number for
     /// the kinematic model, or the magnitude of the body-frame velocity for
     /// a model (like [`DynamicState`]/[`NonlinearBicycleState`]/
-    /// [`PacejkaBicycleState`]) that tracks longitudinal and lateral
-    /// velocity separately.
+    /// [`PacejkaBicycleState`]/[`TwoTrackState`]) that tracks longitudinal
+    /// and lateral velocity separately.
     fn speed_mps(&self) -> f64 {
         match self {
             Self::Bicycle(s) => s.speed_mps,
             Self::DynamicBicycle(s) => s.vx_mps.hypot(s.vy_mps),
             Self::NonlinearBicycle(s) => s.vx_mps.hypot(s.vy_mps),
             Self::PacejkaBicycle(s) => s.vx_mps.hypot(s.vy_mps),
+            Self::TwoTrack(s) => s.vx_mps.hypot(s.vy_mps),
         }
     }
 }
@@ -173,6 +186,7 @@ fn limits_of(model: &VehicleModel) -> ActuatorLimits {
         VehicleModel::DynamicBicycle { limits, .. } => *limits,
         VehicleModel::NonlinearBicycle { limits, .. } => *limits,
         VehicleModel::PacejkaBicycle { limits, .. } => *limits,
+        VehicleModel::TwoTrack { limits, .. } => *limits,
     }
 }
 
@@ -183,6 +197,7 @@ fn kind_of(model: &VehicleModel) -> VehicleModelKind {
         VehicleModel::DynamicBicycle { .. } => VehicleModelKind::DynamicBicycle,
         VehicleModel::NonlinearBicycle { .. } => VehicleModelKind::NonlinearBicycle,
         VehicleModel::PacejkaBicycle { .. } => VehicleModelKind::PacejkaBicycle,
+        VehicleModel::TwoTrack { .. } => VehicleModelKind::TwoTrack,
     }
 }
 
@@ -253,6 +268,28 @@ pub fn default_model(kind: VehicleModelKind) -> VehicleModel {
             },
             limits,
         },
+        VehicleModelKind::TwoTrack => VehicleModel::TwoTrack {
+            params: TwoTrackParams {
+                mass_kg: 3.5,
+                yaw_inertia_kgm2: 0.06,
+                lf_m: 0.16,
+                lr_m: 0.16,
+                cg_height_m: 0.05,
+                track_width_m: 0.2,
+                front_b: 2.5,
+                front_c: 1.3,
+                front_d_mu: 1.1,
+                front_e: -0.5,
+                rear_b: 2.5,
+                rear_c: 1.3,
+                rear_d_mu: 1.1,
+                rear_e: -0.5,
+                combined_slip_b: 1.0,
+                combined_slip_c: 1.0,
+                front_drive_fraction: 0.5,
+            },
+            limits,
+        },
     }
 }
 
@@ -280,6 +317,14 @@ fn default_state(kind: VehicleModelKind) -> VehicleState {
             yaw_rate_rad_s: 0.0,
         }),
         VehicleModelKind::PacejkaBicycle => VehicleState::PacejkaBicycle(PacejkaBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        }),
+        VehicleModelKind::TwoTrack => VehicleState::TwoTrack(TwoTrackState {
             x_m: 0.0,
             y_m: 0.0,
             heading_rad: 0.0,
@@ -316,6 +361,14 @@ fn carry_over_state(old: VehicleState, new_kind: VehicleModelKind) -> VehicleSta
             yaw_rate_rad_s: 0.0,
         }),
         VehicleModelKind::PacejkaBicycle => VehicleState::PacejkaBicycle(PacejkaBicycleState {
+            x_m,
+            y_m,
+            heading_rad,
+            vx_mps: speed_mps,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        }),
+        VehicleModelKind::TwoTrack => VehicleState::TwoTrack(TwoTrackState {
             x_m,
             y_m,
             heading_rad,
@@ -369,6 +422,9 @@ fn advance(
         }
         (VehicleModel::PacejkaBicycle { params, .. }, VehicleState::PacejkaBicycle(s)) => {
             VehicleState::PacejkaBicycle(pacejka_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+        }
+        (VehicleModel::TwoTrack { params, .. }, VehicleState::TwoTrack(s)) => {
+            VehicleState::TwoTrack(two_track_step(s, *params, next_steering_rad, accel_mps2, dt_s))
         }
         _ => unreachable!("SimulatedVehicle::run always keeps model/state kinds in sync"),
     };
@@ -565,6 +621,37 @@ mod tests {
         }
     }
 
+    fn test_two_track_model() -> VehicleModel {
+        VehicleModel::TwoTrack {
+            params: TwoTrackParams {
+                mass_kg: 3.5,
+                yaw_inertia_kgm2: 0.06,
+                lf_m: 0.16,
+                lr_m: 0.16,
+                cg_height_m: 0.05,
+                track_width_m: 0.2,
+                front_b: 2.5,
+                front_c: 1.3,
+                front_d_mu: 1.1,
+                front_e: -0.5,
+                rear_b: 2.5,
+                rear_c: 1.3,
+                rear_d_mu: 1.1,
+                rear_e: -0.5,
+                combined_slip_b: 1.0,
+                combined_slip_c: 1.0,
+                front_drive_fraction: 0.5,
+            },
+            limits: ActuatorLimits {
+                max_steering_angle_rad: 0.4,
+                max_steering_rate_rad_s: 4.0,
+                max_speed_mps: 8.0,
+                max_accel_mps2: 4.0,
+                max_decel_mps2: 8.0,
+            },
+        }
+    }
+
     #[test]
     fn default_limits_validate() {
         assert!(matches!(test_model(), VehicleModel::Bicycle { limits, .. } if limits.validate().is_ok()));
@@ -577,6 +664,7 @@ mod tests {
             VehicleModelKind::DynamicBicycle,
             VehicleModelKind::NonlinearBicycle,
             VehicleModelKind::PacejkaBicycle,
+            VehicleModelKind::TwoTrack,
         ] {
             match default_model(kind) {
                 VehicleModel::Bicycle { params, limits } => {
@@ -595,6 +683,10 @@ mod tests {
                     assert!(params.validate().is_ok());
                     assert!(limits.validate().is_ok());
                 }
+                VehicleModel::TwoTrack { params, limits } => {
+                    assert!(params.validate().is_ok());
+                    assert!(limits.validate().is_ok());
+                }
             }
         }
     }
@@ -605,6 +697,7 @@ mod tests {
         assert_eq!(kind_of(&test_dynamic_model()), VehicleModelKind::DynamicBicycle);
         assert_eq!(kind_of(&test_nonlinear_model()), VehicleModelKind::NonlinearBicycle);
         assert_eq!(kind_of(&test_pacejka_model()), VehicleModelKind::PacejkaBicycle);
+        assert_eq!(kind_of(&test_two_track_model()), VehicleModelKind::TwoTrack);
     }
 
     #[test]
@@ -772,6 +865,41 @@ mod tests {
                 assert_eq!(s.yaw_rate_rad_s, 0.0);
             }
             _ => panic!("expected PacejkaBicycle state"),
+        }
+    }
+
+    #[test]
+    fn advance_dispatches_the_two_track_model_too() {
+        let model = test_two_track_model();
+        let state = VehicleState::TwoTrack(TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        });
+        let (next_state, _) = advance(&model, state, 0.0, 0.0, 5.0, 0.1);
+        match next_state {
+            VehicleState::TwoTrack(s) => assert!(s.vx_mps > 0.0),
+            _ => panic!("expected TwoTrack state"),
+        }
+    }
+
+    #[test]
+    fn carry_over_state_maps_speed_into_the_two_track_models_shared_fields() {
+        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let next = carry_over_state(old, VehicleModelKind::TwoTrack);
+        match next {
+            VehicleState::TwoTrack(s) => {
+                assert_eq!(s.x_m, 1.0);
+                assert_eq!(s.y_m, 2.0);
+                assert_eq!(s.heading_rad, 0.3);
+                assert_eq!(s.vx_mps, 4.0);
+                assert_eq!(s.vy_mps, 0.0);
+                assert_eq!(s.yaw_rate_rad_s, 0.0);
+            }
+            _ => panic!("expected TwoTrack state"),
         }
     }
 }

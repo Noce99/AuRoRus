@@ -6,10 +6,12 @@ known geometry, without a real vehicle or a full physics engine?* It is a
 growing collection of physical models of increasing complexity: a kinematic
 bicycle model, a dynamic model that adds a linear tire model, a further
 model that adds tire saturation/load transfer/combined slip via a
-simplified Pacejka-style curve, and one more that upgrades that curve to the
-full Pacejka Magic Formula - with more expected to join them over time as
-each model's limitations start to matter for a given use case. Which model
-actually drives the simulation at runtime is chosen in
+simplified Pacejka-style curve, one more that upgrades that curve to the
+full Pacejka Magic Formula, and one that goes further still, tracking all
+four wheels individually (a "two-track" model) instead of collapsing each
+axle into one - with more expected to join them over time as each model's
+limitations start to matter for a given use case. Which model actually
+drives the simulation at runtime is chosen in
 [`crate::actuators::simulated_vehicle::VehicleModel`] - see that module's
 doc comment - and selectable live from `web_gui`.
 
@@ -280,7 +282,8 @@ across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
   model below for one that tunes each axle independently.
 - Still a single-track (no left/right) model, so only longitudinal
   (front/rear) load transfer is modeled - there's no lateral load transfer
-  or per-wheel asymmetry, which a full four-wheel model would add.
+  or per-wheel asymmetry. See the two-track model below for one that adds
+  it.
 - The simplified two-parameter Pacejka curve is less general than the full
   Magic Formula (no curvature factor, so it's symmetric about `alpha = 0` in
   a way a real tire curve often isn't) - see the Pacejka bicycle model below
@@ -372,7 +375,8 @@ frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
 ### Limitations
 
 - Same quasi-static (no suspension dynamics), single-track (no left/right),
-  and no-aerodynamic-forces limitations as the nonlinear bicycle model.
+  and no-aerodynamic-forces limitations as the nonlinear bicycle model - see
+  the two-track model below for one that addresses the single-track part.
 - Combined slip is still driven by each axle's *force* usage ratio, not a
   true independently-evolving slip ratio from wheel rotational dynamics -
   there's still no wheelspin or lockup. Modeling that would mean adding
@@ -382,6 +386,148 @@ frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
 - The curvature factor `E` and the combined-slip weighting shape are both
   free-tuned rather than fit to any measured tire data, same caveat as every
   other placeholder parameter in this codebase's vehicle models.
+
+## Two-track (four-wheel) model
+
+Implemented in [`two_track.rs`](two_track.rs). Every model above collapses
+each axle into a single force acting on the vehicle's centerline; this one
+tracks all four wheels individually - their own slip angle, their own
+normal load, and (for the front two) their own steer angle - and sums their
+forces and moments as a rigid body. It reuses the full Pacejka Magic Formula
+from the Pacejka bicycle model above per wheel rather than introducing a new
+tire curve: the change here is purely geometric (wheel positions and force
+summation), which is what actually enables lateral (left-right) load
+transfer and per-wheel asymmetry - the one limitation every model above
+shares.
+
+### State ([`TwoTrackState`](two_track.rs))
+
+Identical fields to [`PacejkaBicycleState`](pacejka_bicycle.rs) - `x_m`,
+`y_m`, `heading_rad`, `vx_mps`, `vy_mps`, `yaw_rate_rad_s`. No new state
+fields are needed: each wheel's slip angle and normal load are derived from
+this same CG-frame state plus geometry every tick, exactly like the
+single-track models already derive `alpha_f`/`alpha_r` without extra state.
+
+### Params ([`TwoTrackParams`](two_track.rs))
+
+- `mass_kg`, `yaw_inertia_kgm2`, `lf_m`, `lr_m`, `cg_height_m` — same meaning
+  as [`PacejkaTireParams`](pacejka_bicycle.rs).
+- `track_width_m` — distance between the left and right wheels, assumed the
+  same front and rear. New; needed for per-wheel slip angles, Ackermann
+  steering, and lateral load transfer.
+- `front_b`, `front_c`, `front_d_mu`, `front_e` and `rear_b`, `rear_c`,
+  `rear_d_mu`, `rear_e` — the same per-axle Magic Formula curve parameters
+  as [`PacejkaTireParams`](pacejka_bicycle.rs), now shared by *both* wheels
+  on that axle (each wheel still gets its own slip angle and normal load, so
+  still produces its own force).
+- `combined_slip_b`, `combined_slip_c` — same meaning as
+  [`PacejkaTireParams`](pacejka_bicycle.rs), applied per wheel.
+- `front_drive_fraction` — front axle's share of the commanded longitudinal
+  force, same meaning as before; within whichever axle(s) are driven, the
+  split is 50/50 left-right (an open-differential assumption - see
+  Limitations). As with the other geometry fields, there is deliberately no
+  `Default`.
+
+### Control inputs
+
+Same as the other four models: `steering_angle_rad` and
+`acceleration_mps2`, supplied externally on every call to `step`.
+
+### Equations
+
+```text
+// 1. Longitudinal-only load transfer, exactly as in the Pacejka model, but
+//    keeping the front/rear axle *totals* (each wheel gets half before any
+//    lateral transfer below):
+Fz_f_total, Fz_r_total = same quasi-static formula as pacejka_bicycle.rs
+
+// 2. Lateral load transfer: a single quasi-static total, using the
+//    centripetal-acceleration proxy ay = vx_mps*yaw_rate_rad_s (the same
+//    "use this tick's known state instead of the not-yet-computed tire
+//    forces" approximation the longitudinal case already makes), split
+//    between axles in proportion to their (longitudinal-transferred) load
+//    share - no separate front/rear roll-stiffness-distribution parameter
+//    (see Limitations):
+ay = vx_mps * yaw_rate_rad_s
+total_lateral_transfer = mass_kg * ay * cg_height_m / track_width_m
+front_share = Fz_f_total / (Fz_f_total + Fz_r_total)
+Fz_fl = max(Fz_f_total/2 - total_lateral_transfer*front_share/2, 0)
+Fz_fr = max(Fz_f_total/2 + total_lateral_transfer*front_share/2, 0)
+Fz_rl = max(Fz_r_total/2 - total_lateral_transfer*(1-front_share)/2, 0)
+Fz_rr = max(Fz_r_total/2 + total_lateral_transfer*(1-front_share)/2, 0)
+// (positive ay shifts load from the "left" (+track_width/2) wheels to the
+// "right" (-track_width/2) wheels - the outside of a positive-yaw_rate turn)
+
+// 3. Ackermann steering: the same steering_angle_rad input other models
+//    treat as one "virtual" front wheel angle becomes two slightly
+//    different physical front wheel angles:
+kappa = tan(steering_angle_rad) / (lf_m + lr_m)      // curvature
+delta_fl = atan((lf_m+lr_m) * kappa / (1 - (track_width_m/2)*kappa))
+delta_fr = atan((lf_m+lr_m) * kappa / (1 + (track_width_m/2)*kappa))
+// (rear wheels are unsteered: delta_rl = delta_rr = 0)
+
+// 4. Per-wheel slip angle, from the rigid-body velocity at each wheel's
+//    position (a_i = lf_m or -lr_m, b_i = +-track_width_m/2):
+vx_wheel_i = vx_mps - yaw_rate_rad_s * b_i
+vy_wheel_i = vy_mps + yaw_rate_rad_s * a_i
+alpha_i    = atan2(vy_wheel_i, vx_wheel_i) - delta_i   // delta_i = 0 for rear wheels
+
+// 5. Per-wheel lateral force: the same full Magic Formula as the Pacejka
+//    model (front wheels use front_b/c/d_mu/e with Fz_fl/Fz_fr, rear wheels
+//    use rear_b/c/d_mu/e with Fz_rl/Fz_rr), each wheel's D scaled by its own
+//    (now laterally-transferred) normal load.
+
+// 6. Longitudinal force: split front/rear by front_drive_fraction, then
+//    50/50 within each driven axle; each wheel clamped to its own grip and
+//    combined-slip-derated exactly as in the Pacejka model, but per wheel.
+
+// 7. Body-frame force/moment summation - the genuinely new part, since a
+//    single-track model has no left-right forces to sum and both front
+//    wheels share one delta:
+Fx_body_i = Fx_wheel_i*cos(delta_i) - Fy_wheel_i*sin(delta_i)
+Fy_body_i = Fx_wheel_i*sin(delta_i) + Fy_wheel_i*cos(delta_i)
+Fx_total  = sum(Fx_body_i)
+Fy_total  = sum(Fy_body_i)
+Mz_total  = sum(a_i*Fy_body_i - b_i*Fx_body_i)   // yaw moment about the CG
+
+dx/dt        = vx_mps*cos(heading_rad) - vy_mps*sin(heading_rad)
+dy/dt        = vx_mps*sin(heading_rad) + vy_mps*cos(heading_rad)
+dheading/dt  = yaw_rate_rad_s
+dvx/dt       = Fx_total/mass_kg + vy_mps*yaw_rate_rad_s
+dvy/dt       = Fy_total/mass_kg - vx_mps*yaw_rate_rad_s
+dyaw_rate/dt = Mz_total/yaw_inertia_kgm2
+```
+
+The `Mz_total` term in step 7 is a real effect no single-track model can
+produce: if the two wheels on an axle end up delivering different
+longitudinal force (e.g. one is combined-slip-derated more than the other
+because lateral transfer left it with less grip), that asymmetry produces
+its own yaw moment via the `track_width_m/2` lever arm - the same mechanism
+behind a torque-vectoring differential, even though this model only assumes
+a simple open-differential 50/50 split.
+
+Integrated with the same RK4 scheme as the other four models (control
+frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
+
+### Limitations
+
+- Same quasi-static (no suspension dynamics) caveat as the other two
+  nonlinear models, now for both longitudinal *and* lateral transfer.
+- Lateral transfer is split between axles by load share, not by an explicit
+  front/rear roll-stiffness distribution (an anti-roll-bar setup) - a real
+  vehicle's front/rear lateral transfer split can be tuned independently of
+  that.
+- The lateral acceleration used for load transfer is the centripetal proxy
+  `vx*yaw_rate_rad_s`, not the true `dvy/dt + vx*yaw_rate_rad_s` - avoids a
+  circular dependency (this tick's not-yet-computed tire forces feeding
+  back into the load that determines them), same approximation spirit as
+  the longitudinal case already makes.
+- Still no wheel-slip-ratio/rotational dynamics (same scope boundary as the
+  Pacejka model) - the 50/50 open-differential assumption has no way to
+  represent a locking or torque-vectoring differential beyond the passive
+  yaw moment described above.
+- Track width is a single value shared front and rear - real vehicles
+  sometimes differ slightly.
 
 ## Contract with the simulation environment
 
