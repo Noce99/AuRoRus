@@ -3,10 +3,13 @@
 //! functions that integrate it forward by one control input and one time
 //! step, for a simulation environment (not implemented here) to call once
 //! per tick. Starts with [`bicycle`], a kinematic bicycle model with slip
-//! angle, [`dynamic_bicycle`], a dynamic model with a linear tire model, and
+//! angle, [`dynamic_bicycle`], a dynamic model with a linear tire model,
 //! [`nonlinear_bicycle`], which adds tire saturation, load transfer, and
-//! combined slip on top of that; more models are expected to join them over
-//! time. See `src/environment/simulator/vehicle/README.md` for the modeling
+//! combined slip on top of that via a simplified Pacejka-style curve, and
+//! [`pacejka_bicycle`], which upgrades that curve to the full Pacejka Magic
+//! Formula with independently-tuned front/rear axles; more models are
+//! expected to join them over time. See
+//! `src/environment/simulator/vehicle/README.md` for the modeling
 //! background and equations.
 //!
 //! Not a trait: dispatch across the (small, closed, compile-time-known) set
@@ -21,7 +24,9 @@
 mod bicycle;
 mod dynamic_bicycle;
 mod nonlinear_bicycle;
+mod pacejka_bicycle;
 
 pub use bicycle::{BicycleParams, BicycleState, step};
 pub use dynamic_bicycle::{DynamicParams, DynamicState, step as dynamic_step};
 pub use nonlinear_bicycle::{NonlinearBicycleState, NonlinearTireParams, step as nonlinear_step};
+pub use pacejka_bicycle::{PacejkaBicycleState, PacejkaTireParams, step as pacejka_step};

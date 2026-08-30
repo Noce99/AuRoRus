@@ -4,9 +4,10 @@ This module exists to answer a concrete question: *how do we advance a
 simulated vehicle's state forward in time, given basic control inputs and
 known geometry, without a real vehicle or a full physics engine?* It is a
 growing collection of physical models of increasing complexity: a kinematic
-bicycle model, a dynamic model that adds a linear tire model, and a further
+bicycle model, a dynamic model that adds a linear tire model, a further
 model that adds tire saturation/load transfer/combined slip via a
-simplified Pacejka-style curve, with more expected to join them over time as
+simplified Pacejka-style curve, and one more that upgrades that curve to the
+full Pacejka Magic Formula - with more expected to join them over time as
 each model's limitations start to matter for a given use case. Which model
 actually drives the simulation at runtime is chosen in
 [`crate::actuators::simulated_vehicle::VehicleModel`] - see that module's
@@ -275,15 +276,112 @@ across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
   chassis has.
 - Front and rear tires share one `tire_mu`/`pacejka_b`/`pacejka_c` - real
   vehicles often run different compounds, or the same tire simply behaves
-  differently front vs rear under different loads.
+  differently front vs rear under different loads. See the Pacejka bicycle
+  model below for one that tunes each axle independently.
 - Still a single-track (no left/right) model, so only longitudinal
   (front/rear) load transfer is modeled - there's no lateral load transfer
   or per-wheel asymmetry, which a full four-wheel model would add.
 - The simplified two-parameter Pacejka curve is less general than the full
   Magic Formula (no curvature factor, so it's symmetric about `alpha = 0` in
-  a way a real tire curve often isn't) - a deliberate scope trade-off given
-  there's no measured tire data available to fit a fuller model against
-  anyway.
+  a way a real tire curve often isn't) - see the Pacejka bicycle model below
+  for one that adds it.
+
+## Pacejka bicycle model (full Magic Formula)
+
+Implemented in [`pacejka_bicycle.rs`](pacejka_bicycle.rs). Builds on the
+nonlinear bicycle model above, replacing its simplified tire curve with the
+full ("similarity") Pacejka Magic Formula, tuned independently per axle, and
+replacing its friction-ellipse combined slip with Pacejka's own weighting-
+function shape. Longitudinal force/load-transfer handling is otherwise
+unchanged from the nonlinear model.
+
+### State ([`PacejkaBicycleState`](pacejka_bicycle.rs))
+
+Identical fields to [`NonlinearBicycleState`](nonlinear_bicycle.rs) - `x_m`,
+`y_m`, `heading_rad`, `vx_mps`, `vy_mps`, `yaw_rate_rad_s` - kept as its own
+type per this module's convention that every model owns its full state
+independently.
+
+### Params ([`PacejkaTireParams`](pacejka_bicycle.rs))
+
+- `mass_kg`, `yaw_inertia_kgm2`, `lf_m`, `lr_m`, `cg_height_m` — same meaning
+  and role (quasi-static load transfer) as
+  [`NonlinearTireParams`](nonlinear_bicycle.rs).
+- `front_b`, `front_c`, `front_d_mu`, `front_e` and `rear_b`, `rear_c`,
+  `rear_d_mu`, `rear_e` — the front/rear Magic Formula stiffness, shape,
+  peak-friction, and curvature factors. `*_d_mu` plays the same role as the
+  nonlinear model's single `tire_mu`, but tunable per axle; `*_e` is new -
+  the nonlinear model's curve is what you get at `*_e = 0.0`.
+- `combined_slip_b`, `combined_slip_c` — stiffness and shape factors of the
+  combined-slip weighting-function curve (see Equations), shared front and
+  rear - the same simplification choice the nonlinear model already made for
+  its own shared parameters.
+- `front_drive_fraction` — same meaning as
+  [`NonlinearTireParams`](nonlinear_bicycle.rs)'s field. As with the other
+  geometry fields, there is deliberately no `Default`.
+
+### Control inputs
+
+Same as the other three models: `steering_angle_rad` and
+`acceleration_mps2`, supplied externally on every call to `step`.
+
+### Equations
+
+```text
+// Load transfer and slip angles - identical to the nonlinear bicycle model.
+Fz_f, Fz_r = quasi-static front/rear normal load from mass_kg, cg_height_m,
+             lf_m, lr_m, and acceleration_mps2 (clamped to >= 0)
+alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
+alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+
+// Full ("similarity") Magic Formula per axle - D is the axle's peak force,
+// scaled by its current normal load; E adds curvature the simplified curve
+// (front_e = rear_e = 0 reduces exactly to it) doesn't have.
+Dx_f = front_d_mu * Fz_f
+Dx_r = rear_d_mu  * Fz_r
+Fyf_raw = -Dx_f * sin(front_c * atan(front_b*alpha_f - front_e*(front_b*alpha_f - atan(front_b*alpha_f))))
+Fyr_raw = -Dx_r * sin(rear_c  * atan(rear_b*alpha_r  - rear_e *(rear_b*alpha_r  - atan(rear_b*alpha_r))))
+
+// Longitudinal force, split and clamped exactly as in the nonlinear model.
+Fx_total = mass_kg * acceleration_mps2
+Fx_f = clamp(front_drive_fraction * Fx_total, -Dx_f, Dx_f)
+Fx_r = clamp((1-front_drive_fraction) * Fx_total, -Dx_r, Dx_r)
+ax_achieved = (Fx_f + Fx_r) / mass_kg
+
+// Combined slip: Pacejka's own weighting-function shape in place of the
+// nonlinear model's friction ellipse, driven by each axle's force-usage
+// ratio (not a true slip ratio - see Limitations).
+Gyk_f = cos(combined_slip_c * atan(combined_slip_b * (Fx_f / Dx_f)))
+Gyk_r = cos(combined_slip_c * atan(combined_slip_b * (Fx_r / Dx_r)))
+Fyf = Fyf_raw * Gyk_f
+Fyr = Fyr_raw * Gyk_r
+
+dx/dt        = vx_mps*cos(heading_rad) - vy_mps*sin(heading_rad)
+dy/dt        = vx_mps*sin(heading_rad) + vy_mps*cos(heading_rad)
+dheading/dt  = yaw_rate_rad_s
+dvx/dt       = ax_achieved + vy_mps*yaw_rate_rad_s
+dvy/dt       = (Fyf*cos(steering_angle_rad) + Fyr)/mass_kg - vx_mps*yaw_rate_rad_s
+dyaw_rate/dt = (lf_m*Fyf*cos(steering_angle_rad) - lr_m*Fyr)/yaw_inertia_kgm2
+```
+
+An axle with `Dx <= 0` (lifted, zero load) gets `Fx = 0` and `Fy = 0`.
+
+Integrated with the same RK4 scheme as the other three models (control
+frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
+
+### Limitations
+
+- Same quasi-static (no suspension dynamics), single-track (no left/right),
+  and no-aerodynamic-forces limitations as the nonlinear bicycle model.
+- Combined slip is still driven by each axle's *force* usage ratio, not a
+  true independently-evolving slip ratio from wheel rotational dynamics -
+  there's still no wheelspin or lockup. Modeling that would mean adding
+  per-wheel state (angular velocity), wheel inertia, and a torque-tracking
+  control loop - a substantially bigger model, and a deliberate scope
+  boundary for this one.
+- The curvature factor `E` and the combined-slip weighting shape are both
+  free-tuned rather than fit to any measured tire data, same caveat as every
+  other placeholder parameter in this codebase's vehicle models.
 
 ## Contract with the simulation environment
 

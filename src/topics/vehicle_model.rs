@@ -28,6 +28,10 @@ pub enum VehicleModelKind {
     /// combined slip - see
     /// [`crate::environment::simulator::vehicle::nonlinear_bicycle`].
     NonlinearBicycle,
+    /// A dynamic bicycle model using the full Pacejka Magic Formula for
+    /// lateral tire force - see
+    /// [`crate::environment::simulator::vehicle::pacejka_bicycle`].
+    PacejkaBicycle,
 }
 
 /// The vehicle model kind a driver of the selection (e.g. `web_gui`)

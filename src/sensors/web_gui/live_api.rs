@@ -120,6 +120,11 @@ const VEHICLE_MODEL_OPTIONS: &[(VehicleModelKind, &str, &str)] = &[
         "nonlinear_bicycle",
         "Nonlinear bicycle (tire saturation + load transfer)",
     ),
+    (
+        VehicleModelKind::PacejkaBicycle,
+        "pacejka_bicycle",
+        "Pacejka bicycle (full Magic Formula)",
+    ),
 ];
 
 /// The API string for `kind` - the inverse of [`parse_kind`].
