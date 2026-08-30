@@ -7,7 +7,8 @@
 //! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`].
 
 use crate::environment::simulator::vehicle::{
-    BicycleParams, BicycleState, DynamicParams, DynamicState, dynamic_step, step as bicycle_step,
+    BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState, NonlinearTireParams,
+    dynamic_step, nonlinear_step, step as bicycle_step,
 };
 use crate::topics::{
     HUMAN_VESC_COMMAND_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
@@ -89,6 +90,13 @@ pub enum VehicleModel {
         params: DynamicParams,
         limits: ActuatorLimits,
     },
+    /// A dynamic bicycle model with tire saturation, load transfer, and
+    /// combined slip - see
+    /// [`crate::environment::simulator::vehicle::nonlinear_bicycle`].
+    NonlinearBicycle {
+        params: NonlinearTireParams,
+        limits: ActuatorLimits,
+    },
 }
 
 /// The state a [`VehicleModel`] is advancing, in the same variant as the
@@ -98,6 +106,7 @@ pub enum VehicleModel {
 pub enum VehicleState {
     Bicycle(BicycleState),
     DynamicBicycle(DynamicState),
+    NonlinearBicycle(NonlinearBicycleState),
 }
 
 impl VehicleState {
@@ -107,6 +116,7 @@ impl VehicleState {
         match self {
             Self::Bicycle(s) => s.x_m,
             Self::DynamicBicycle(s) => s.x_m,
+            Self::NonlinearBicycle(s) => s.x_m,
         }
     }
 
@@ -116,6 +126,7 @@ impl VehicleState {
         match self {
             Self::Bicycle(s) => s.y_m,
             Self::DynamicBicycle(s) => s.y_m,
+            Self::NonlinearBicycle(s) => s.y_m,
         }
     }
 
@@ -124,17 +135,19 @@ impl VehicleState {
         match self {
             Self::Bicycle(s) => s.heading_rad,
             Self::DynamicBicycle(s) => s.heading_rad,
+            Self::NonlinearBicycle(s) => s.heading_rad,
         }
     }
 
     /// The vehicle's ground speed, in meters/second - a single number for
     /// the kinematic model, or the magnitude of the body-frame velocity for
-    /// a model (like [`DynamicState`]) that tracks longitudinal and lateral
-    /// velocity separately.
+    /// a model (like [`DynamicState`]/[`NonlinearBicycleState`]) that tracks
+    /// longitudinal and lateral velocity separately.
     fn speed_mps(&self) -> f64 {
         match self {
             Self::Bicycle(s) => s.speed_mps,
             Self::DynamicBicycle(s) => s.vx_mps.hypot(s.vy_mps),
+            Self::NonlinearBicycle(s) => s.vx_mps.hypot(s.vy_mps),
         }
     }
 }
@@ -145,6 +158,7 @@ fn limits_of(model: &VehicleModel) -> ActuatorLimits {
     match model {
         VehicleModel::Bicycle { limits, .. } => *limits,
         VehicleModel::DynamicBicycle { limits, .. } => *limits,
+        VehicleModel::NonlinearBicycle { limits, .. } => *limits,
     }
 }
 
@@ -153,6 +167,7 @@ fn kind_of(model: &VehicleModel) -> VehicleModelKind {
     match model {
         VehicleModel::Bicycle { .. } => VehicleModelKind::Bicycle,
         VehicleModel::DynamicBicycle { .. } => VehicleModelKind::DynamicBicycle,
+        VehicleModel::NonlinearBicycle { .. } => VehicleModelKind::NonlinearBicycle,
     }
 }
 
@@ -188,6 +203,20 @@ pub fn default_model(kind: VehicleModelKind) -> VehicleModel {
             },
             limits,
         },
+        VehicleModelKind::NonlinearBicycle => VehicleModel::NonlinearBicycle {
+            params: NonlinearTireParams {
+                mass_kg: 3.5,
+                yaw_inertia_kgm2: 0.06,
+                lf_m: 0.16,
+                lr_m: 0.16,
+                cg_height_m: 0.05,
+                tire_mu: 1.1,
+                pacejka_b: 2.5,
+                pacejka_c: 1.3,
+                front_drive_fraction: 0.5,
+            },
+            limits,
+        },
     }
 }
 
@@ -199,6 +228,14 @@ fn default_state(kind: VehicleModelKind) -> VehicleState {
             VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 })
         }
         VehicleModelKind::DynamicBicycle => VehicleState::DynamicBicycle(DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        }),
+        VehicleModelKind::NonlinearBicycle => VehicleState::NonlinearBicycle(NonlinearBicycleState {
             x_m: 0.0,
             y_m: 0.0,
             heading_rad: 0.0,
@@ -219,6 +256,14 @@ fn carry_over_state(old: VehicleState, new_kind: VehicleModelKind) -> VehicleSta
     match new_kind {
         VehicleModelKind::Bicycle => VehicleState::Bicycle(BicycleState { x_m, y_m, heading_rad, speed_mps }),
         VehicleModelKind::DynamicBicycle => VehicleState::DynamicBicycle(DynamicState {
+            x_m,
+            y_m,
+            heading_rad,
+            vx_mps: speed_mps,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        }),
+        VehicleModelKind::NonlinearBicycle => VehicleState::NonlinearBicycle(NonlinearBicycleState {
             x_m,
             y_m,
             heading_rad,
@@ -266,6 +311,9 @@ fn advance(
         }
         (VehicleModel::DynamicBicycle { params, .. }, VehicleState::DynamicBicycle(s)) => {
             VehicleState::DynamicBicycle(dynamic_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+        }
+        (VehicleModel::NonlinearBicycle { params, .. }, VehicleState::NonlinearBicycle(s)) => {
+            VehicleState::NonlinearBicycle(nonlinear_step(s, *params, next_steering_rad, accel_mps2, dt_s))
         }
         _ => unreachable!("SimulatedVehicle::run always keeps model/state kinds in sync"),
     };
@@ -409,6 +457,29 @@ mod tests {
         }
     }
 
+    fn test_nonlinear_model() -> VehicleModel {
+        VehicleModel::NonlinearBicycle {
+            params: NonlinearTireParams {
+                mass_kg: 3.5,
+                yaw_inertia_kgm2: 0.06,
+                lf_m: 0.16,
+                lr_m: 0.16,
+                cg_height_m: 0.05,
+                tire_mu: 1.1,
+                pacejka_b: 2.5,
+                pacejka_c: 1.3,
+                front_drive_fraction: 0.5,
+            },
+            limits: ActuatorLimits {
+                max_steering_angle_rad: 0.4,
+                max_steering_rate_rad_s: 4.0,
+                max_speed_mps: 8.0,
+                max_accel_mps2: 4.0,
+                max_decel_mps2: 8.0,
+            },
+        }
+    }
+
     #[test]
     fn default_limits_validate() {
         assert!(matches!(test_model(), VehicleModel::Bicycle { limits, .. } if limits.validate().is_ok()));
@@ -416,13 +487,17 @@ mod tests {
 
     #[test]
     fn default_model_validates_for_every_kind() {
-        for kind in [VehicleModelKind::Bicycle, VehicleModelKind::DynamicBicycle] {
+        for kind in [VehicleModelKind::Bicycle, VehicleModelKind::DynamicBicycle, VehicleModelKind::NonlinearBicycle] {
             match default_model(kind) {
                 VehicleModel::Bicycle { params, limits } => {
                     assert!(params.validate().is_ok());
                     assert!(limits.validate().is_ok());
                 }
                 VehicleModel::DynamicBicycle { params, limits } => {
+                    assert!(params.validate().is_ok());
+                    assert!(limits.validate().is_ok());
+                }
+                VehicleModel::NonlinearBicycle { params, limits } => {
                     assert!(params.validate().is_ok());
                     assert!(limits.validate().is_ok());
                 }
@@ -434,6 +509,7 @@ mod tests {
     fn kind_of_matches_the_variant() {
         assert_eq!(kind_of(&test_model()), VehicleModelKind::Bicycle);
         assert_eq!(kind_of(&test_dynamic_model()), VehicleModelKind::DynamicBicycle);
+        assert_eq!(kind_of(&test_nonlinear_model()), VehicleModelKind::NonlinearBicycle);
     }
 
     #[test]
@@ -531,6 +607,41 @@ mod tests {
         match next_state {
             VehicleState::DynamicBicycle(s) => assert!(s.vx_mps > 0.0),
             _ => panic!("expected DynamicBicycle state"),
+        }
+    }
+
+    #[test]
+    fn advance_dispatches_the_nonlinear_bicycle_model_too() {
+        let model = test_nonlinear_model();
+        let state = VehicleState::NonlinearBicycle(NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        });
+        let (next_state, _) = advance(&model, state, 0.0, 0.0, 5.0, 0.1);
+        match next_state {
+            VehicleState::NonlinearBicycle(s) => assert!(s.vx_mps > 0.0),
+            _ => panic!("expected NonlinearBicycle state"),
+        }
+    }
+
+    #[test]
+    fn carry_over_state_maps_speed_into_the_nonlinear_models_shared_fields() {
+        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let next = carry_over_state(old, VehicleModelKind::NonlinearBicycle);
+        match next {
+            VehicleState::NonlinearBicycle(s) => {
+                assert_eq!(s.x_m, 1.0);
+                assert_eq!(s.y_m, 2.0);
+                assert_eq!(s.heading_rad, 0.3);
+                assert_eq!(s.vx_mps, 4.0);
+                assert_eq!(s.vy_mps, 0.0);
+                assert_eq!(s.yaw_rate_rad_s, 0.0);
+            }
+            _ => panic!("expected NonlinearBicycle state"),
         }
     }
 }

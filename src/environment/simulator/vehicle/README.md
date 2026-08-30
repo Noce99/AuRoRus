@@ -4,11 +4,13 @@ This module exists to answer a concrete question: *how do we advance a
 simulated vehicle's state forward in time, given basic control inputs and
 known geometry, without a real vehicle or a full physics engine?* It is a
 growing collection of physical models of increasing complexity: a kinematic
-bicycle model, and a dynamic model that adds lateral tire forces, with more
-expected to join them over time as each model's limitations start to matter
-for a given use case. Which model actually drives the simulation at runtime
-is chosen in [`crate::actuators::simulated_vehicle::VehicleModel`] - see that
-module's doc comment - and selectable live from `web_gui`.
+bicycle model, a dynamic model that adds a linear tire model, and a further
+model that adds tire saturation/load transfer/combined slip via a
+simplified Pacejka-style curve, with more expected to join them over time as
+each model's limitations start to matter for a given use case. Which model
+actually drives the simulation at runtime is chosen in
+[`crate::actuators::simulated_vehicle::VehicleModel`] - see that module's
+doc comment - and selectable live from `web_gui`.
 
 Every model here follows the same shape: a plain, `Copy` state struct, a
 params struct describing the vehicle's fixed geometry, and a pure `step`
@@ -168,8 +170,120 @@ across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
   the kinematic model (which has no such singularity) would be a natural
   future improvement, not implemented here.
 - No load transfer, no combined longitudinal/lateral tire force limit (a
-  "friction circle"), and no aerodynamic or rolling-resistance forces - all
-  candidates for a further, even more complex model down the line.
+  "friction circle"), and no aerodynamic or rolling-resistance forces - see
+  the nonlinear bicycle model below for one that adds the first two.
+
+## Nonlinear bicycle model (tire saturation, load transfer, combined slip)
+
+Implemented in [`nonlinear_bicycle.rs`](nonlinear_bicycle.rs). Builds on the
+dynamic bicycle model above, replacing its linear tire model with a
+saturating, load-dependent one, and coupling longitudinal and lateral force
+through a shared per-axle grip budget.
+
+### State ([`NonlinearBicycleState`](nonlinear_bicycle.rs))
+
+Identical fields to [`DynamicState`](dynamic_bicycle.rs) - `x_m`, `y_m`,
+`heading_rad`, `vx_mps`, `vy_mps`, `yaw_rate_rad_s` - kept as its own type
+rather than reused, matching this module's convention that every model owns
+its full state independently.
+
+### Params ([`NonlinearTireParams`](nonlinear_bicycle.rs))
+
+- `mass_kg`, `yaw_inertia_kgm2`, `lf_m`, `lr_m` — same meaning as
+  [`DynamicParams`](dynamic_bicycle.rs).
+- `cg_height_m` — height of the CG above the ground, in meters. Drives how
+  much longitudinal acceleration shifts load between the front and rear
+  axles.
+- `tire_mu` — peak tire/road friction coefficient, shared front and rear (a
+  deliberate simplification - see Limitations).
+- `pacejka_b`, `pacejka_c` — stiffness and shape factors of the simplified
+  Pacejka lateral force curve (see Equations), also shared front and rear.
+- `front_drive_fraction` — fraction (`0.0..=1.0`) of the commanded
+  longitudinal force delivered through the front axle; the rest goes to the
+  rear. `0.0` is pure rear-wheel drive, `1.0` pure front-wheel drive,
+  anything in between an all-wheel-drive split. As with the other geometry
+  fields, there is deliberately no `Default`.
+
+### Control inputs
+
+Same as the other two models: `steering_angle_rad` and `acceleration_mps2`,
+supplied externally on every call to `step`.
+
+### Equations
+
+```text
+// Quasi-static longitudinal load transfer (front/rear only - this is still
+// a single-track model, so there is no left/right split to transfer across).
+static_fz_f = mass_kg*g*lr_m/(lf_m+lr_m)
+static_fz_r = mass_kg*g*lf_m/(lf_m+lr_m)
+transfer    = mass_kg*acceleration_mps2*cg_height_m/(lf_m+lr_m)
+Fz_f = max(static_fz_f - transfer, 0)   // clamped: load can't go negative
+Fz_r = max(static_fz_r + transfer, 0)
+
+// Slip angles - same as the dynamic bicycle model.
+alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
+alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+
+// Simplified-Pacejka lateral force: saturating and load-dependent, instead
+// of growing without bound like the linear tire model's Fy = -c*alpha.
+Fyf_raw = -tire_mu*Fz_f * sin(pacejka_c * atan(pacejka_b * alpha_f))
+Fyr_raw = -tire_mu*Fz_r * sin(pacejka_c * atan(pacejka_b * alpha_r))
+
+// Commanded longitudinal force, split by front_drive_fraction, each axle
+// clamped to what its current normal load can support, then a friction
+// ellipse derates that axle's lateral force by how much of its longitudinal
+// budget is in use. An axle with zero load has zero grip in any direction.
+Fx_total = mass_kg * acceleration_mps2
+Fx_f = clamp(front_drive_fraction * Fx_total, -tire_mu*Fz_f, tire_mu*Fz_f)
+Fx_r = clamp((1-front_drive_fraction) * Fx_total, -tire_mu*Fz_r, tire_mu*Fz_r)
+remaining_f = sqrt(max(1 - (Fx_f/(tire_mu*Fz_f))^2, 0))
+remaining_r = sqrt(max(1 - (Fx_r/(tire_mu*Fz_r))^2, 0))
+Fyf = Fyf_raw * remaining_f
+Fyr = Fyr_raw * remaining_r
+ax_achieved = (Fx_f + Fx_r) / mass_kg
+
+dx/dt        = vx_mps*cos(heading_rad) - vy_mps*sin(heading_rad)
+dy/dt        = vx_mps*sin(heading_rad) + vy_mps*cos(heading_rad)
+dheading/dt  = yaw_rate_rad_s
+dvx/dt       = ax_achieved + vy_mps*yaw_rate_rad_s
+dvy/dt       = (Fyf*cos(steering_angle_rad) + Fyr)/mass_kg - vx_mps*yaw_rate_rad_s
+dyaw_rate/dt = (lf_m*Fyf*cos(steering_angle_rad) - lr_m*Fyr)/yaw_inertia_kgm2
+```
+
+`sin(C*atan(B*alpha))` is the simplified Pacejka curve: the same smooth,
+naturally-bounded family as the industry-standard "Magic Formula" tire
+model, but with only two shape parameters (`B`, `C`) rather than the full
+4-6-coefficient version - it's linear near `alpha = 0` (initial slope
+`B*C`) and saturates toward `±1` (so lateral force saturates toward
+`±tire_mu*Fz`) as `alpha` grows, with no singularity for any input.
+
+The friction-ellipse step (`remaining_f`/`remaining_r`) is what makes this a
+*combined*-slip model: using more of an axle's grip for acceleration or
+braking leaves correspondingly less available for cornering, and vice
+versa - the effect that produces understeer under power or a slide under
+heavy braking, which the dynamic bicycle model's fully decoupled
+longitudinal/lateral forces can't reproduce.
+
+Integrated with the same RK4 scheme as the other two models (control frozen
+across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
+
+### Limitations
+
+- Load transfer is quasi-static (algebraic in the current tick's
+  acceleration) - there's no suspension mass/damping dynamics, so it
+  responds instantly rather than with the roll/pitch transient a real
+  chassis has.
+- Front and rear tires share one `tire_mu`/`pacejka_b`/`pacejka_c` - real
+  vehicles often run different compounds, or the same tire simply behaves
+  differently front vs rear under different loads.
+- Still a single-track (no left/right) model, so only longitudinal
+  (front/rear) load transfer is modeled - there's no lateral load transfer
+  or per-wheel asymmetry, which a full four-wheel model would add.
+- The simplified two-parameter Pacejka curve is less general than the full
+  Magic Formula (no curvature factor, so it's symmetric about `alpha = 0` in
+  a way a real tire curve often isn't) - a deliberate scope trade-off given
+  there's no measured tire data available to fit a fuller model against
+  anyway.
 
 ## Contract with the simulation environment
 

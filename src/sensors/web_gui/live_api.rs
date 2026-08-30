@@ -115,6 +115,11 @@ struct VehicleModelOption {
 const VEHICLE_MODEL_OPTIONS: &[(VehicleModelKind, &str, &str)] = &[
     (VehicleModelKind::Bicycle, "bicycle", "Kinematic bicycle"),
     (VehicleModelKind::DynamicBicycle, "dynamic_bicycle", "Dynamic bicycle (tire forces)"),
+    (
+        VehicleModelKind::NonlinearBicycle,
+        "nonlinear_bicycle",
+        "Nonlinear bicycle (tire saturation + load transfer)",
+    ),
 ];
 
 /// The API string for `kind` - the inverse of [`parse_kind`].

@@ -3,9 +3,10 @@
 //! functions that integrate it forward by one control input and one time
 //! step, for a simulation environment (not implemented here) to call once
 //! per tick. Starts with [`bicycle`], a kinematic bicycle model with slip
-//! angle, and [`dynamic_bicycle`], a dynamic model with lateral tire forces;
-//! more models are expected to join them over time. See
-//! `src/environment/simulator/vehicle/README.md` for the modeling
+//! angle, [`dynamic_bicycle`], a dynamic model with a linear tire model, and
+//! [`nonlinear_bicycle`], which adds tire saturation, load transfer, and
+//! combined slip on top of that; more models are expected to join them over
+//! time. See `src/environment/simulator/vehicle/README.md` for the modeling
 //! background and equations.
 //!
 //! Not a trait: dispatch across the (small, closed, compile-time-known) set
@@ -19,6 +20,8 @@
 
 mod bicycle;
 mod dynamic_bicycle;
+mod nonlinear_bicycle;
 
 pub use bicycle::{BicycleParams, BicycleState, step};
 pub use dynamic_bicycle::{DynamicParams, DynamicState, step as dynamic_step};
+pub use nonlinear_bicycle::{NonlinearBicycleState, NonlinearTireParams, step as nonlinear_step};

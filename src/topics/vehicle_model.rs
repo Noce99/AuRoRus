@@ -24,6 +24,10 @@ pub enum VehicleModelKind {
     /// A dynamic bicycle model with lateral tire forces - see
     /// [`crate::environment::simulator::vehicle::dynamic_bicycle`].
     DynamicBicycle,
+    /// A dynamic bicycle model with tire saturation, load transfer, and
+    /// combined slip - see
+    /// [`crate::environment::simulator::vehicle::nonlinear_bicycle`].
+    NonlinearBicycle,
 }
 
 /// The vehicle model kind a driver of the selection (e.g. `web_gui`)
