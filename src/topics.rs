@@ -4,10 +4,15 @@
 
 mod lidar_scan;
 mod map;
+mod vehicle_model;
 mod vehicle_status;
 mod vesc_command;
 
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
+pub use vehicle_model::{
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection,
+    VehicleModelStatus,
+};
 pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
 pub use vesc_command::{HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME, VescCommand};

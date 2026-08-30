@@ -1,13 +1,15 @@
 //! The live, topic-backed API: the currently selected map's identity and
-//! pixels (from the `map` topic), the vehicle's live status, and the two
-//! write endpoints a driver uses to steer it (`map_selection`,
-//! `human_vesc_command`) - as opposed to [`super::maps_api`], which
-//! lists/generates map folders on disk.
+//! pixels (from the `map` topic), the vehicle's live status and model, and
+//! the write endpoints a driver uses to steer it and pick its model
+//! (`map_selection`, `human_vesc_command`, `vehicle_model_selection`) - as
+//! opposed to [`super::maps_api`], which lists/generates map folders on
+//! disk.
 
 use super::maps_api::{bad_request, json_response, safe_map_folder};
 use crate::topics::{
     HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleStatus, VescCommand,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::Captain;
 use std::path::Path;
@@ -98,6 +100,82 @@ pub fn human_vesc_command(request: &mut Request, captain: &Captain, writer_id: u
         .topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME)
         .write(writer_id, VescCommand::new(body.servo_position_rad, body.speed_mps))
         .expect("lost writer authorization for the human_vesc_command topic");
+    json_response(&(), 200)
+}
+
+/// One selectable vehicle model kind, as listed by [`vehicle_models`].
+#[derive(serde::Serialize)]
+struct VehicleModelOption {
+    kind: &'static str,
+    label: &'static str,
+}
+
+/// Every [`VehicleModelKind`] paired with its API string (see [`kind_str`])
+/// and a human-readable label, in the order they should appear in a picker.
+const VEHICLE_MODEL_OPTIONS: &[(VehicleModelKind, &str, &str)] = &[
+    (VehicleModelKind::Bicycle, "bicycle", "Kinematic bicycle"),
+    (VehicleModelKind::DynamicBicycle, "dynamic_bicycle", "Dynamic bicycle (tire forces)"),
+];
+
+/// The API string for `kind` - the inverse of [`parse_kind`].
+fn kind_str(kind: VehicleModelKind) -> &'static str {
+    VEHICLE_MODEL_OPTIONS
+        .iter()
+        .find(|(k, ..)| *k == kind)
+        .map(|(_, s, _)| *s)
+        .expect("VEHICLE_MODEL_OPTIONS lists every VehicleModelKind")
+}
+
+/// Parses an API string (as sent to [`select_vehicle_model`]) into a
+/// [`VehicleModelKind`], or `None` if it names no known model.
+fn parse_kind(s: &str) -> Option<VehicleModelKind> {
+    VEHICLE_MODEL_OPTIONS.iter().find(|(_, k, _)| *k == s).map(|(kind, ..)| *kind)
+}
+
+/// `GET /api/vehicle_models` - every selectable vehicle model kind, for a
+/// picker in the UI.
+pub fn vehicle_models() -> ResponseBox {
+    let options: Vec<VehicleModelOption> = VEHICLE_MODEL_OPTIONS
+        .iter()
+        .map(|(_, kind, label)| VehicleModelOption { kind, label })
+        .collect();
+    json_response(&options, 200)
+}
+
+#[derive(serde::Serialize)]
+struct LiveVehicleModel {
+    kind: &'static str,
+}
+
+/// `GET /api/vehicle_model` - the vehicle model kind currently running, read
+/// from the `vehicle_model_status` topic.
+pub fn vehicle_model(captain: &Captain) -> ResponseBox {
+    let status = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME).read();
+    json_response(&LiveVehicleModel { kind: kind_str(status.kind) }, 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SelectVehicleModelBody {
+    kind: String,
+}
+
+/// `POST /api/vehicle_model_selection` - body `{"kind": "..."}` - writes the
+/// wanted vehicle model kind to `vehicle_model_selection`, for
+/// [`crate::actuators::SimulatedVehicle`] to pick up.
+pub fn select_vehicle_model(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+    let body: SelectVehicleModelBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+
+    let Some(kind) = parse_kind(&body.kind) else {
+        return bad_request(&format!("unknown vehicle model kind: {:?}", body.kind));
+    };
+
+    captain
+        .topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME)
+        .write(writer_id, VehicleModelSelection { kind })
+        .expect("lost writer authorization for the vehicle_model_selection topic");
     json_response(&(), 200)
 }
 

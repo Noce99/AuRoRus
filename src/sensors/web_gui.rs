@@ -1,10 +1,12 @@
 //! [`WebGui`]: an [`Executor`] that serves a local web UI for browsing and
-//! generating maps, and for driving the vehicle - WASD control, live map
-//! and vehicle status - on [`BIND_ADDR`]. Claims the writer slot for
-//! `human_vesc_command` and `map_selection` (see [`live_api`]); reads
-//! `map` and `vehicle_status`, which some other executor in the same
-//! [`crate::Runner`] (e.g. [`crate::sensors::MapServer`],
-//! [`crate::actuators::SimulatedVehicle`]) is expected to be writing.
+//! generating maps, for driving the vehicle - WASD control, live map and
+//! vehicle status - and for picking which vehicle physics model is running,
+//! on [`BIND_ADDR`]. Claims the writer slot for `human_vesc_command`,
+//! `map_selection`, and `vehicle_model_selection` (see [`live_api`]); reads
+//! `map`, `vehicle_status`, and `vehicle_model_status`, which some other
+//! executor in the same [`crate::Runner`] (e.g.
+//! [`crate::sensors::MapServer`], [`crate::actuators::SimulatedVehicle`]) is
+//! expected to be writing.
 
 mod assets;
 mod handlers;
@@ -12,7 +14,8 @@ mod live_api;
 mod maps_api;
 
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
@@ -60,6 +63,7 @@ impl Executor for WebGui {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME, self.id, VescCommand::default);
         captain.claim_writer::<MapSelection>(MAP_SELECTION_TOPIC_NAME, self.id, MapSelection::default);
+        captain.claim_writer::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME, self.id, VehicleModelSelection::default);
     }
 
     fn run(&mut self, captain: &Captain) {

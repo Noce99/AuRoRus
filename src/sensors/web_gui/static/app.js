@@ -15,6 +15,12 @@ let liveMapName = null;
 /** @type {{x_m:number, y_m:number, heading_rad:number, speed_mps:number}|null} */
 let vehicleStatus = null;
 
+/** Vehicle model kind the `vehicle_model_status` topic currently holds
+ *  (server-side, actually-running model), or null before the first poll -
+ *  tracked separately from the `<select>`'s own value so polling can tell
+ *  when the live selection has actually changed (e.g. from another tab). */
+let liveVehicleModelKind = null;
+
 /** World-space view: how many meters of world height are visible, and
  *  which world point (in meters, same frame as MapInfo) is centered. */
 const view = {
@@ -399,6 +405,49 @@ async function pollVehicleStatus() {
 }
 
 // ---------------------------------------------------------------------
+// Vehicle model selection
+// ---------------------------------------------------------------------
+
+const vehicleModelSelectEl = document.getElementById("vehicle-model-select");
+
+// Writes the wanted model kind to `vehicle_model_selection` - `SimulatedVehicle`
+// picks it up on its own poll cycle, `pollVehicleModel` then reflects it here.
+async function selectVehicleModel(kind) {
+  await fetchJSON("/api/vehicle_model_selection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
+  });
+}
+
+async function populateVehicleModelOptions() {
+  const options = await fetchJSON("/api/vehicle_models");
+  vehicleModelSelectEl.innerHTML = "";
+  for (const option of options) {
+    const el = document.createElement("option");
+    el.value = option.kind;
+    el.textContent = option.label;
+    vehicleModelSelectEl.appendChild(el);
+  }
+}
+
+vehicleModelSelectEl.addEventListener("change", () => {
+  liveVehicleModelKind = vehicleModelSelectEl.value; // optimistic; pollVehicleModel confirms it
+  selectVehicleModel(vehicleModelSelectEl.value).catch((err) => console.error(err));
+});
+
+// Polls the `vehicle_model_status` topic (via `/api/vehicle_model`) and
+// updates the dropdown whenever the live selection actually changes -
+// driven by `vehicle_model_selection`, written by `selectVehicleModel`
+// above (this tab's dropdown, or another client's).
+async function pollVehicleModel() {
+  const live = await fetchJSON("/api/vehicle_model");
+  if (live.kind === liveVehicleModelKind) return;
+  liveVehicleModelKind = live.kind;
+  vehicleModelSelectEl.value = live.kind;
+}
+
+// ---------------------------------------------------------------------
 // Generate Map modal
 // ---------------------------------------------------------------------
 
@@ -528,6 +577,7 @@ window.addEventListener("resize", frame);
 
 setInterval(() => pollLiveMap().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
 setInterval(() => pollVehicleStatus().catch((err) => console.error(err)), VEHICLE_STATUS_POLL_MS);
+setInterval(() => pollVehicleModel().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
 
 refreshMapList()
   .then(async (maps) => {
@@ -537,4 +587,8 @@ refreshMapList()
     }
     frame();
   })
+  .catch((err) => console.error(err));
+
+populateVehicleModelOptions()
+  .then(() => pollVehicleModel())
   .catch((err) => console.error(err));

@@ -88,6 +88,16 @@ html, body {
   flex: 0 0 auto;
 }
 
+#vehicle-model-select {
+  flex: 0 0 auto;
+  font: inherit;
+  background: #22272e;
+  color: #e8e8e8;
+  border: 1px solid #303640;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
 #sidebar-toggle {
   flex: 0 0 auto;
   width: 18px;

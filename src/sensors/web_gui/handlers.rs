@@ -28,6 +28,9 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Post, "/api/map_selection") => live_api::select_map(&mut request, captain, writer_id, maps_root),
         (Method::Get, "/api/vehicle_status") => live_api::vehicle_status(captain),
         (Method::Post, "/api/human_vesc_command") => live_api::human_vesc_command(&mut request, captain, writer_id),
+        (Method::Get, "/api/vehicle_models") => live_api::vehicle_models(),
+        (Method::Get, "/api/vehicle_model") => live_api::vehicle_model(captain),
+        (Method::Post, "/api/vehicle_model_selection") => live_api::select_vehicle_model(&mut request, captain, writer_id),
         _ => maps_api::not_found(),
     };
 

@@ -4,4 +4,4 @@
 
 mod simulated_vehicle;
 
-pub use simulated_vehicle::{ActuatorLimits, SimulatedVehicle, VehicleModel};
+pub use simulated_vehicle::{ActuatorLimits, SimulatedVehicle, VehicleModel, VehicleState, default_model};

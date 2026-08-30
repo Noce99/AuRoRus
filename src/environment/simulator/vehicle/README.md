@@ -3,10 +3,12 @@
 This module exists to answer a concrete question: *how do we advance a
 simulated vehicle's state forward in time, given basic control inputs and
 known geometry, without a real vehicle or a full physics engine?* It is a
-growing collection of physical models — it starts with one, the kinematic
-bicycle model below, with more expected to join it over time (e.g. a
-dynamic model with tire forces, once the kinematic model's limitations
-start to matter).
+growing collection of physical models of increasing complexity: a kinematic
+bicycle model, and a dynamic model that adds lateral tire forces, with more
+expected to join them over time as each model's limitations start to matter
+for a given use case. Which model actually drives the simulation at runtime
+is chosen in [`crate::actuators::simulated_vehicle::VehicleModel`] - see that
+module's doc comment - and selectable live from `web_gui`.
 
 Every model here follows the same shape: a plain, `Copy` state struct, a
 params struct describing the vehicle's fixed geometry, and a pure `step`
@@ -84,25 +86,104 @@ safe because the equations above only ever consume `heading_rad` through
 `sin`/`cos`, which are periodic — wrapping never changes the dynamics, and
 it keeps the value from growing unbounded over a long-running simulation.
 
-## Contract with the simulation environment
-
-This module owns no timing loop, thread, or scheduler. A (not yet built)
-simulation environment is expected to hold a `BicycleState` and
-`BicycleParams`, and call `step(state, params, steering_angle_rad,
-acceleration_mps2, dt_s)` once per tick with that tick's `dt_s` and the
-current control sample, replacing its stored state with the result.
-
-No actuator limits or delay are modeled — clamping `steering_angle_rad` and
-`acceleration_mps2` to values the real vehicle could actually achieve is
-the caller's responsibility, not this module's.
-
-## Limitations
+### Limitations
 
 - Purely kinematic: the only lateral effect modeled is the geometric slip
   angle `beta`, not real tire slip from lateral force. Not valid at high
   lateral acceleration or on low-friction surfaces, where actual tire slip
-  diverges from this model's prediction.
+  diverges from this model's prediction - see the dynamic bicycle model
+  below for a model that accounts for it.
 - No default vehicle geometry is provided (see [Params](#params-bicycleparams)).
-- More models — most likely a dynamic model with tire forces — are
-  expected to land in this same directory and get their own section here
-  as they're added.
+
+## Dynamic bicycle model (tire forces)
+
+Implemented in [`dynamic_bicycle.rs`](dynamic_bicycle.rs).
+
+### State ([`DynamicState`](dynamic_bicycle.rs))
+
+- `x_m`, `y_m`, `heading_rad` — same meaning as [`BicycleState`](bicycle.rs).
+- `vx_mps`, `vy_mps` — body-frame longitudinal and lateral velocity of the
+  CG, in meters/second.
+- `yaw_rate_rad_s` — rate of change of `heading_rad`, in radians/second.
+
+Unlike the kinematic model, forward speed isn't a single number: `vx_mps`
+and `vy_mps` are tracked separately because real tire slip means the CG's
+velocity direction no longer has to align with the body's heading by a fixed
+geometric relationship.
+
+### Params ([`DynamicParams`](dynamic_bicycle.rs))
+
+- `mass_kg` — vehicle mass.
+- `yaw_inertia_kgm2` — yaw moment of inertia about the vertical axis through
+  the CG.
+- `lf_m`, `lr_m` — same meaning as [`BicycleParams`](bicycle.rs).
+- `cf_n_per_rad`, `cr_n_per_rad` — front/rear tire cornering stiffness
+  (lateral force per radian of slip angle). As with `lf_m`/`lr_m`, there is
+  deliberately no `Default`.
+
+### Control inputs
+
+Same as the kinematic bicycle model: `steering_angle_rad` and
+`acceleration_mps2`, supplied externally on every call to `step`.
+
+### Equations
+
+```text
+alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
+alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+Fyf     = -cf_n_per_rad * alpha_f
+Fyr     = -cr_n_per_rad * alpha_r
+
+dx/dt        = vx_mps*cos(heading_rad) - vy_mps*sin(heading_rad)
+dy/dt        = vx_mps*sin(heading_rad) + vy_mps*cos(heading_rad)
+dheading/dt  = yaw_rate_rad_s
+dvx/dt       = acceleration_mps2 + vy_mps*yaw_rate_rad_s
+dvy/dt       = (Fyf*cos(steering_angle_rad) + Fyr)/mass_kg - vx_mps*yaw_rate_rad_s
+dyaw_rate/dt = (lf_m*Fyf*cos(steering_angle_rad) - lr_m*Fyr)/yaw_inertia_kgm2
+```
+
+`alpha_f`/`alpha_r` are the front/rear tire slip angles, computed from the
+vehicle's actual body-frame velocity rather than assumed from geometry alone
+- this is what lets the model produce a real lateral force (`Fyf`, `Fyr`) via
+a linear tire model (force proportional to slip angle, via the cornering
+stiffness), and so capture effects the kinematic model can't: understeer/
+oversteer, and the tires' lateral force saturating at high slip (though the
+*linear* tire model used here doesn't itself cap that force - see
+Limitations below).
+
+Integrated with the same RK4 scheme as the kinematic model (control frozen
+across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
+
+### Limitations
+
+- The linear tire model has no saturation: `Fyf`/`Fyr` grow without bound as
+  slip angle grows, whereas a real tire's lateral force saturates (and then
+  falls off) at large slip. Valid only within the tires' linear region -
+  roughly small slip angles, i.e. moderate lateral acceleration - not at the
+  limit of grip or beyond it.
+- Not valid near zero forward speed: `alpha_f`/`alpha_r` use `atan2` against
+  `vx_mps`, so as `vx_mps` approaches zero, tiny lateral motion produces slip
+  angles approaching ±90°, and the resulting forces no longer represent real
+  tire behavior at a stop or in a very slow maneuver. A low-speed blend with
+  the kinematic model (which has no such singularity) would be a natural
+  future improvement, not implemented here.
+- No load transfer, no combined longitudinal/lateral tire force limit (a
+  "friction circle"), and no aerodynamic or rolling-resistance forces - all
+  candidates for a further, even more complex model down the line.
+
+## Contract with the simulation environment
+
+This module owns no timing loop, thread, or scheduler. A simulation
+environment (`crate::actuators::simulated_vehicle`) holds whichever model's
+state and params are currently active, and calls that model's `step(state,
+params, steering_angle_rad, acceleration_mps2, dt_s)` once per tick with
+that tick's `dt_s` and the current control sample, replacing its stored
+state with the result.
+
+No actuator limits or delay are modeled — clamping `steering_angle_rad` and
+`acceleration_mps2` to values the real vehicle could actually achieve is
+the caller's responsibility, not this module's (see
+`crate::actuators::simulated_vehicle::ActuatorLimits`).
+
+More models are expected to land in this same directory and get their own
+section here as they're added.
