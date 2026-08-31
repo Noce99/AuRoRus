@@ -231,6 +231,26 @@ fn wheel_combined_slip(combined_slip_b: f64, combined_slip_c: f64, d_n: f64, dem
     (fx_n, weighting)
 }
 
+/// Minimum longitudinal speed (in either direction), in meters/second, used
+/// in place of a wheel's true longitudinal velocity when computing its slip
+/// angle - see
+/// `crate::environment::simulator::vehicle::dynamic_bicycle::LOW_SPEED_FLOOR_MPS`,
+/// which this mitigates the same singularity for, applied per wheel here.
+const LOW_SPEED_FLOOR_MPS: f64 = 1.0;
+
+/// `vx_mps`, floored in magnitude to [`LOW_SPEED_FLOOR_MPS`] - sign-preserving,
+/// defaulting to the forward direction at exactly zero, since that's the
+/// common case (starting from a stop).
+fn regularized_vx(vx_mps: f64) -> f64 {
+    if vx_mps.abs() >= LOW_SPEED_FLOOR_MPS {
+        vx_mps
+    } else if vx_mps < 0.0 {
+        -LOW_SPEED_FLOOR_MPS
+    } else {
+        LOW_SPEED_FLOOR_MPS
+    }
+}
+
 /// One wheel's fixed geometry and this-tick inputs, gathered so
 /// [`wheel_body_forces`] can be called once per wheel from a loop instead of
 /// once per wheel inline.
@@ -264,7 +284,7 @@ fn wheel_body_forces(
 ) -> (f64, f64, f64) {
     let vx_wheel = vx_mps - yaw_rate_rad_s * wheel.b_m;
     let vy_wheel = vy_mps + yaw_rate_rad_s * wheel.a_m;
-    let alpha = vy_wheel.atan2(vx_wheel) - wheel.delta_rad;
+    let alpha = vy_wheel.atan2(regularized_vx(vx_wheel)) - wheel.delta_rad;
 
     let d_n = wheel.d_mu * wheel.fz_n;
     let fy_raw = pacejka_lateral_force(wheel.b, wheel.c, d_n, wheel.e, alpha);
@@ -544,6 +564,27 @@ mod tests {
         assert!((next.vx_mps - 5.0).abs() < 1e-9);
         assert!(next.vy_mps.abs() < 1e-9);
         assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn full_steering_and_throttle_from_a_standstill_does_not_diverge() {
+        // Same regression as
+        // crate::environment::simulator::vehicle::dynamic_bicycle's test of
+        // the same name - see LOW_SPEED_FLOOR_MPS.
+        let params = test_params();
+        let mut state =
+            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..300 {
+            state = step(state, params, 0.4, 4.0, dt_s);
+            assert!(state.vx_mps.is_finite());
+            assert!(state.vy_mps.is_finite());
+            assert!(
+                state.vx_mps.hypot(state.vy_mps) < 15.0,
+                "speed diverged: {}",
+                state.vx_mps.hypot(state.vy_mps)
+            );
+        }
     }
 
     #[test]

@@ -93,12 +93,43 @@ struct DynamicDerivative {
     dyaw_rate_dt: f64,
 }
 
+/// Minimum longitudinal speed (in either direction), in meters/second, used
+/// in place of the true `vx_mps` when computing tire slip angles. Below
+/// this, `atan2`'s true geometric angle swings toward +-90 degrees for even
+/// tiny lateral velocity - the "not valid near zero forward speed"
+/// limitation in the module README - which this model's *unsaturated*
+/// linear tire force then turns into an unbounded lateral force. That
+/// force feeds back into `vx_mps` via the `vy_mps*yaw_rate_rad_s` coupling
+/// term in [`derivative`], which can run away well past what
+/// `crate::actuators::simulated_vehicle::ActuatorLimits` should allow -
+/// observed in practice as the vehicle suddenly rocketing away (forward or
+/// backward) from a standing start under full steering and throttle.
+/// Flooring the `atan2` denominator's magnitude (see [`regularized_vx`])
+/// keeps slip angles - and so tire forces - bounded during that low-speed
+/// transient, without changing anything once the vehicle is actually
+/// moving faster than this.
+const LOW_SPEED_FLOOR_MPS: f64 = 1.0;
+
+/// `vx_mps`, floored in magnitude to [`LOW_SPEED_FLOOR_MPS`] - sign-preserving,
+/// defaulting to the forward direction at exactly zero, since that's the
+/// common case (starting from a stop).
+fn regularized_vx(vx_mps: f64) -> f64 {
+    if vx_mps.abs() >= LOW_SPEED_FLOOR_MPS {
+        vx_mps
+    } else if vx_mps < 0.0 {
+        -LOW_SPEED_FLOOR_MPS
+    } else {
+        LOW_SPEED_FLOOR_MPS
+    }
+}
+
 /// The instantaneous derivative of `state` under a constant control input,
 /// from the linear-tire single-track dynamic bicycle equations:
 ///
 /// ```text
-/// alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
-/// alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+/// vx_reg  = regularized_vx(vx_mps)   // see LOW_SPEED_FLOOR_MPS
+/// alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_reg) - steering_angle_rad
+/// alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_reg)
 /// Fyf     = -cf_n_per_rad * alpha_f
 /// Fyr     = -cr_n_per_rad * alpha_r
 ///
@@ -117,15 +148,17 @@ struct DynamicDerivative {
 /// (`vx_mps`, `vy_mps`, `yaw_rate_rad_s`), which is what lets this model
 /// produce real lateral tire forces (`Fyf`, `Fyr`) via a linear tire model,
 /// rather than assuming the tires can always deliver whatever lateral
-/// motion the geometry implies.
+/// motion the geometry implies. They're computed against `vx_reg` rather
+/// than the raw `vx_mps` - see [`LOW_SPEED_FLOOR_MPS`].
 fn derivative(
     state: DynamicState,
     params: DynamicParams,
     steering_angle_rad: f64,
     acceleration_mps2: f64,
 ) -> DynamicDerivative {
-    let alpha_f = (state.vy_mps + params.lf_m * state.yaw_rate_rad_s).atan2(state.vx_mps) - steering_angle_rad;
-    let alpha_r = (state.vy_mps - params.lr_m * state.yaw_rate_rad_s).atan2(state.vx_mps);
+    let vx_reg = regularized_vx(state.vx_mps);
+    let alpha_f = (state.vy_mps + params.lf_m * state.yaw_rate_rad_s).atan2(vx_reg) - steering_angle_rad;
+    let alpha_r = (state.vy_mps - params.lr_m * state.yaw_rate_rad_s).atan2(vx_reg);
     let fyf = -params.cf_n_per_rad * alpha_f;
     let fyr = -params.cr_n_per_rad * alpha_r;
     let cos_delta = steering_angle_rad.cos();
@@ -262,6 +295,28 @@ mod tests {
         assert!((next.vx_mps - 5.0).abs() < 1e-9);
         assert!(next.vy_mps.abs() < 1e-9);
         assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn full_steering_and_throttle_from_a_standstill_does_not_diverge() {
+        // Reproduces the scenario LOW_SPEED_FLOOR_MPS exists for: full
+        // steering and throttle from a complete stop, where the
+        // un-floored atan2(vy_mps, vx_mps) singularity used to let tire
+        // forces run away, sending the vehicle's speed far past anything
+        // ActuatorLimits should allow before collapsing back down.
+        let params = test_params();
+        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..300 {
+            state = step(state, params, 0.4, 4.0, dt_s);
+            assert!(state.vx_mps.is_finite());
+            assert!(state.vy_mps.is_finite());
+            assert!(
+                state.vx_mps.hypot(state.vy_mps) < 15.0,
+                "speed diverged: {}",
+                state.vx_mps.hypot(state.vy_mps)
+            );
+        }
     }
 
     #[test]

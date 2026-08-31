@@ -134,6 +134,29 @@ fn axle_combined_slip(tire_mu: f64, fz_n: f64, demanded_fx_n: f64) -> (f64, f64)
     (fx_n, remaining_fraction)
 }
 
+/// Minimum longitudinal speed (in either direction), in meters/second, used
+/// in place of the true `vx_mps` when computing tire slip angles - see
+/// `crate::environment::simulator::vehicle::dynamic_bicycle::LOW_SPEED_FLOOR_MPS`,
+/// which this mitigates the same singularity for. This model's saturating
+/// tire curve bounds the *force* even at a raw slip angle near +-90 degrees,
+/// but the slip angle itself is still numerically unstable near `vx_mps =
+/// 0.0` (tiny changes in `vy_mps` swing it wildly), so the floor is kept
+/// here too rather than relying on saturation alone.
+const LOW_SPEED_FLOOR_MPS: f64 = 1.0;
+
+/// `vx_mps`, floored in magnitude to [`LOW_SPEED_FLOOR_MPS`] - sign-preserving,
+/// defaulting to the forward direction at exactly zero, since that's the
+/// common case (starting from a stop).
+fn regularized_vx(vx_mps: f64) -> f64 {
+    if vx_mps.abs() >= LOW_SPEED_FLOOR_MPS {
+        vx_mps
+    } else if vx_mps < 0.0 {
+        -LOW_SPEED_FLOOR_MPS
+    } else {
+        LOW_SPEED_FLOOR_MPS
+    }
+}
+
 /// Instantaneous rate of change of a [`NonlinearBicycleState`], as returned
 /// by [`derivative`] and consumed by [`step`]'s RK4 integration.
 #[derive(Debug, Clone, Copy)]
@@ -176,8 +199,9 @@ fn derivative(
 ) -> NonlinearDerivative {
     let (fz_f, fz_r) = normal_loads(params, acceleration_mps2);
 
-    let alpha_f = (state.vy_mps + params.lf_m * state.yaw_rate_rad_s).atan2(state.vx_mps) - steering_angle_rad;
-    let alpha_r = (state.vy_mps - params.lr_m * state.yaw_rate_rad_s).atan2(state.vx_mps);
+    let vx_reg = regularized_vx(state.vx_mps);
+    let alpha_f = (state.vy_mps + params.lf_m * state.yaw_rate_rad_s).atan2(vx_reg) - steering_angle_rad;
+    let alpha_r = (state.vy_mps - params.lr_m * state.yaw_rate_rad_s).atan2(vx_reg);
     let fyf_raw = -params.tire_mu * fz_f * (params.pacejka_c * (params.pacejka_b * alpha_f).atan()).sin();
     let fyr_raw = -params.tire_mu * fz_r * (params.pacejka_c * (params.pacejka_b * alpha_r).atan()).sin();
 
@@ -354,6 +378,27 @@ mod tests {
         assert!((next.vx_mps - 5.0).abs() < 1e-9);
         assert!(next.vy_mps.abs() < 1e-9);
         assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn full_steering_and_throttle_from_a_standstill_does_not_diverge() {
+        // Same regression as
+        // crate::environment::simulator::vehicle::dynamic_bicycle's test of
+        // the same name - see LOW_SPEED_FLOOR_MPS.
+        let params = test_params();
+        let mut state =
+            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..300 {
+            state = step(state, params, 0.4, 4.0, dt_s);
+            assert!(state.vx_mps.is_finite());
+            assert!(state.vy_mps.is_finite());
+            assert!(
+                state.vx_mps.hypot(state.vy_mps) < 15.0,
+                "speed diverged: {}",
+                state.vx_mps.hypot(state.vy_mps)
+            );
+        }
     }
 
     #[test]
