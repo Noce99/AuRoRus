@@ -8,6 +8,7 @@ const DEFAULT_MAPS_ROOT: &str = "maps";
 
 pub struct Config {
     pub maps_root: PathBuf,
+    pub config_dir: PathBuf,
 }
 
 /// Parses CLI flags from `argv`. Prints usage and exits the process on
@@ -17,8 +18,10 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let usage = format!(
         "Usage: {program} [OPTIONS]\n\n\
          Options:\n  \
-         --maps-root DIR   folder to serve/generate maps from (default: {DEFAULT_MAPS_ROOT:?})\n  \
-         -h, --help        print this message"
+         --maps-root DIR    folder to serve/generate maps from (default: {DEFAULT_MAPS_ROOT:?})\n  \
+         --config-dir DIR   folder to load config/ files from (default: {:?})\n  \
+         -h, --help         print this message",
+        aurorus::config::DEFAULT_CONFIG_ROOT,
     );
 
     let fail = |message: String| -> ! {
@@ -28,6 +31,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     };
 
     let mut maps_root = PathBuf::from(DEFAULT_MAPS_ROOT);
+    let mut config_dir = PathBuf::from(aurorus::config::DEFAULT_CONFIG_ROOT);
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -40,9 +44,14 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                     fail(format!("Missing value for {flag}"));
                 })
             }
+            "--config-dir" => {
+                config_dir = args.next().map(PathBuf::from).unwrap_or_else(|| {
+                    fail(format!("Missing value for {flag}"));
+                })
+            }
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
 
-    Config { maps_root }
+    Config { maps_root, config_dir }
 }

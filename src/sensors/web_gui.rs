@@ -1,10 +1,10 @@
 //! [`WebGui`]: an [`Executor`] that serves a local web UI for browsing and
 //! generating maps, for driving the vehicle - WASD control, live map and
 //! vehicle status - and for picking which vehicle physics model is running,
-//! on [`BIND_ADDR`]. Claims the writer slot for `human_vesc_command`,
-//! `map_selection`, and `vehicle_model_selection` (see [`live_api`]); reads
-//! `map`, `vehicle_status`, and `vehicle_model_status`, which some other
-//! executor in the same [`crate::Runner`] (e.g.
+//! on [`WebGuiConfig::bind_addr`]. Claims the writer slot for `human_vesc_command`,
+//! `map_selection`, `vehicle_model_selection`, and `place_at_start` (see
+//! [`live_api`]); reads `map`, `vehicle_status`, and `vehicle_model_status`,
+//! which some other executor in the same [`crate::Runner`] (e.g.
 //! [`crate::sensors::MapServer`], [`crate::actuators::SimulatedVehicle`]) is
 //! expected to be writing.
 
@@ -14,8 +14,8 @@ mod live_api;
 mod maps_api;
 
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VehicleModelSelection, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
@@ -24,14 +24,37 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-/// Address [`WebGui`] binds its HTTP server to.
-const BIND_ADDR: &str = "0.0.0.0:1999";
-/// Number of worker threads handling requests concurrently - so a slow
-/// request (e.g. generating a large map) doesn't stall every other client.
-const WORKER_THREADS: usize = 4;
-/// How long each worker blocks in `recv_timeout` before re-checking whether
-/// it should stop - bounds shutdown latency without busy-waiting.
-const POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// Every tunable parameter [`WebGui`] needs - loaded from
+/// `config/sensors/web_gui.toml` (see [`Default`]) or from an arbitrary
+/// path via [`crate::config::load`].
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct WebGuiConfig {
+    /// Address [`WebGui`] binds its HTTP server to.
+    pub bind_addr: String,
+    /// Number of worker threads handling requests concurrently - so a slow
+    /// request (e.g. generating a large map) doesn't stall every other
+    /// client.
+    pub worker_threads: usize,
+    /// How long each worker blocks in `recv_timeout` before re-checking
+    /// whether it should stop, in milliseconds - bounds shutdown latency
+    /// without busy-waiting.
+    pub poll_interval_ms: u64,
+    /// Speed, in m/s, that a full W or S key press commands under WASD
+    /// human control - served to the frontend via `GET /api/config` so the
+    /// UI and server never drift apart.
+    pub human_max_speed_mps: f64,
+    /// Steering angle, in radians, that a full A or D key press commands
+    /// under WASD human control - served to the frontend via
+    /// `GET /api/config` so the UI and server never drift apart.
+    pub human_max_steering_rad: f64,
+}
+
+impl Default for WebGuiConfig {
+    fn default() -> Self {
+        toml::from_str(include_str!("../../config/sensors/web_gui.toml"))
+            .expect("config/sensors/web_gui.toml must deserialize into WebGuiConfig")
+    }
+}
 
 /// Builds a `Content-Type: ...`-style header. Used by both [`assets`] and
 /// [`maps_api`] - a header name/value built from a `&'static str` constant
@@ -46,12 +69,13 @@ pub struct WebGui {
     id: u8,
     name: String,
     maps_root: PathBuf,
+    config: WebGuiConfig,
 }
 
 impl WebGui {
     /// Creates a `WebGui` that will serve maps under `maps_root` once run.
-    pub fn new(name: impl Into<String>, maps_root: impl Into<PathBuf>) -> Self {
-        Self { id: 0, name: name.into(), maps_root: maps_root.into() }
+    pub fn new(name: impl Into<String>, maps_root: impl Into<PathBuf>, config: WebGuiConfig) -> Self {
+        Self { id: 0, name: name.into(), maps_root: maps_root.into(), config }
     }
 }
 
@@ -64,27 +88,31 @@ impl Executor for WebGui {
         captain.claim_writer::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME, self.id, VescCommand::default);
         captain.claim_writer::<MapSelection>(MAP_SELECTION_TOPIC_NAME, self.id, MapSelection::default);
         captain.claim_writer::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME, self.id, VehicleModelSelection::default);
+        captain.claim_writer::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME, self.id, PlaceAtStart::default);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let server = match tiny_http::Server::http(BIND_ADDR) {
+        let bind_addr = &self.config.bind_addr;
+        let server = match tiny_http::Server::http(bind_addr) {
             Ok(server) => Arc::new(server),
             Err(err) => {
-                eprintln!("{}: failed to bind {BIND_ADDR}: {err}", self.name);
+                eprintln!("{}: failed to bind {bind_addr}: {err}", self.name);
                 return;
             }
         };
-        println!("{}: serving on http://{BIND_ADDR}", self.name);
+        println!("{}: serving on http://{bind_addr}", self.name);
 
         let id = self.id;
         let maps_root = &self.maps_root;
+        let config = &self.config;
+        let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         thread::scope(|scope| {
-            for _ in 0..WORKER_THREADS {
+            for _ in 0..self.config.worker_threads {
                 let server = server.clone();
                 scope.spawn(move || {
                     while captain.is_running(id) {
-                        match server.recv_timeout(POLL_INTERVAL) {
-                            Ok(Some(request)) => handlers::handle(request, maps_root, captain, id),
+                        match server.recv_timeout(poll_interval) {
+                            Ok(Some(request)) => handlers::handle(request, maps_root, captain, id, config),
                             Ok(None) => continue,
                             Err(err) => eprintln!("web_gui: connection error: {err}"),
                         }
@@ -100,5 +128,9 @@ impl Executor for WebGui {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn fresh(&self) -> Box<dyn Executor> {
+        Box::new(WebGui::new(self.name.clone(), self.maps_root.clone(), self.config.clone()))
     }
 }

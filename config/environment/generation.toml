@@ -1,0 +1,33 @@
+# Every tunable parameter for `aurorus::environment::generate`.
+
+# Width of the bounded area Voronoi sites are scattered in, in meters.
+area_width_m = 60.0
+# Height of the bounded area Voronoi sites are scattered in, in meters.
+area_height_m = 60.0
+# Size of one raster pixel, in meters.
+resolution_m_per_px = 0.05
+# Number of random Voronoi seed points to scatter.
+num_sites = 60
+# Minimum allowed distance between any two seed points, in meters.
+min_site_spacing_m = 3.0
+# Fraction (0.0-1.0, exclusive) of the diagram's total interior area the BFS
+# region growth aims to cover before stopping.
+target_area_fraction = 0.35
+# Width of the drivable track band, in meters.
+track_width_m = 2.5
+# Target arc-length spacing between consecutive race-line points, in meters.
+point_spacing_m = 0.25
+# How many points to interpolate per raw loop segment before resampling to
+# even spacing - higher gives a smoother curve.
+smoothing_samples_per_segment = 20
+# Speed cap on straights, in meters/second.
+max_speed_mps = 8.0
+# Maximum lateral acceleration used to derive cornering speed, in
+# meters/second^2.
+max_lateral_accel_mps2 = 6.0
+# Seed for the deterministic RNG driving the whole generation - the same
+# seed and config reproduce the same map exactly.
+seed = 0
+# Folder every generated map's own folder is created under, relative to the
+# current working directory - a gitignored folder at the repo root.
+output_root = "maps"

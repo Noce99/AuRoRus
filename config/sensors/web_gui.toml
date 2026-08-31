@@ -1,0 +1,19 @@
+# Configuration for `aurorus::sensors::WebGui`, the local web UI for
+# browsing/generating maps, driving the vehicle, and picking the vehicle
+# physics model.
+
+# Address WebGui binds its HTTP server to.
+bind_addr = "0.0.0.0:1999"
+# Number of worker threads handling requests concurrently - so a slow
+# request (e.g. generating a large map) doesn't stall every other client.
+worker_threads = 4
+# How long each worker blocks waiting for a request before re-checking
+# whether it should stop, in milliseconds - bounds shutdown latency without
+# busy-waiting.
+poll_interval_ms = 200
+# Speed, in m/s, that a full W or S key press commands under WASD human
+# control.
+human_max_speed_mps = 8.0
+# Steering angle, in radians, that a full A or D key press commands under
+# WASD human control.
+human_max_steering_rad = 0.35

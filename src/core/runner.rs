@@ -28,6 +28,11 @@ impl fmt::Display for SwitchExecutorError {
 
 impl std::error::Error for SwitchExecutorError {}
 
+/// Replays one [`Runner::register_topic`] call against a rebuilt [`Captain`],
+/// so a restart in [`Runner::run_until_stopped`] can bring pre-seeded topics
+/// back too.
+type TopicRegistration = Box<dyn Fn(&Captain) + Send + Sync>;
+
 /// Owns every topic and every registered [`Executor`], and drives them all.
 ///
 /// Register topics with [`register_topic`](Self::register_topic) and executors
@@ -41,6 +46,7 @@ pub struct Runner {
     next_id: u8,
     pending: Vec<(u8, Box<dyn Executor>)>,
     running: HashMap<u8, thread::JoinHandle<Box<dyn Executor>>>,
+    registered_topics: Vec<TopicRegistration>,
     verbose: bool,
 }
 
@@ -53,6 +59,7 @@ impl Runner {
             next_id: 0,
             pending: Vec::new(),
             running: HashMap::new(),
+            registered_topics: Vec::new(),
             verbose: false,
         }
     }
@@ -73,18 +80,25 @@ impl Runner {
         }
     }
 
-    /// Registers a new topic under `name`, seeded with `initial`. Usually
+    /// Registers a new topic under `name`, seeded by calling `initial`. Usually
     /// unnecessary now that [`crate::Executor::claim_writing_topics`] auto-registers
     /// a topic the first time its writer claims it - use this only to pre-seed a
     /// topic that has no writer.
+    ///
+    /// `initial` is a factory rather than a bare value so
+    /// [`run_until_stopped`](Self::run_until_stopped) can replay this
+    /// registration against the fresh [`Captain`] a restart builds.
     pub fn register_topic<T: Send + Sync + 'static>(
         &mut self,
         name: impl Into<String>,
-        initial: T,
+        initial: impl Fn() -> T + Send + Sync + 'static,
     ) {
         let name = name.into();
         self.log(LogColor::Pink, format!("registered topic {name:?}"));
-        self.captain.register_topic(name, initial);
+        self.captain.register_topic(name.clone(), initial());
+        self.registered_topics.push(Box::new(move |captain: &Captain| {
+            captain.register_topic(name.clone(), initial());
+        }));
     }
 
     /// Looks up a previously registered topic, e.g. to read it after every
@@ -165,10 +179,45 @@ impl Runner {
     /// Waits for every currently running executor to finish, returning each one.
     /// Typically called after [`stop`](Self::stop) has signaled them all to exit.
     pub fn join_all(&mut self) -> Vec<Box<dyn Executor>> {
-        let executors = self
+        self.join_all_with_ids().into_iter().map(|(_, executor)| executor).collect()
+    }
+
+    /// Runs every registered executor until a final [`stop`](Self::stop) -
+    /// handling any number of [`Captain::request_restart`] calls along the
+    /// way by rebuilding a fresh [`Captain`] (fresh topics, replaying every
+    /// [`register_topic`](Self::register_topic) call) and a fresh instance of
+    /// every executor (via [`Executor::fresh`], same ids), then starting
+    /// over. Returns the finished executors once a stop was *not*
+    /// accompanied by a restart request - same contract as
+    /// [`join_all`](Self::join_all) today.
+    pub fn run_until_stopped(&mut self) -> Vec<Box<dyn Executor>> {
+        loop {
+            self.run_all();
+            let finished = self.join_all_with_ids();
+            if !self.captain.take_restart_requested() {
+                return finished.into_iter().map(|(_, executor)| executor).collect();
+            }
+            self.log(LogColor::Green, "restart requested - rebuilding all executors");
+
+            self.captain = Arc::new(Captain::new());
+            self.captain.set_verbose(self.verbose);
+            for register in &self.registered_topics {
+                register(&self.captain);
+            }
+            for (id, executor) in finished {
+                self.pending.push((id, executor.fresh()));
+            }
+        }
+    }
+
+    /// Like [`join_all`](Self::join_all), but keeps each executor's id
+    /// alongside it - needed by [`run_until_stopped`](Self::run_until_stopped)
+    /// to respawn restarted executors under their original ids.
+    fn join_all_with_ids(&mut self) -> Vec<(u8, Box<dyn Executor>)> {
+        let executors: Vec<_> = self
             .running
             .drain()
-            .map(|(_, handle)| handle.join().expect("executor thread panicked"))
+            .map(|(id, handle)| (id, handle.join().expect("executor thread panicked")))
             .collect();
         self.log(LogColor::Green, "all executors stopped successfully");
         executors
@@ -207,12 +256,17 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 
-    /// A minimal executor that records its assigned id, counts loop iterations, and
-    /// flags when it's finished - just enough to observe `switch_executor`'s effects.
+    /// A minimal executor that records its assigned id, counts loop iterations,
+    /// flags when it's finished, and (once, if `restart_after`/`stop_after` is
+    /// set) asks the captain to restart everything or do a final stop after
+    /// that many iterations - just enough to observe `switch_executor` and
+    /// `run_until_stopped`'s effects.
     struct CountingExecutor {
         id: u8,
         iterations: Arc<AtomicUsize>,
         finished: Arc<AtomicBool>,
+        restart_after: Option<usize>,
+        stop_after: Option<usize>,
     }
 
     impl Executor for CountingExecutor {
@@ -222,7 +276,12 @@ mod tests {
 
         fn run(&mut self, captain: &Captain) {
             while captain.is_running(self.id) {
-                self.iterations.fetch_add(1, Ordering::Relaxed);
+                let count = self.iterations.fetch_add(1, Ordering::Relaxed) + 1;
+                if self.restart_after == Some(count) {
+                    captain.request_restart();
+                } else if self.stop_after == Some(count) {
+                    captain.stop();
+                }
                 thread::sleep(Duration::from_millis(1));
             }
             self.finished.store(true, Ordering::Relaxed);
@@ -234,6 +293,16 @@ mod tests {
 
         fn as_any(&self) -> &dyn Any {
             self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            Box::new(CountingExecutor {
+                id: self.id,
+                iterations: Arc::new(AtomicUsize::new(0)),
+                finished: Arc::new(AtomicBool::new(false)),
+                restart_after: None,
+                stop_after: self.stop_after,
+            })
         }
     }
 
@@ -249,11 +318,15 @@ mod tests {
             id: 0,
             iterations: old_iterations.clone(),
             finished: old_finished.clone(),
+            restart_after: None,
+            stop_after: None,
         }));
         let other_id = runner.add_executor(Box::new(CountingExecutor {
             id: 0,
             iterations: other_iterations.clone(),
             finished: Arc::new(AtomicBool::new(false)),
+            restart_after: None,
+            stop_after: None,
         }));
 
         runner.run_all();
@@ -268,6 +341,8 @@ mod tests {
                     id: 0,
                     iterations: new_iterations.clone(),
                     finished: new_finished.clone(),
+                    restart_after: None,
+                    stop_after: None,
                 }),
             )
             .expect("target executor should still be running");
@@ -297,9 +372,54 @@ mod tests {
                 id: 0,
                 iterations: Arc::new(AtomicUsize::new(0)),
                 finished: Arc::new(AtomicBool::new(false)),
+                restart_after: None,
+                stop_after: None,
             }),
         );
 
         assert!(matches!(result, Err(SwitchExecutorError::NotRunning(0))));
+    }
+
+    #[test]
+    fn run_until_stopped_gives_every_executor_a_fresh_start_on_restart() {
+        let mut runner = Runner::new();
+
+        let old_finished = Arc::new(AtomicBool::new(false));
+        let old_iterations = Arc::new(AtomicUsize::new(0));
+        let trigger_id = runner.add_executor(Box::new(CountingExecutor {
+            id: 0,
+            iterations: old_iterations.clone(),
+            finished: old_finished.clone(),
+            restart_after: Some(3),
+            stop_after: Some(20),
+        }));
+        let other_id = runner.add_executor(Box::new(CountingExecutor {
+            id: 0,
+            iterations: Arc::new(AtomicUsize::new(0)),
+            finished: Arc::new(AtomicBool::new(false)),
+            restart_after: None,
+            stop_after: None,
+        }));
+
+        let finished = runner.run_until_stopped();
+
+        // The pre-restart instance actually stopped...
+        assert!(old_finished.load(Ordering::Relaxed));
+        assert_eq!(finished.len(), 2);
+
+        let trigger = finished
+            .iter()
+            .map(|executor| executor.as_any().downcast_ref::<CountingExecutor>().unwrap())
+            .find(|executor| executor.id == trigger_id)
+            .expect("trigger executor should be among the finished ones");
+
+        // ...and the executor returned after the final stop is a genuinely
+        // fresh instance (its own counter), not the same one continuing on.
+        assert!(!Arc::ptr_eq(&old_iterations, &trigger.iterations));
+        assert!(trigger.finished.load(Ordering::Relaxed));
+
+        assert!(finished.iter().any(|executor| {
+            executor.as_any().downcast_ref::<CountingExecutor>().unwrap().id == other_id
+        }));
     }
 }

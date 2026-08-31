@@ -44,4 +44,7 @@ impl Executor for Lidar {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn fresh(&self) -> Box<dyn Executor> {
+        Box::new(Lidar::new(self.rate_hz, self.name.clone()))
+    }
 }

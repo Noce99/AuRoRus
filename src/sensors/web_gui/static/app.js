@@ -518,8 +518,10 @@ form.addEventListener("submit", async (event) => {
 // WASD human control -> human_vesc_command
 // ---------------------------------------------------------------------
 
-const HUMAN_MAX_SPEED_MPS = 3.0;
-const HUMAN_MAX_STEERING_RAD = 0.35;
+/** Overwritten from `GET /api/config` at startup - these are only
+ *  fallbacks for the brief window before that first fetch resolves. */
+let humanMaxSpeedMps = 3.0;
+let humanMaxSteeringRad = 0.35;
 const HUMAN_COMMAND_POST_MS = 50;
 
 const keys = { w: false, a: false, s: false, d: false };
@@ -555,8 +557,8 @@ function currentHumanCommand() {
   // positive and A is negative.
   const steer = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
   return {
-    servo_position_rad: steer * HUMAN_MAX_STEERING_RAD,
-    speed_mps: speed * HUMAN_MAX_SPEED_MPS,
+    servo_position_rad: steer * humanMaxSteeringRad,
+    speed_mps: speed * humanMaxSpeedMps,
   };
 }
 
@@ -569,11 +571,44 @@ setInterval(() => {
 }, HUMAN_COMMAND_POST_MS);
 
 // ---------------------------------------------------------------------
+// "R" -> restart everything
+// ---------------------------------------------------------------------
+
+window.addEventListener("keydown", (event) => {
+  if (isTypingTarget(event.target)) return;
+  // Ignore held-key auto-repeat and modified presses, so this doesn't fire
+  // on every repeat while held, or steal the browser's own Ctrl/Cmd+R reload.
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key.toLowerCase() !== "r") return;
+  event.preventDefault();
+  fetch("/api/restart", { method: "POST" }).catch((err) => console.error(err));
+});
+
+// ---------------------------------------------------------------------
+// "P" -> place the vehicle at the start line
+// ---------------------------------------------------------------------
+
+window.addEventListener("keydown", (event) => {
+  if (isTypingTarget(event.target)) return;
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key.toLowerCase() !== "p") return;
+  event.preventDefault();
+  fetch("/api/place_at_start", { method: "POST" }).catch((err) => console.error(err));
+});
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
 new ResizeObserver(frame).observe(canvas.parentElement);
 window.addEventListener("resize", frame);
+
+fetchJSON("/api/config")
+  .then((config) => {
+    humanMaxSpeedMps = config.human_max_speed_mps;
+    humanMaxSteeringRad = config.human_max_steering_rad;
+  })
+  .catch((err) => console.error(err));
 
 setInterval(() => pollLiveMap().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
 setInterval(() => pollVehicleStatus().catch((err) => console.error(err)), VEHICLE_STATUS_POLL_MS);

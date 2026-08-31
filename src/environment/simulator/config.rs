@@ -2,14 +2,11 @@
 
 use std::path::PathBuf;
 
-/// Default output root for generated maps, relative to the current working
-/// directory - a gitignored folder at the repo root.
-const DEFAULT_OUTPUT_ROOT: &str = "maps";
-
 /// Every tunable parameter for [`crate::environment::simulator::generate`].
 /// Construct via [`Default`] and override only the fields that matter, e.g.
-/// `GenerationConfig { seed: 42, ..Default::default() }`.
-#[derive(Debug, Clone)]
+/// `GenerationConfig { seed: 42, ..Default::default() }`, or load from an
+/// arbitrary path via [`crate::config::load`].
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct GenerationConfig {
     /// Width of the bounded area Voronoi sites are scattered in, in meters.
     pub area_width_m: f64,
@@ -46,21 +43,8 @@ pub struct GenerationConfig {
 
 impl Default for GenerationConfig {
     fn default() -> Self {
-        Self {
-            area_width_m: 60.0,
-            area_height_m: 60.0,
-            resolution_m_per_px: 0.05,
-            num_sites: 60,
-            min_site_spacing_m: 3.0,
-            target_area_fraction: 0.35,
-            track_width_m: 2.5,
-            point_spacing_m: 0.25,
-            smoothing_samples_per_segment: 20,
-            max_speed_mps: 8.0,
-            max_lateral_accel_mps2: 6.0,
-            seed: 0,
-            output_root: PathBuf::from(DEFAULT_OUTPUT_ROOT),
-        }
+        toml::from_str(include_str!("../../../config/environment/generation.toml"))
+            .expect("config/environment/generation.toml must deserialize into GenerationConfig")
     }
 }
 

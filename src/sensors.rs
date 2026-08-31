@@ -8,6 +8,6 @@ mod map_server;
 mod random_lidar;
 mod web_gui;
 
-pub use map_server::MapServer;
-pub use random_lidar::RandomLidar;
-pub use web_gui::WebGui;
+pub use map_server::{MapServer, MapServerConfig};
+pub use random_lidar::{RandomLidar, RandomLidarConfig};
+pub use web_gui::{WebGui, WebGuiConfig};

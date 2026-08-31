@@ -26,6 +26,7 @@ pub use core::{Captain, Executor, Runner, RwLockTopic, SwitchExecutorError, Topi
 
 pub mod actuators;
 pub mod algorithms;
+pub mod config;
 pub mod environment;
 pub mod sensors;
 pub mod topics;

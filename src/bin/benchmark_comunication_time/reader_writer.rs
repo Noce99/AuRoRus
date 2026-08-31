@@ -109,6 +109,10 @@ impl Executor for WriterExecutor {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    fn fresh(&self) -> Box<dyn Executor> {
+        Box::new(WriterExecutor::new(self.rate_hz, self.topic_size))
+    }
 }
 
 /// Repeatedly reads the latest payload from [`TOPIC_NAME`], pacing itself at a
@@ -171,5 +175,9 @@ impl Executor for ReaderExecutor {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn fresh(&self) -> Box<dyn Executor> {
+        Box::new(ReaderExecutor::new(self.rate_hz, self.sink.clone()))
     }
 }

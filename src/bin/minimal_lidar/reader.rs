@@ -41,4 +41,7 @@ impl Executor for Reader {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn fresh(&self) -> Box<dyn Executor> {
+        Box::new(Reader::new(self.rate_hz, self.name.clone()))
+    }
 }

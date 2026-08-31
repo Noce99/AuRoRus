@@ -31,7 +31,7 @@ pub struct BicycleState {
 /// `lf_m`/`lr_m` describe a specific vehicle's real geometry - silently
 /// defaulting them would silently produce a physically wrong trajectory
 /// with no signal that anything is off. Callers must state them explicitly.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub struct BicycleParams {
     /// Distance from the CG to the front axle, in meters.
     pub lf_m: f64,

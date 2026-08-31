@@ -1,6 +1,7 @@
 //! Routes an incoming request to the right handler and writes back its
 //! response.
 
+use super::WebGuiConfig;
 use super::assets;
 use super::live_api;
 use super::maps_api;
@@ -11,7 +12,7 @@ use tiny_http::{Method, Request, ResponseBox};
 /// Handles one request end to end: routes it, then sends the response.
 /// `writer_id` is this `WebGui`'s own executor id, used to authorize its
 /// writes to `human_vesc_command`/`map_selection`.
-pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8) {
+pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8, config: &WebGuiConfig) {
     let method = request.method().clone();
     let path = request.url().split('?').next().unwrap_or("/").to_string();
 
@@ -19,6 +20,7 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Get, "/" | "/index.html") => assets::respond("index.html"),
         (Method::Get, "/style.css") => assets::respond("style.css"),
         (Method::Get, "/app.js") => assets::respond("app.js"),
+        (Method::Get, "/api/config") => live_api::config(config),
         (Method::Get, "/api/maps") => maps_api::list(maps_root),
         (Method::Get, "/api/generate/defaults") => maps_api::generate_defaults(),
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
@@ -31,6 +33,8 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Get, "/api/vehicle_models") => live_api::vehicle_models(),
         (Method::Get, "/api/vehicle_model") => live_api::vehicle_model(captain),
         (Method::Post, "/api/vehicle_model_selection") => live_api::select_vehicle_model(&mut request, captain, writer_id),
+        (Method::Post, "/api/restart") => live_api::restart(captain),
+        (Method::Post, "/api/place_at_start") => live_api::place_at_start(captain, writer_id),
         _ => maps_api::not_found(),
     };
 

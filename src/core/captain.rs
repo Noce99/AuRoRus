@@ -29,6 +29,7 @@ pub struct Captain {
     executor_running: [AtomicBool; 256],
     names: Mutex<HashMap<u8, String>>,
     verbose: AtomicBool,
+    restart_requested: AtomicBool,
 }
 
 impl Captain {
@@ -40,6 +41,7 @@ impl Captain {
             executor_running: std::array::from_fn(|_| AtomicBool::new(true)),
             names: Mutex::new(HashMap::new()),
             verbose: AtomicBool::new(false),
+            restart_requested: AtomicBool::new(false),
         }
     }
 
@@ -225,6 +227,25 @@ impl Captain {
     /// Signals every executor polling [`is_running`](Self::is_running) to stop.
     pub(crate) fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
+    }
+
+    /// Signals every executor to stop, same as [`stop`](Self::stop), but
+    /// additionally marks that [`crate::Runner::run_until_stopped`] should
+    /// rebuild everything from scratch - a fresh instance of every executor,
+    /// against a fresh [`Captain`] - once they've all stopped, rather than
+    /// treating this as a final shutdown. Callable from inside any executor's
+    /// own [`crate::Executor::run`] loop.
+    pub fn request_restart(&self) {
+        self.restart_requested.store(true, Ordering::Relaxed);
+        self.stop();
+    }
+
+    /// Atomically reads and clears the restart flag set by
+    /// [`request_restart`](Self::request_restart). Used by
+    /// [`crate::Runner::run_until_stopped`] to detect a restart without
+    /// racing a second request that arrives while it's already rebuilding.
+    pub(crate) fn take_restart_requested(&self) -> bool {
+        self.restart_requested.swap(false, Ordering::Relaxed)
     }
 
     /// Signals just the executor running under `id` to stop, leaving every other

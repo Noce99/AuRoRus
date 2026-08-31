@@ -17,7 +17,16 @@ pub struct Config {
 /// argument, a flag missing its value, or an invalid value.
 pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
-    let defaults = GenerationConfig::default();
+
+    // A first pass just for --config-dir, so it can be used below to load
+    // the defaults every other flag's help text and override base rely on -
+    // the full parse (which needs those defaults already loaded) happens
+    // further down.
+    let raw_args: Vec<String> = args.collect();
+    let config_dir = config_dir_from(&raw_args);
+    let defaults = aurorus::config::load(&config_dir.join("environment/generation.toml"))
+        .unwrap_or_else(|_| GenerationConfig::default());
+
     let usage = format!(
         "Usage: {program} [OPTIONS]\n\n\
          Options:\n  \
@@ -33,6 +42,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
          --max-lateral-accel M      m/s^2 (default: {})\n  \
          --out DIR                  output root (default: {:?})\n  \
          --name NAME                override the generated folder's name\n  \
+         --config-dir DIR           folder to load config/ files from (default: {:?})\n  \
          -h, --help                 print this message",
         defaults.num_sites,
         defaults.area_width_m,
@@ -44,6 +54,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
         defaults.max_speed_mps,
         defaults.max_lateral_accel_mps2,
         defaults.output_root,
+        aurorus::config::DEFAULT_CONFIG_ROOT,
     );
 
     let fail = |message: String| -> ! {
@@ -59,6 +70,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let mut generation = GenerationConfig { seed: default_seed, ..defaults };
     let mut folder_name = None;
 
+    let mut args = raw_args.into_iter();
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "-h" | "--help" => {
@@ -118,6 +130,11 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                     next_value(&mut args, |s| Some(s.to_string())).unwrap_or_else(|| fail(invalid_message(&flag))),
                 )
             }
+            "--config-dir" => {
+                // Already consumed by config_dir_from() above to load
+                // `defaults` - just skip its value here.
+                next_value(&mut args, |s| Some(PathBuf::from(s))).unwrap_or_else(|| fail(invalid_message(&flag)));
+            }
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
@@ -134,4 +151,16 @@ fn next_value<T>(args: &mut impl Iterator<Item = String>, validate: impl FnOnce(
 
 fn invalid_message(flag: &str) -> String {
     format!("Missing or invalid value for {flag}")
+}
+
+/// Scans `args` for `--config-dir DIR`, falling back to
+/// [`aurorus::config::DEFAULT_CONFIG_ROOT`] if it's absent - run before the
+/// main flag-parsing loop so the config file it names can be loaded first,
+/// to serve as every other flag's default.
+fn config_dir_from(args: &[String]) -> PathBuf {
+    args.iter()
+        .position(|arg| arg == "--config-dir")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(aurorus::config::DEFAULT_CONFIG_ROOT))
 }

@@ -41,6 +41,13 @@ pub trait Executor: Send {
     /// [`crate::Runner::run_all`] joins it.
     fn as_any(&self) -> &dyn Any;
 
+    /// A brand-new instance of this executor: same construction parameters
+    /// (name, config, ...) as when it was first created, but none of the
+    /// state accumulated while running. Used by
+    /// [`crate::Runner::run_until_stopped`] to give every executor a
+    /// completely fresh start after a [`crate::Captain::request_restart`].
+    fn fresh(&self) -> Box<dyn Executor>;
+
     /// Boxes this executor as a `Box<dyn Executor>`, e.g. for
     /// [`crate::Runner::add_executor`] or
     /// [`crate::Runner::switch_executor`].

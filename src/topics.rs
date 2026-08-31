@@ -4,12 +4,16 @@
 
 mod lidar_scan;
 mod map;
+mod place_at_start;
+mod start_state;
 mod vehicle_model;
 mod vehicle_status;
 mod vesc_command;
 
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
+pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
+pub use start_state::{START_STATE_TOPIC_NAME, StartState};
 pub use vehicle_model::{
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection,
     VehicleModelStatus,

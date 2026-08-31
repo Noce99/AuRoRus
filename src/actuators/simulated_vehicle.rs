@@ -12,25 +12,20 @@ use crate::environment::simulator::vehicle::{
     pacejka_step, step as bicycle_step, two_track_step,
 };
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VESC_COMMAND_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus,
-    VehicleStatus, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, StartState,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME,
+    VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
 use std::thread;
 use std::time::Duration;
 
-/// How often [`SimulatedVehicle`] advances the model and republishes
-/// [`VehicleStatus`], and how often it checks
-/// [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a wanted model switch.
-const TICK_RATE_HZ: f64 = 100.0;
-
 /// The physical limits a [`VehicleModel`]'s simulated actuators can't
 /// exceed, no matter how far the current state is from the desired
 /// setpoint - [`SimulatedVehicle`] approaches the setpoint as fast as these
 /// allow, every tick.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub struct ActuatorLimits {
     /// Largest front-wheel steering angle the servo can hold, in either
     /// direction, in radians.
@@ -201,138 +196,75 @@ fn kind_of(model: &VehicleModel) -> VehicleModelKind {
     }
 }
 
-/// The default [`VehicleModel`] for `kind`: RC-car-scale geometry and
-/// actuator limits for a small (roughly 1/10-scale) RC racecar, matching the
-/// kind of track `generate_map` produces. `DynamicBicycle`'s mass/inertia/
-/// cornering-stiffness values are placeholder estimates for that same scale
-/// of vehicle, not measured - tune them once a real (or more carefully
-/// modeled) vehicle is available. This is a deliberate exception to
-/// [`DynamicParams`]/[`BicycleParams`] having no [`Default`]: a live,
-/// web-selectable model needs *some* starting parameters for a kind the
-/// caller only names, not configures.
-pub fn default_model(kind: VehicleModelKind) -> VehicleModel {
-    let limits = ActuatorLimits {
-        max_steering_angle_rad: 0.4189, // 24 degrees
-        max_steering_rate_rad_s: 4.0,
-        max_speed_mps: 8.0,
-        max_accel_mps2: 4.0,
-        max_decel_mps2: 8.0,
-    };
-    match kind {
-        VehicleModelKind::Bicycle => {
-            VehicleModel::Bicycle { params: BicycleParams { lf_m: 0.16, lr_m: 0.16 }, limits }
-        }
-        VehicleModelKind::DynamicBicycle => VehicleModel::DynamicBicycle {
-            params: DynamicParams {
-                mass_kg: 3.5,
-                yaw_inertia_kgm2: 0.06,
-                lf_m: 0.16,
-                lr_m: 0.16,
-                cf_n_per_rad: 60.0,
-                cr_n_per_rad: 60.0,
-            },
-            limits,
-        },
-        VehicleModelKind::NonlinearBicycle => VehicleModel::NonlinearBicycle {
-            params: NonlinearTireParams {
-                mass_kg: 3.5,
-                yaw_inertia_kgm2: 0.06,
-                lf_m: 0.16,
-                lr_m: 0.16,
-                cg_height_m: 0.05,
-                tire_mu: 1.1,
-                pacejka_b: 2.5,
-                pacejka_c: 1.3,
-                front_drive_fraction: 0.5,
-            },
-            limits,
-        },
-        VehicleModelKind::PacejkaBicycle => VehicleModel::PacejkaBicycle {
-            params: PacejkaTireParams {
-                mass_kg: 3.5,
-                yaw_inertia_kgm2: 0.06,
-                lf_m: 0.16,
-                lr_m: 0.16,
-                cg_height_m: 0.05,
-                front_b: 2.5,
-                front_c: 1.3,
-                front_d_mu: 1.1,
-                front_e: -0.5,
-                rear_b: 2.5,
-                rear_c: 1.3,
-                rear_d_mu: 1.1,
-                rear_e: -0.5,
-                combined_slip_b: 1.0,
-                combined_slip_c: 1.0,
-                front_drive_fraction: 0.5,
-            },
-            limits,
-        },
-        VehicleModelKind::TwoTrack => VehicleModel::TwoTrack {
-            params: TwoTrackParams {
-                mass_kg: 3.5,
-                yaw_inertia_kgm2: 0.06,
-                lf_m: 0.16,
-                lr_m: 0.16,
-                cg_height_m: 0.05,
-                track_width_m: 0.2,
-                front_b: 2.5,
-                front_c: 1.3,
-                front_d_mu: 1.1,
-                front_e: -0.5,
-                rear_b: 2.5,
-                rear_c: 1.3,
-                rear_d_mu: 1.1,
-                rear_e: -0.5,
-                combined_slip_b: 1.0,
-                combined_slip_c: 1.0,
-                front_drive_fraction: 0.5,
-            },
-            limits,
-        },
+/// Every tunable parameter [`SimulatedVehicle`] needs: how often it ticks,
+/// the [`ActuatorLimits`] shared by every model kind, and each kind's own
+/// physical parameters - loaded from `config/actuators/simulated_vehicle.toml`
+/// (see [`Default`]) or from an arbitrary path via [`crate::config::load`].
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct SimulatedVehicleConfig {
+    /// How often [`SimulatedVehicle`] advances the model and republishes
+    /// [`VehicleStatus`], and how often it checks
+    /// [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a wanted model switch, in
+    /// Hz.
+    pub tick_rate_hz: f64,
+    /// Shared by every [`VehicleModelKind`] - see [`ActuatorLimits`].
+    pub limits: ActuatorLimits,
+    pub bicycle: BicycleParams,
+    pub dynamic_bicycle: DynamicParams,
+    pub nonlinear_bicycle: NonlinearTireParams,
+    pub pacejka_bicycle: PacejkaTireParams,
+    pub two_track: TwoTrackParams,
+}
+
+impl Default for SimulatedVehicleConfig {
+    /// RC-car-scale geometry and actuator limits for a small (roughly
+    /// 1/10-scale) RC racecar, matching the kind of track `generate_map`
+    /// produces, from the checked-in `config/actuators/simulated_vehicle.toml`.
+    /// `dynamic_bicycle`'s mass/inertia/cornering-stiffness values are
+    /// placeholder estimates for that same scale of vehicle, not measured -
+    /// tune them once a real (or more carefully modeled) vehicle is
+    /// available. This is a deliberate exception to
+    /// [`DynamicParams`]/[`BicycleParams`] having no [`Default`]: a live,
+    /// web-selectable model needs *some* starting parameters for a kind the
+    /// caller only names, not configures.
+    fn default() -> Self {
+        toml::from_str(include_str!("../../config/actuators/simulated_vehicle.toml"))
+            .expect("config/actuators/simulated_vehicle.toml must deserialize into SimulatedVehicleConfig")
     }
 }
 
-/// The origin, stationary [`VehicleState`] for `kind` - used for the very
-/// first state [`SimulatedVehicle::run`] advances.
-fn default_state(kind: VehicleModelKind) -> VehicleState {
+/// The default [`VehicleModel`] for `kind`, built from `config`.
+pub fn default_model(kind: VehicleModelKind, config: &SimulatedVehicleConfig) -> VehicleModel {
     match kind {
-        VehicleModelKind::Bicycle => {
-            VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 })
+        VehicleModelKind::Bicycle => VehicleModel::Bicycle { params: config.bicycle, limits: config.limits },
+        VehicleModelKind::DynamicBicycle => {
+            VehicleModel::DynamicBicycle { params: config.dynamic_bicycle, limits: config.limits }
         }
-        VehicleModelKind::DynamicBicycle => VehicleState::DynamicBicycle(DynamicState {
-            x_m: 0.0,
-            y_m: 0.0,
-            heading_rad: 0.0,
-            vx_mps: 0.0,
-            vy_mps: 0.0,
-            yaw_rate_rad_s: 0.0,
-        }),
-        VehicleModelKind::NonlinearBicycle => VehicleState::NonlinearBicycle(NonlinearBicycleState {
-            x_m: 0.0,
-            y_m: 0.0,
-            heading_rad: 0.0,
-            vx_mps: 0.0,
-            vy_mps: 0.0,
-            yaw_rate_rad_s: 0.0,
-        }),
-        VehicleModelKind::PacejkaBicycle => VehicleState::PacejkaBicycle(PacejkaBicycleState {
-            x_m: 0.0,
-            y_m: 0.0,
-            heading_rad: 0.0,
-            vx_mps: 0.0,
-            vy_mps: 0.0,
-            yaw_rate_rad_s: 0.0,
-        }),
-        VehicleModelKind::TwoTrack => VehicleState::TwoTrack(TwoTrackState {
-            x_m: 0.0,
-            y_m: 0.0,
-            heading_rad: 0.0,
-            vx_mps: 0.0,
-            vy_mps: 0.0,
-            yaw_rate_rad_s: 0.0,
-        }),
+        VehicleModelKind::NonlinearBicycle => {
+            VehicleModel::NonlinearBicycle { params: config.nonlinear_bicycle, limits: config.limits }
+        }
+        VehicleModelKind::PacejkaBicycle => {
+            VehicleModel::PacejkaBicycle { params: config.pacejka_bicycle, limits: config.limits }
+        }
+        VehicleModelKind::TwoTrack => VehicleModel::TwoTrack { params: config.two_track, limits: config.limits },
     }
+}
+
+/// Builds a [`VehicleState`] of `kind` from `start`'s shared fields (position,
+/// heading, speed) - used for the very first state [`SimulatedVehicle::run`]
+/// advances, so the vehicle starts wherever [`START_STATE_TOPIC_NAME`] says
+/// to, zeroed on every other field. Implemented via [`carry_over_state`],
+/// which does exactly this projection when switching models at runtime.
+fn state_from_start(start: StartState, kind: VehicleModelKind) -> VehicleState {
+    carry_over_state(
+        VehicleState::Bicycle(BicycleState {
+            x_m: start.x_m,
+            y_m: start.y_m,
+            heading_rad: start.heading_rad,
+            speed_mps: start.speed_mps,
+        }),
+        kind,
+    )
 }
 
 /// Projects `old`'s shared fields (position, heading, speed) into a fresh
@@ -440,24 +372,30 @@ fn select_command(autonomous: VescCommand, human: VescCommand) -> VescCommand {
     if human.time_stamp_us >= autonomous.time_stamp_us { human } else { autonomous }
 }
 
-/// Runs `model` forward in time at [`TICK_RATE_HZ`], reading the freshest of
+/// Runs `model` forward in time at [`SimulatedVehicleConfig::tick_rate_hz`], reading the freshest of
 /// [`VESC_COMMAND_TOPIC_NAME`]/[`HUMAN_VESC_COMMAND_TOPIC_NAME`] each tick
-/// and publishing the resulting [`VehicleStatus`]. Starts at the world
-/// origin, stationary, with the steering centered. Also watches
-/// [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and switches to
-/// [`default_model`] of the wanted kind - carrying over shared state (see
-/// [`carry_over_state`]) - whenever it no longer matches the model currently
-/// running.
+/// and publishing the resulting [`VehicleStatus`]. Starts at whatever
+/// [`START_STATE_TOPIC_NAME`] holds at that moment (the world origin,
+/// stationary, if [`crate::sensors::MapServer`] hasn't published one yet),
+/// with the steering centered, and places the vehicle there again - steering
+/// re-centered - every time [`START_STATE_TOPIC_NAME`] changes (e.g. a map
+/// change) or [`PLACE_AT_START_TOPIC_NAME`] is bumped (e.g. `web_gui`'s "P"
+/// key). Also watches [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and
+/// switches to [`default_model`] of the wanted kind - carrying over shared
+/// state (see [`carry_over_state`]) - whenever it no longer matches the
+/// model currently running.
 pub struct SimulatedVehicle {
     id: u8,
     name: String,
     model: VehicleModel,
+    config: SimulatedVehicleConfig,
 }
 
 impl SimulatedVehicle {
-    /// Creates a `SimulatedVehicle` that will run `model` once started.
-    pub fn new(name: impl Into<String>, model: VehicleModel) -> Self {
-        Self { id: 0, name: name.into(), model }
+    /// Creates a `SimulatedVehicle` that will run `model` once started,
+    /// ticking and switching models per `config`.
+    pub fn new(name: impl Into<String>, model: VehicleModel, config: SimulatedVehicleConfig) -> Self {
+        Self { id: 0, name: name.into(), model, config }
     }
 }
 
@@ -477,26 +415,39 @@ impl Executor for SimulatedVehicle {
         let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
         let model_selection_topic = captain.topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME);
         let model_status_topic = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
+        let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
+        let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
 
         let mut applied_kind = kind_of(&self.model);
         model_status_topic
             .write(self.id, VehicleModelStatus { kind: applied_kind })
             .expect("lost writer authorization for the vehicle_model_status topic");
 
-        let mut state = default_state(applied_kind);
+        let mut applied_start = start_state_topic.read();
+        let mut applied_place_request = place_at_start_topic.read().requested;
+        let mut state = state_from_start(applied_start, applied_kind);
         let mut steering_angle_rad = 0.0;
-        let dt_s = 1.0 / TICK_RATE_HZ;
+        let dt_s = 1.0 / self.config.tick_rate_hz;
         let interval = Duration::from_secs_f64(dt_s);
 
         while captain.is_running(self.id) {
             let wanted_kind = model_selection_topic.read().kind;
             if wanted_kind != applied_kind {
-                self.model = default_model(wanted_kind);
+                self.model = default_model(wanted_kind, &self.config);
                 state = carry_over_state(state, wanted_kind);
                 applied_kind = wanted_kind;
                 model_status_topic
                     .write(self.id, VehicleModelStatus { kind: applied_kind })
                     .expect("lost writer authorization for the vehicle_model_status topic");
+            }
+
+            let wanted_start = start_state_topic.read();
+            let wanted_place_request = place_at_start_topic.read().requested;
+            if wanted_start != applied_start || wanted_place_request != applied_place_request {
+                state = state_from_start(wanted_start, applied_kind);
+                steering_angle_rad = 0.0;
+                applied_start = wanted_start;
+                applied_place_request = wanted_place_request;
             }
 
             let command = select_command(vesc_topic.read(), human_topic.read());
@@ -528,6 +479,15 @@ impl Executor for SimulatedVehicle {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn fresh(&self) -> Box<dyn Executor> {
+        // Rebuilds `model` via `default_model`, rather than cloning `self.model`,
+        // so a restart resets the vehicle's simulated state (position, velocity,
+        // ...) even if the model kind was switched mid-run via
+        // `VEHICLE_MODEL_SELECTION_TOPIC_NAME` - only the *kind* carries over.
+        let kind = kind_of(&self.model);
+        Box::new(SimulatedVehicle::new(self.name.clone(), default_model(kind, &self.config), self.config.clone()))
     }
 }
 
@@ -659,6 +619,7 @@ mod tests {
 
     #[test]
     fn default_model_validates_for_every_kind() {
+        let config = SimulatedVehicleConfig::default();
         for kind in [
             VehicleModelKind::Bicycle,
             VehicleModelKind::DynamicBicycle,
@@ -666,7 +627,7 @@ mod tests {
             VehicleModelKind::PacejkaBicycle,
             VehicleModelKind::TwoTrack,
         ] {
-            match default_model(kind) {
+            match default_model(kind, &config) {
                 VehicleModel::Bicycle { params, limits } => {
                     assert!(params.validate().is_ok());
                     assert!(limits.validate().is_ok());
@@ -731,6 +692,22 @@ mod tests {
         match next {
             VehicleState::Bicycle(s) => assert!((s.speed_mps - 5.0).abs() < 1e-12),
             _ => panic!("expected Bicycle state"),
+        }
+    }
+
+    #[test]
+    fn state_from_start_carries_the_start_state_into_every_model_kind() {
+        let start = StartState { x_m: 3.0, y_m: -2.0, heading_rad: 0.5, speed_mps: 0.0 };
+        match state_from_start(start, VehicleModelKind::DynamicBicycle) {
+            VehicleState::DynamicBicycle(s) => {
+                assert_eq!(s.x_m, 3.0);
+                assert_eq!(s.y_m, -2.0);
+                assert_eq!(s.heading_rad, 0.5);
+                assert_eq!(s.vx_mps, 0.0);
+                assert_eq!(s.vy_mps, 0.0);
+                assert_eq!(s.yaw_rate_rad_s, 0.0);
+            }
+            _ => panic!("expected DynamicBicycle state"),
         }
     }
 

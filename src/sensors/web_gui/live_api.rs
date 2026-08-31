@@ -1,19 +1,40 @@
 //! The live, topic-backed API: the currently selected map's identity and
 //! pixels (from the `map` topic), the vehicle's live status and model, and
-//! the write endpoints a driver uses to steer it and pick its model
-//! (`map_selection`, `human_vesc_command`, `vehicle_model_selection`) - as
-//! opposed to [`super::maps_api`], which lists/generates map folders on
-//! disk.
+//! the write endpoints a driver uses to steer it, pick its model, and place
+//! it at the start line (`map_selection`, `human_vesc_command`,
+//! `vehicle_model_selection`, `place_at_start`) - as opposed to
+//! [`super::maps_api`], which lists/generates map folders on disk.
 
+use super::WebGuiConfig;
 use super::maps_api::{bad_request, json_response, safe_map_folder};
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind,
-    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::Captain;
 use std::path::Path;
 use tiny_http::{Request, Response, ResponseBox};
+
+/// The subset of [`WebGuiConfig`] the frontend needs, as served by
+/// [`config`].
+#[derive(serde::Serialize)]
+struct FrontendConfig {
+    human_max_speed_mps: f64,
+    human_max_steering_rad: f64,
+}
+
+/// `GET /api/config` - frontend-facing config values (the WASD human
+/// control limits), so the UI and server never drift apart.
+pub fn config(config: &WebGuiConfig) -> ResponseBox {
+    json_response(
+        &FrontendConfig {
+            human_max_speed_mps: config.human_max_speed_mps,
+            human_max_steering_rad: config.human_max_steering_rad,
+        },
+        200,
+    )
+}
 
 /// `GET /api/map` - the currently selected map's name and dimensions (not
 /// its pixels - see [`raster`]), read from the `map` topic. `name` is
@@ -191,6 +212,31 @@ pub fn select_vehicle_model(request: &mut Request, captain: &Captain, writer_id:
         .topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME)
         .write(writer_id, VehicleModelSelection { kind })
         .expect("lost writer authorization for the vehicle_model_selection topic");
+    json_response(&(), 200)
+}
+
+/// `POST /api/restart` - asks the runner to kill every executor and bring
+/// the whole system back up completely fresh (see
+/// [`Captain::request_restart`]), e.g. from the "R" keyboard shortcut. Note
+/// this `WebGui` itself is one of the executors restarted, so the response
+/// to this very request is the last thing the old HTTP server sends before
+/// it's torn down and rebuilt.
+pub fn restart(captain: &Captain) -> ResponseBox {
+    captain.request_restart();
+    json_response(&(), 200)
+}
+
+/// `POST /api/place_at_start` - bumps `place_at_start`'s counter, asking
+/// [`crate::actuators::SimulatedVehicle`] to place the vehicle at whatever
+/// `start_state` currently holds, e.g. from the "P" keyboard shortcut. Unlike
+/// [`restart`], this doesn't tear anything down - just resets the vehicle's
+/// simulated position/heading/speed in place.
+pub fn place_at_start(captain: &Captain, writer_id: u8) -> ResponseBox {
+    let topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+    let requested = topic.read().requested.wrapping_add(1);
+    topic
+        .write(writer_id, PlaceAtStart { requested })
+        .expect("lost writer authorization for the place_at_start topic");
     json_response(&(), 200)
 }
 

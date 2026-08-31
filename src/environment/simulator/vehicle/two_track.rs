@@ -45,7 +45,7 @@ pub struct TwoTrackState {
 /// describe a specific vehicle's real physical properties, and silently
 /// defaulting them would silently produce a physically wrong trajectory
 /// with no signal that anything is off.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub struct TwoTrackParams {
     /// Vehicle mass, in kilograms.
     pub mass_kg: f64,
