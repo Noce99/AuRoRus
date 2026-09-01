@@ -134,8 +134,8 @@ Same as the kinematic bicycle model: `steering_angle_rad` and
 ### Equations
 
 ```text
-alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
-alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+alpha_f = atan((vy_mps + lf_m*yaw_rate_rad_s) / vx_mps) - steering_angle_rad
+alpha_r = atan((vy_mps - lr_m*yaw_rate_rad_s) / vx_mps)
 Fyf     = -cf_n_per_rad * alpha_f
 Fyr     = -cr_n_per_rad * alpha_r
 
@@ -169,19 +169,34 @@ across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
   regularization below, this means the model still isn't a physically
   faithful stand-in for real tire behavior at a stop - it's only numerically
   bounded there.
-- Not valid near zero forward speed: `alpha_f`/`alpha_r` use `atan2` against
-  `vx_mps`, so as `vx_mps` approaches zero, tiny lateral motion produces slip
-  angles approaching ±90°. Combined with this model's *unbounded* linear tire
-  force, that used to let a feedback loop through the `vy_mps*yaw_rate_rad_s`
-  term in `dvx/dt` run away - observed as the vehicle's speed suddenly
-  rocketing (forward or backward) to many times what
-  `crate::actuators::simulated_vehicle::ActuatorLimits` allows, from a
-  standing start under full steering and throttle. `derivative` now floors
-  `vx_mps`'s magnitude to `LOW_SPEED_FLOOR_MPS` before computing slip angles,
-  which keeps the numerics bounded, though the resulting forces still don't
-  represent real tire behavior at a stop or in a very slow maneuver - a
-  low-speed blend with the kinematic model (which has no such singularity)
-  would be a more physically faithful future improvement.
+- Not valid near zero forward speed: as `vx_mps` approaches zero, tiny
+  lateral motion produces slip angles approaching ±90°. Combined with this
+  model's *unbounded* linear tire force, that used to let a feedback loop
+  through the `vy_mps*yaw_rate_rad_s` term in `dvx/dt` run away - observed as
+  the vehicle's speed suddenly rocketing (forward or backward) to many times
+  what `crate::actuators::simulated_vehicle::ActuatorLimits` allows, from a
+  standing start under full steering and throttle. `derivative` floors
+  `vx_mps`'s magnitude to `LOW_SPEED_FLOOR_MPS` before computing slip angles
+  (`vx_reg`), which keeps the numerics bounded, and separately scales `Fyf`/
+  `Fyr` toward `0.0` as the axle's true (unfloored) relative speed approaches
+  zero (`low_speed_force_scale`) - without that second piece, a vehicle at a
+  complete standstill would still produce full lateral force from steering
+  angle alone (since `vx_reg` is never `0.0`), rotating/drifting in place
+  under steering input with no throttle. The resulting forces still don't
+  represent real tire behavior in a very slow maneuver short of a complete
+  stop - a low-speed blend with the kinematic model (which has no such
+  singularity) would be a more physically faithful future improvement.
+- `alpha_f`/`alpha_r` use plain `atan` (of the ratio) rather than `atan2` -
+  for `vx_reg > 0` the two are identical, but `atan2` would compute an angle
+  near `±180°` (not near `0°`) whenever `vx_reg < 0` (reversing) and lateral
+  velocity is small, which reads as a near-maximum slip angle despite there
+  being no actual slip - observed as steering doing almost nothing while
+  reversing, and as straight-line reverse spuriously generating lateral
+  force. Plain `atan` degrades gracefully into reverse instead, at the cost
+  of losing the true `atan2` slip angle's sign distinction between, e.g., a
+  wheel moving forward-and-left vs. backward-and-right (both give the same
+  small positive ratio) - not a distinction this model's tire curve needs,
+  since it only ever consumes the angle through an odd function of it.
 - No load transfer, no combined longitudinal/lateral tire force limit (a
   "friction circle"), and no aerodynamic or rolling-resistance forces - see
   the nonlinear bicycle model below for one that adds the first two.
@@ -234,9 +249,10 @@ Fz_f = max(static_fz_f - transfer, 0)   // clamped: load can't go negative
 Fz_r = max(static_fz_r + transfer, 0)
 
 // Slip angles - same as the dynamic bicycle model, including the same
-// low-speed vx_mps floor (see that model's Limitations).
-alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
-alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+// low-speed vx_mps floor and plain-atan reverse handling (see that model's
+// Limitations).
+alpha_f = atan((vy_mps + lf_m*yaw_rate_rad_s) / vx_mps) - steering_angle_rad
+alpha_r = atan((vy_mps - lr_m*yaw_rate_rad_s) / vx_mps)
 
 // Simplified-Pacejka lateral force: saturating and load-dependent, instead
 // of growing without bound like the linear tire model's Fy = -c*alpha.
@@ -299,9 +315,11 @@ across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
   Magic Formula (no curvature factor, so it's symmetric about `alpha = 0` in
   a way a real tire curve often isn't) - see the Pacejka bicycle model below
   for one that adds it.
-- Same low-speed `vx_mps` floor on the slip-angle `atan2` as the dynamic
-  bicycle model, for the same reason (numerically bounded near a stop, not
-  physically faithful there).
+- Same low-speed `vx_mps` floor and force scaling on the slip angle as the
+  dynamic bicycle model, for the same reason (numerically bounded near a
+  stop, and no phantom force from steering alone at a complete standstill),
+  and the same plain-`atan` (rather than `atan2`) slip angle so reversing
+  still steers.
 
 ## Pacejka bicycle model (full Magic Formula)
 
@@ -346,11 +364,11 @@ Same as the other three models: `steering_angle_rad` and
 
 ```text
 // Load transfer and slip angles - identical to the nonlinear bicycle model,
-// including its low-speed vx_mps floor.
+// including its low-speed vx_mps floor and plain-atan reverse handling.
 Fz_f, Fz_r = quasi-static front/rear normal load from mass_kg, cg_height_m,
              lf_m, lr_m, and acceleration_mps2 (clamped to >= 0)
-alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_mps) - steering_angle_rad
-alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_mps)
+alpha_f = atan((vy_mps + lf_m*yaw_rate_rad_s) / vx_mps) - steering_angle_rad
+alpha_r = atan((vy_mps - lr_m*yaw_rate_rad_s) / vx_mps)
 
 // Full ("similarity") Magic Formula per axle - D is the axle's peak force,
 // scaled by its current normal load; E adds curvature the simplified curve
@@ -390,9 +408,9 @@ frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
 ### Limitations
 
 - Same quasi-static (no suspension dynamics), single-track (no left/right),
-  no-aerodynamic-forces, and low-speed `vx_mps` floor limitations as the
-  nonlinear bicycle model - see the two-track model below for one that
-  addresses the single-track part.
+  no-aerodynamic-forces, low-speed `vx_mps` floor/force-scaling, and
+  plain-`atan` reverse handling as the nonlinear bicycle model - see the
+  two-track model below for one that addresses the single-track part.
 - Combined slip is still driven by each axle's *force* usage ratio, not a
   true independently-evolving slip ratio from wheel rotational dynamics -
   there's still no wheelspin or lockup. Modeling that would mean adding
@@ -484,10 +502,11 @@ delta_fr = atan((lf_m+lr_m) * kappa / (1 + (track_width_m/2)*kappa))
 
 // 4. Per-wheel slip angle, from the rigid-body velocity at each wheel's
 //    position (a_i = lf_m or -lr_m, b_i = +-track_width_m/2), with the same
-//    low-speed vx floor as the single-track models applied per wheel:
+//    low-speed vx floor and plain-atan reverse handling as the single-track
+//    models applied per wheel:
 vx_wheel_i = vx_mps - yaw_rate_rad_s * b_i
 vy_wheel_i = vy_mps + yaw_rate_rad_s * a_i
-alpha_i    = atan2(vy_wheel_i, regularized_vx(vx_wheel_i)) - delta_i   // delta_i = 0 for rear wheels
+alpha_i    = atan(vy_wheel_i / regularized_vx(vx_wheel_i)) - delta_i   // delta_i = 0 for rear wheels
 
 // 5. Per-wheel lateral force: the same full Magic Formula as the Pacejka
 //    model (front wheels use front_b/c/d_mu/e with Fz_fl/Fz_fr, rear wheels
@@ -530,7 +549,8 @@ frozen across the step, `heading_rad` wrapped to `(-pi, pi]` at the end).
 
 - Same quasi-static (no suspension dynamics) caveat as the other two
   nonlinear models, now for both longitudinal *and* lateral transfer. Same
-  low-speed `vx` floor on the per-wheel slip-angle `atan2` too.
+  low-speed `vx` floor/force-scaling and plain-`atan` reverse handling on the
+  per-wheel slip angle too.
 - Lateral transfer is split between axles by load share, not by an explicit
   front/rear roll-stiffness distribution (an anti-roll-bar setup) - a real
   vehicle's front/rear lateral transfer split can be tuned independently of

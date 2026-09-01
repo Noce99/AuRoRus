@@ -238,17 +238,31 @@ fn wheel_combined_slip(combined_slip_b: f64, combined_slip_c: f64, d_n: f64, dem
 /// which this mitigates the same singularity for, applied per wheel here.
 const LOW_SPEED_FLOOR_MPS: f64 = 1.0;
 
-/// `vx_mps`, floored in magnitude to [`LOW_SPEED_FLOOR_MPS`] - sign-preserving,
-/// defaulting to the forward direction at exactly zero, since that's the
-/// common case (starting from a stop).
+/// `vx_mps`'s magnitude, floored to [`LOW_SPEED_FLOOR_MPS`] - always
+/// positive, deliberately *not* sign-preserving - see
+/// `crate::environment::simulator::vehicle::dynamic_bicycle::regularized_vx`,
+/// which this needs it for the same reason: with a *signed* denominator, the
+/// yaw-rate feedback term's `1/vx_reg` coefficient flips from damping to
+/// amplifying whenever a wheel reverses - a genuine linear instability of
+/// the reversed model, not a numerical artifact - so the denominator's sign
+/// is kept fixed instead. The true signed `vx_wheel` still carries the
+/// forward/reverse distinction through the rest of [`wheel_body_forces`].
 fn regularized_vx(vx_mps: f64) -> f64 {
-    if vx_mps.abs() >= LOW_SPEED_FLOOR_MPS {
-        vx_mps
-    } else if vx_mps < 0.0 {
-        -LOW_SPEED_FLOOR_MPS
-    } else {
-        LOW_SPEED_FLOOR_MPS
-    }
+    vx_mps.abs().max(LOW_SPEED_FLOOR_MPS)
+}
+
+/// Scales a wheel's tire force to `0.0` as its true (unfloored) relative
+/// speed - the vector `(vx_wheel, vy_wheel)` its contact patch actually sees
+/// - approaches zero, saturating to `1.0` once that speed reaches
+/// [`LOW_SPEED_FLOOR_MPS`] - see
+/// `crate::environment::simulator::vehicle::dynamic_bicycle::low_speed_force_scale`,
+/// which this is needed for the same reason as: flooring the `atan2`
+/// denominator keeps the *slip angle* bounded, but by itself still lets a
+/// stationary vehicle produce full lateral tire force from steering angle
+/// alone, which is physically wrong since a tire with zero relative velocity
+/// isn't sliding and so can't be generating any force.
+fn low_speed_force_scale(vx_wheel: f64, vy_wheel: f64) -> f64 {
+    (vx_wheel.hypot(vy_wheel) / LOW_SPEED_FLOOR_MPS).min(1.0)
 }
 
 /// One wheel's fixed geometry and this-tick inputs, gathered so
@@ -274,6 +288,12 @@ struct WheelInput {
 /// steered frame), rotated into the body frame by `delta_rad`, and the yaw
 /// moment that force produces about the CG via its `(a_m, b_m)` lever arm.
 /// Returns `(fx_body_n, fy_body_n, yaw_moment_nm)`.
+///
+/// The slip angle is computed against `vx_wheel`'s always-positive
+/// [`regularized_vx`], using plain `atan` rather than `atan2` - see that
+/// function's doc comment, and
+/// `crate::environment::simulator::vehicle::dynamic_bicycle`'s `derivative`
+/// doc comment, for why.
 fn wheel_body_forces(
     wheel: &WheelInput,
     vx_mps: f64,
@@ -284,10 +304,10 @@ fn wheel_body_forces(
 ) -> (f64, f64, f64) {
     let vx_wheel = vx_mps - yaw_rate_rad_s * wheel.b_m;
     let vy_wheel = vy_mps + yaw_rate_rad_s * wheel.a_m;
-    let alpha = vy_wheel.atan2(regularized_vx(vx_wheel)) - wheel.delta_rad;
+    let alpha = (vy_wheel / regularized_vx(vx_wheel)).atan() - wheel.delta_rad;
 
     let d_n = wheel.d_mu * wheel.fz_n;
-    let fy_raw = pacejka_lateral_force(wheel.b, wheel.c, d_n, wheel.e, alpha);
+    let fy_raw = pacejka_lateral_force(wheel.b, wheel.c, d_n, wheel.e, alpha) * low_speed_force_scale(vx_wheel, vy_wheel);
     let (fx_wheel, weighting) = wheel_combined_slip(combined_slip_b, combined_slip_c, d_n, wheel.fx_demand_n);
     let fy_wheel = fy_raw * weighting;
 
@@ -564,6 +584,67 @@ mod tests {
         assert!((next.vx_mps - 5.0).abs() < 1e-9);
         assert!(next.vy_mps.abs() < 1e-9);
         assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn steering_alone_from_a_standstill_does_not_move_the_vehicle() {
+        // See dynamic_bicycle's test of the same name - a stationary tire
+        // can't be generating any lateral force, so steering with zero
+        // throttle should leave a standing vehicle exactly where it is.
+        let params = test_params();
+        let mut state =
+            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..100 {
+            state = step(state, params, 0.4, 0.0, dt_s);
+        }
+        assert_eq!(
+            state,
+            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 }
+        );
+    }
+
+    #[test]
+    fn straight_line_reverse_and_no_steering_produces_no_lateral_force() {
+        // See dynamic_bicycle's test of the same name - a wheel rolling
+        // straight backward with no steering has zero actual slip, so it
+        // should produce zero lateral force just like straight forward.
+        let state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let next = step(state, test_params(), 0.0, 0.0, 2.0);
+        assert!((next.x_m - (-10.0)).abs() < 1e-9);
+        assert!(next.y_m.abs() < 1e-9);
+        assert!(next.heading_rad.abs() < 1e-9);
+        assert!((next.vx_mps - (-5.0)).abs() < 1e-9);
+        assert!(next.vy_mps.abs() < 1e-9);
+        assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn steering_still_turns_the_vehicle_while_reversing() {
+        // See dynamic_bicycle's test of the same name.
+        let params = test_params();
+        let mut state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -3.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..50 {
+            state = step(state, params, 0.35, 0.0, dt_s);
+        }
+        assert!(state.yaw_rate_rad_s.abs() > 0.5, "expected steering to meaningfully turn the vehicle in reverse: {state:?}");
+    }
+
+    #[test]
+    fn steering_while_accelerating_into_reverse_does_not_diverge() {
+        // See dynamic_bicycle's test of the same name.
+        let params = test_params();
+        let mut state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        let (target_speed, max_accel, max_decel) = (-3.0_f64, 4.0_f64, 8.0_f64);
+        for _ in 0..300 {
+            let err = target_speed - state.vx_mps;
+            let accel = if err >= 0.0 { (err / dt_s).min(max_accel) } else { (err / dt_s).max(-max_decel) };
+            state = step(state, params, 0.2, accel, dt_s);
+            assert!(state.vy_mps.is_finite() && state.yaw_rate_rad_s.is_finite());
+            assert!(state.yaw_rate_rad_s.abs() < 10.0, "yaw rate diverged while reversing under steering: {state:?}");
+        }
     }
 
     #[test]

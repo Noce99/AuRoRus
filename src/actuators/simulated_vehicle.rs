@@ -161,7 +161,9 @@ impl VehicleState {
     /// the kinematic model, or the magnitude of the body-frame velocity for
     /// a model (like [`DynamicState`]/[`NonlinearBicycleState`]/
     /// [`PacejkaBicycleState`]/[`TwoTrackState`]) that tracks longitudinal
-    /// and lateral velocity separately.
+    /// and lateral velocity separately. For reporting only - see
+    /// [`Self::longitudinal_speed_mps`] for the signed quantity [`advance`]'s
+    /// speed controller tracks.
     fn speed_mps(&self) -> f64 {
         match self {
             Self::Bicycle(s) => s.speed_mps,
@@ -169,6 +171,27 @@ impl VehicleState {
             Self::NonlinearBicycle(s) => s.vx_mps.hypot(s.vy_mps),
             Self::PacejkaBicycle(s) => s.vx_mps.hypot(s.vy_mps),
             Self::TwoTrack(s) => s.vx_mps.hypot(s.vy_mps),
+        }
+    }
+
+    /// The signed longitudinal speed [`advance`]'s controller tracks
+    /// `target_speed_mps` against, in meters/second - the kinematic model's
+    /// single signed `speed_mps`, or `vx_mps` for a model that tracks
+    /// longitudinal and lateral velocity separately. Unlike [`Self::speed_mps`],
+    /// this is signed: using the unsigned ground-speed magnitude here would
+    /// let a braking overshoot past zero (a negative `vx_mps` with `vy_mps`
+    /// near zero) read as still needing to *decelerate*, since the magnitude
+    /// keeps growing as the vehicle picks up speed backward - driving
+    /// `accel_mps2` to stay pinned at `-max_decel_mps2` every tick instead of
+    /// flipping sign, a runaway with no bound from `max_speed_mps` (only the
+    /// target is clamped to it, not the state).
+    fn longitudinal_speed_mps(&self) -> f64 {
+        match self {
+            Self::Bicycle(s) => s.speed_mps,
+            Self::DynamicBicycle(s) => s.vx_mps,
+            Self::NonlinearBicycle(s) => s.vx_mps,
+            Self::PacejkaBicycle(s) => s.vx_mps,
+            Self::TwoTrack(s) => s.vx_mps,
         }
     }
 }
@@ -335,7 +358,7 @@ fn advance(
         .clamp(-limits.max_steering_angle_rad, limits.max_steering_angle_rad);
 
     let target_speed_mps = target_speed_mps.clamp(-limits.max_speed_mps, limits.max_speed_mps);
-    let speed_error_mps = target_speed_mps - state.speed_mps();
+    let speed_error_mps = target_speed_mps - state.longitudinal_speed_mps();
     let accel_mps2 = if speed_error_mps >= 0.0 {
         (speed_error_mps / dt_s).min(limits.max_accel_mps2)
     } else {

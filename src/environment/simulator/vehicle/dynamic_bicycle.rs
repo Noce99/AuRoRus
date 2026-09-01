@@ -110,17 +110,38 @@ struct DynamicDerivative {
 /// moving faster than this.
 const LOW_SPEED_FLOOR_MPS: f64 = 1.0;
 
-/// `vx_mps`, floored in magnitude to [`LOW_SPEED_FLOOR_MPS`] - sign-preserving,
-/// defaulting to the forward direction at exactly zero, since that's the
-/// common case (starting from a stop).
+/// `vx_mps`'s magnitude, floored to [`LOW_SPEED_FLOOR_MPS`] - always
+/// positive, deliberately *not* sign-preserving. Used as the slip angle's
+/// `atan` denominator (see [`derivative`]) rather than the signed `vx_mps`:
+/// the model's yaw-rate feedback term has a `1/vx_reg` coefficient whose sign
+/// determines whether it damps or amplifies yaw rate, and with a *signed*
+/// `vx_reg` that coefficient flips from damping to amplifying whenever the
+/// vehicle reverses - a genuine linear instability of the reversed model,
+/// not a numerical artifact, that (with steering held) grows the yaw rate
+/// exponentially every tick. Keeping the denominator's sign fixed (always
+/// positive) keeps that feedback term damping in both directions, matching
+/// how the *forward* model is dynamically stable. What direction the vehicle
+/// actually turns while reversing still comes out sign-correct: `dx/dt`/
+/// `dy/dt`/`dvy/dt`/`dyaw_rate/dt` all still multiply by the true signed
+/// `vx_mps` elsewhere in [`derivative`], which is what actually carries the
+/// forward/reverse distinction through the rest of the model.
 fn regularized_vx(vx_mps: f64) -> f64 {
-    if vx_mps.abs() >= LOW_SPEED_FLOOR_MPS {
-        vx_mps
-    } else if vx_mps < 0.0 {
-        -LOW_SPEED_FLOOR_MPS
-    } else {
-        LOW_SPEED_FLOOR_MPS
-    }
+    vx_mps.abs().max(LOW_SPEED_FLOOR_MPS)
+}
+
+/// Scales an axle's tire force to `0.0` as its true (unfloored) relative
+/// speed - the vector `(vx_mps, lateral_mps)` its contact patch actually
+/// sees - approaches zero, saturating to `1.0` once that speed reaches
+/// [`LOW_SPEED_FLOOR_MPS`]. Needed on top of [`regularized_vx`]: flooring the
+/// `atan2` denominator keeps the *slip angle* bounded, but by itself still
+/// lets a stationary vehicle produce full lateral tire force from steering
+/// angle alone (`alpha_f = -steering_angle_rad` when `vy_mps` and
+/// `yaw_rate_rad_s` are both `0.0`, since `vx_reg` is never `0.0`) - which is
+/// physically wrong, since a tire with zero relative velocity isn't sliding
+/// and so can't be generating any force. Observed in practice as the vehicle
+/// rotating/drifting in place under steering input alone, with no throttle.
+fn low_speed_force_scale(vx_mps: f64, lateral_mps: f64) -> f64 {
+    (vx_mps.hypot(lateral_mps) / LOW_SPEED_FLOOR_MPS).min(1.0)
 }
 
 /// The instantaneous derivative of `state` under a constant control input,
@@ -128,10 +149,10 @@ fn regularized_vx(vx_mps: f64) -> f64 {
 ///
 /// ```text
 /// vx_reg  = regularized_vx(vx_mps)   // see LOW_SPEED_FLOOR_MPS
-/// alpha_f = atan2(vy_mps + lf_m*yaw_rate_rad_s, vx_reg) - steering_angle_rad
-/// alpha_r = atan2(vy_mps - lr_m*yaw_rate_rad_s, vx_reg)
-/// Fyf     = -cf_n_per_rad * alpha_f
-/// Fyr     = -cr_n_per_rad * alpha_r
+/// alpha_f = atan((vy_mps + lf_m*yaw_rate_rad_s) / vx_reg) - steering_angle_rad
+/// alpha_r = atan((vy_mps - lr_m*yaw_rate_rad_s) / vx_reg)
+/// Fyf     = -cf_n_per_rad * alpha_f * low_speed_force_scale(vx_mps, vy_mps + lf_m*yaw_rate_rad_s)
+/// Fyr     = -cr_n_per_rad * alpha_r * low_speed_force_scale(vx_mps, vy_mps - lr_m*yaw_rate_rad_s)
 ///
 /// dx/dt        = vx_mps*cos(heading_rad) - vy_mps*sin(heading_rad)
 /// dy/dt        = vx_mps*sin(heading_rad) + vy_mps*cos(heading_rad)
@@ -148,8 +169,14 @@ fn regularized_vx(vx_mps: f64) -> f64 {
 /// (`vx_mps`, `vy_mps`, `yaw_rate_rad_s`), which is what lets this model
 /// produce real lateral tire forces (`Fyf`, `Fyr`) via a linear tire model,
 /// rather than assuming the tires can always deliver whatever lateral
-/// motion the geometry implies. They're computed against `vx_reg` rather
-/// than the raw `vx_mps` - see [`LOW_SPEED_FLOOR_MPS`].
+/// motion the geometry implies. They're computed against `vx_reg` - always
+/// positive, see [`regularized_vx`] - rather than the raw (signed) `vx_mps`,
+/// using plain `atan` rather than `atan2`: with a positive-only denominator
+/// the two are identical (`atan2(y,x) == atan(y/x)` whenever `x > 0`, for
+/// any `y`), but plain `atan` is what makes a positive-only `vx_reg`
+/// meaningful in the first place - `atan2` would still fold the sign of the
+/// *true* `vx_mps` back in via `y`'s sign convention in a way `atan` doesn't
+/// need to care about here.
 fn derivative(
     state: DynamicState,
     params: DynamicParams,
@@ -157,10 +184,12 @@ fn derivative(
     acceleration_mps2: f64,
 ) -> DynamicDerivative {
     let vx_reg = regularized_vx(state.vx_mps);
-    let alpha_f = (state.vy_mps + params.lf_m * state.yaw_rate_rad_s).atan2(vx_reg) - steering_angle_rad;
-    let alpha_r = (state.vy_mps - params.lr_m * state.yaw_rate_rad_s).atan2(vx_reg);
-    let fyf = -params.cf_n_per_rad * alpha_f;
-    let fyr = -params.cr_n_per_rad * alpha_r;
+    let front_lateral_mps = state.vy_mps + params.lf_m * state.yaw_rate_rad_s;
+    let rear_lateral_mps = state.vy_mps - params.lr_m * state.yaw_rate_rad_s;
+    let alpha_f = (front_lateral_mps / vx_reg).atan() - steering_angle_rad;
+    let alpha_r = (rear_lateral_mps / vx_reg).atan();
+    let fyf = -params.cf_n_per_rad * alpha_f * low_speed_force_scale(state.vx_mps, front_lateral_mps);
+    let fyr = -params.cr_n_per_rad * alpha_r * low_speed_force_scale(state.vx_mps, rear_lateral_mps);
     let cos_delta = steering_angle_rad.cos();
 
     let (sin_h, cos_h) = state.heading_rad.sin_cos();
@@ -251,6 +280,7 @@ mod tests {
         }
     }
 
+
     #[test]
     fn default_geometry_validates() {
         assert!(test_params().validate().is_ok());
@@ -295,6 +325,74 @@ mod tests {
         assert!((next.vx_mps - 5.0).abs() < 1e-9);
         assert!(next.vy_mps.abs() < 1e-9);
         assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn steering_alone_from_a_standstill_does_not_move_the_vehicle() {
+        // A stationary tire isn't sliding, so it can't be generating any
+        // lateral force - steering with zero throttle should leave a
+        // standing vehicle exactly where it is, not spin/drift it in place
+        // (see low_speed_force_scale).
+        let params = test_params();
+        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..100 {
+            state = step(state, params, 0.4, 0.0, dt_s);
+        }
+        assert_eq!(state, DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 });
+    }
+
+    #[test]
+    fn straight_line_reverse_and_no_steering_produces_no_lateral_force() {
+        // A wheel rolling straight backward with no steering has zero actual
+        // slip, so it should produce zero lateral force - same as straight
+        // forward (straight_line_zero_steering_and_no_slip_matches_simple_kinematics)
+        // but with vx_mps negative. Regression for atan2 computing a slip
+        // angle near +-pi (not 0) whenever vx_mps < 0, which used to make
+        // reversing spuriously drift/rotate even with the wheels straight.
+        let state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let next = step(state, test_params(), 0.0, 0.0, 2.0);
+        assert!((next.x_m - (-10.0)).abs() < 1e-9);
+        assert!(next.y_m.abs() < 1e-9);
+        assert!(next.heading_rad.abs() < 1e-9);
+        assert!((next.vx_mps - (-5.0)).abs() < 1e-9);
+        assert!(next.vy_mps.abs() < 1e-9);
+        assert!(next.yaw_rate_rad_s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn steering_still_turns_the_vehicle_while_reversing() {
+        // Regression for steering doing almost nothing while reversing: the
+        // old atan2-based slip angle saturated near the tire curve's extreme
+        // for any nonzero steering once vx_mps went negative, instead of
+        // responding proportionally like it does going forward.
+        let params = test_params();
+        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -3.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        for _ in 0..50 {
+            state = step(state, params, 0.35, 0.0, dt_s);
+        }
+        assert!(state.yaw_rate_rad_s.abs() > 0.5, "expected steering to meaningfully turn the vehicle in reverse: {state:?}");
+    }
+
+    #[test]
+    fn steering_while_accelerating_into_reverse_does_not_diverge() {
+        // Regression: with a *signed* regularized_vx, the yaw-rate feedback
+        // term's 1/vx_reg coefficient flips from damping to amplifying while
+        // reversing at low speed (a genuine linear instability of the
+        // reversed model), which under steering grew yaw_rate_rad_s
+        // exponentially every tick instead of settling into a bounded turn.
+        let params = test_params();
+        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let dt_s = 0.01;
+        let (target_speed, max_accel, max_decel) = (-3.0_f64, 4.0_f64, 8.0_f64);
+        for _ in 0..300 {
+            let err = target_speed - state.vx_mps;
+            let accel = if err >= 0.0 { (err / dt_s).min(max_accel) } else { (err / dt_s).max(-max_decel) };
+            state = step(state, params, 0.2, accel, dt_s);
+            assert!(state.vy_mps.is_finite() && state.yaw_rate_rad_s.is_finite());
+            assert!(state.yaw_rate_rad_s.abs() < 10.0, "yaw rate diverged while reversing under steering: {state:?}");
+        }
     }
 
     #[test]
