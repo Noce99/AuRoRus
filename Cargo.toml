@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bincode = { version = "2.0.1", features = ["serde"] }
 csv = "1.4.0"
+ctrlc = "3.5"
 fax = "0.3.0"
 rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }

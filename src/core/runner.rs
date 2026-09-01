@@ -2,13 +2,29 @@
 //! parallel against a shared [`Captain`].
 
 use crate::core::captain::Captain;
+use crate::core::debug_executor::DebugExecutor;
 use crate::core::executor::Executor;
 use crate::core::log::{self, LogColor};
 use crate::core::topic::RwLockTopic;
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
+
+/// A cheap, `Clone`-able handle that can signal every executor to stop from any
+/// thread - e.g. a Ctrl+C handler running on its own OS thread while
+/// [`Runner::run_until_stopped`] blocks the caller's thread. Deliberately exposes
+/// only [`stop`](Self::stop), not the rest of [`Captain`]'s surface.
+#[derive(Clone)]
+pub struct StopHandle(Arc<Captain>);
+
+impl StopHandle {
+    /// Same effect as [`Runner::stop`], callable from any thread without a `&Runner`.
+    pub fn stop(&self) {
+        self.0.stop();
+    }
+}
 
 /// Error returned by [`Runner::switch_executor`].
 #[derive(Debug)]
@@ -48,6 +64,9 @@ pub struct Runner {
     running: HashMap<u8, thread::JoinHandle<Box<dyn Executor>>>,
     registered_topics: Vec<TopicRegistration>,
     verbose: bool,
+    /// Set by [`debug_mode`](Self::debug_mode); `None` means debug recording is off.
+    /// Passed to every executor's [`Executor::set_debug_mode`] as it's spawned.
+    debug_frequency_hz: Option<f64>,
 }
 
 impl Runner {
@@ -61,7 +80,37 @@ impl Runner {
             running: HashMap::new(),
             registered_topics: Vec::new(),
             verbose: false,
+            debug_frequency_hz: None,
         }
+    }
+
+    /// Turns on debug recording: every topic currently being written is
+    /// snapshotted at `frequency_hz` (only when its value actually changed) into
+    /// a new/resumed session file at `output_path`, via a [`crate::core::debug_executor::DebugExecutor`]
+    /// this adds automatically, right alongside every other executor.
+    ///
+    /// Consuming (`self -> Self`) rather than `&mut self`, unlike the rest of
+    /// `Runner`'s builder-ish methods, to match the call shape
+    /// `Runner::new().debug_mode(hz, path)` - it's still fine to chain further
+    /// `&mut self` calls (`activate_verbose`, `add_executor`, ...) on the result
+    /// afterward, since `Runner::new()` still returns `Self` by value.
+    ///
+    /// Takes both `frequency_hz` and `output_path` together, rather than a second
+    /// call/method for the path, because they're always known at the same call
+    /// site once a binary's CLI has resolved its `--debug`/`--debug_frequency`
+    /// flags - splitting them would only invite an inconsistent state (frequency
+    /// set, no path, or vice versa) with no benefit.
+    pub fn debug_mode(mut self, frequency_hz: f64, output_path: impl Into<PathBuf>) -> Self {
+        self.debug_frequency_hz = Some(frequency_hz);
+        self.add_executor(DebugExecutor::new(output_path.into(), frequency_hz).boxed());
+        self
+    }
+
+    /// A [`StopHandle`] for this runner, e.g. to wire up a Ctrl+C handler before
+    /// calling [`run_until_stopped`](Self::run_until_stopped), which otherwise
+    /// blocks the calling thread.
+    pub fn stop_handle(&self) -> StopHandle {
+        StopHandle(self.captain.clone())
     }
 
     /// Turns on verbose logging: every subsequent call to a method below prints
@@ -88,7 +137,7 @@ impl Runner {
     /// `initial` is a factory rather than a bare value so
     /// [`run_until_stopped`](Self::run_until_stopped) can replay this
     /// registration against the fresh [`Captain`] a restart builds.
-    pub fn register_topic<T: Send + Sync + 'static>(
+    pub fn register_topic<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static>(
         &mut self,
         name: impl Into<String>,
         initial: impl Fn() -> T + Send + Sync + 'static,
@@ -103,7 +152,7 @@ impl Runner {
 
     /// Looks up a previously registered topic, e.g. to read it after every
     /// executor has stopped. See [`Captain::topic`] for panic conditions.
-    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
+    pub fn topic<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
         self.captain.topic(name)
     }
 
@@ -135,7 +184,7 @@ impl Runner {
     /// start executors added afterward.
     pub fn run_all(&mut self) {
         for (id, executor) in self.pending.drain(..) {
-            let handle = Self::spawn(&self.captain, id, executor);
+            let handle = Self::spawn(&self.captain, id, executor, self.debug_frequency_hz);
             self.running.insert(id, handle);
         }
         self.log(LogColor::Green, "all executors started");
@@ -170,7 +219,7 @@ impl Runner {
         let old_executor = old_handle.join().expect("executor thread panicked");
         self.captain.resume_executor(id);
 
-        let handle = Self::spawn(&self.captain, id, new_executor);
+        let handle = Self::spawn(&self.captain, id, new_executor, self.debug_frequency_hz);
         self.running.insert(id, handle);
 
         Ok(old_executor)
@@ -227,10 +276,14 @@ impl Runner {
         captain: &Arc<Captain>,
         id: u8,
         mut executor: Box<dyn Executor>,
+        debug_frequency_hz: Option<f64>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
         executor.init(id);
         let name = executor.name();
         captain.set_name(id, name.clone());
+        if let Some(hz) = debug_frequency_hz {
+            executor.set_debug_mode(hz);
+        }
         executor.claim_writing_topics(captain);
         let captain = captain.clone();
         thread::Builder::new()

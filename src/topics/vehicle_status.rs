@@ -7,7 +7,7 @@ pub const VEHICLE_STATUS_TOPIC_NAME: &str = "vehicle_status";
 
 /// The vehicle's position, heading, and speed at one instant, in the same
 /// world frame (meters) as [`crate::environment::MapInfo`].
-#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct VehicleStatus {
     /// X coordinate of the vehicle in world coordinates, in meters.
     pub x_m: f64,

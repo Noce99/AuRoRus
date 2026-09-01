@@ -15,7 +15,7 @@ pub const PLACE_AT_START_TOPIC_NAME: &str = "place_at_start";
 /// vehicle at [`crate::topics::StartState`] whenever this no longer matches
 /// what it last applied. A counter rather than a bool so two rapid requests
 /// can't cancel each other out via toggle parity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct PlaceAtStart {
     pub requested: u64,
 }

@@ -22,11 +22,12 @@
 
 mod core;
 
-pub use core::{Captain, Executor, Runner, RwLockTopic, SwitchExecutorError, TopicError};
+pub use core::{Captain, Executor, Runner, RwLockTopic, StopHandle, SwitchExecutorError, TopicError};
 
 pub mod actuators;
 pub mod algorithms;
 pub mod config;
+pub mod debug_format;
 pub mod environment;
 pub mod sensors;
 pub mod topics;

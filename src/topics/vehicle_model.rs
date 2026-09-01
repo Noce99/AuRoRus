@@ -15,7 +15,7 @@ pub const VEHICLE_MODEL_STATUS_TOPIC_NAME: &str = "vehicle_model_status";
 /// [`crate::actuators::simulated_vehicle`], not here - this enum is just the
 /// stable, serializable identity that flows over the selection/status
 /// topics and the web API.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VehicleModelKind {
     /// A CG-referenced kinematic bicycle model - see
     /// [`crate::environment::simulator::vehicle::bicycle`].
@@ -42,7 +42,7 @@ pub enum VehicleModelKind {
 /// currently wants running. [`crate::actuators::SimulatedVehicle`] polls
 /// this and switches models whenever it no longer matches the currently
 /// running one, publishing the change on [`VehicleModelStatus`].
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VehicleModelSelection {
     pub kind: VehicleModelKind,
 }
@@ -51,7 +51,7 @@ pub struct VehicleModelSelection {
 /// [`crate::actuators::SimulatedVehicle`] so a driver of the selection can
 /// tell what's actually active - e.g. to reflect it in a dropdown on
 /// startup, or after another client changes it.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VehicleModelStatus {
     pub kind: VehicleModelKind,
 }

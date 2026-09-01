@@ -23,7 +23,7 @@ pub const HUMAN_VESC_COMMAND_TOPIC_NAME: &str = "human_vesc_command";
 /// responsible for approaching this setpoint within whatever limits the
 /// real (or simulated) actuators have - this struct carries only the
 /// desire, not a plan for getting there.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VescCommand {
     /// When this command was published, as microseconds since the Unix
     /// epoch - lets a consumer reading both [`VESC_COMMAND_TOPIC_NAME`] and

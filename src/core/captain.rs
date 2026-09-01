@@ -3,11 +3,38 @@
 
 use crate::core::log::LogColor;
 use crate::core::topic::RwLockTopic;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+
+/// Type-erased access to one topic's writer/value, for the debug-recording
+/// [`crate::core::debug_executor::DebugExecutor`] - implemented generically below for every
+/// [`RwLockTopic<T>`] whose `T` satisfies the bound every topic type must now meet (see
+/// [`Captain::claim_writer`]/[`Captain::register_topic`]). Lives here, not in [`crate::core::topic`],
+/// so `topic.rs` itself stays free of any bincode/serde dependency.
+pub(crate) trait DebugTopic: Send + Sync {
+    /// See [`RwLockTopic::writer`]. Named identically on purpose - there's no ambiguity in practice,
+    /// since this is only ever called through `Arc<dyn DebugTopic>`, never on a concrete `RwLockTopic<T>`.
+    fn writer(&self) -> Option<u8>;
+    /// The topic's current value, bincode-encoded - what [`crate::core::debug_executor::DebugExecutor`]
+    /// writes to the `.debug` file (after checking it differs from what it last recorded).
+    fn read_encoded(&self) -> Vec<u8>;
+}
+
+impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T> {
+    fn writer(&self) -> Option<u8> {
+        RwLockTopic::writer(self)
+    }
+
+    fn read_encoded(&self) -> Vec<u8> {
+        bincode::serde::encode_to_vec(self.read(), bincode::config::standard())
+            .expect("encoding a topic's current value for the debug recorder should never fail")
+    }
+}
 
 /// The object [`crate::Runner`] hands to every executor's [`crate::Executor::run`]:
 /// a registry of named, typed topics plus the run/stop signals every executor
@@ -25,6 +52,11 @@ use std::sync::{Arc, Mutex, RwLock};
 /// [`crate::Runner::switch_executor`]).
 pub struct Captain {
     topics: RwLock<HashMap<String, Arc<dyn Any + Send + Sync>>>,
+    /// Every topic in `topics`, again, but behind the type-erased [`DebugTopic`] handle instead of
+    /// `dyn Any` - populated at the same time as `topics` (see [`topic_or_register`](Self::topic_or_register)),
+    /// so [`crate::core::debug_executor::DebugExecutor`] can enumerate every topic's name/writer/value
+    /// without knowing each one's concrete type.
+    debug_topics: RwLock<HashMap<String, Arc<dyn DebugTopic>>>,
     running: AtomicBool,
     executor_running: [AtomicBool; 256],
     names: Mutex<HashMap<u8, String>>,
@@ -37,6 +69,7 @@ impl Captain {
     pub(crate) fn new() -> Self {
         Self {
             topics: RwLock::new(HashMap::new()),
+            debug_topics: RwLock::new(HashMap::new()),
             running: AtomicBool::new(true),
             executor_running: std::array::from_fn(|_| AtomicBool::new(true)),
             names: Mutex::new(HashMap::new()),
@@ -104,16 +137,26 @@ impl Captain {
             .unwrap_or_else(|| format!("executor {id}"))
     }
 
+    /// A snapshot of every currently registered topic's name and debug-recording handle - a clone of
+    /// every `Arc` taken under the lock and then released immediately, so a caller's subsequent
+    /// read/serialize work (potentially slow: one `read_encoded()` per topic) never holds up any other
+    /// executor's `register_topic`/`claim_writer`/`topic` call. Used by
+    /// [`crate::core::debug_executor::DebugExecutor`] to enumerate every topic without knowing any of
+    /// their concrete types.
+    pub(crate) fn debug_topics_snapshot(&self) -> Vec<(String, Arc<dyn DebugTopic>)> {
+        self.debug_topics.read().unwrap().iter().map(|(name, topic)| (name.clone(), topic.clone())).collect()
+    }
+
     /// Registers a new topic under `name`, seeded with `initial`.
-    pub(crate) fn register_topic<T: Send + Sync + 'static>(
+    pub(crate) fn register_topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         name: impl Into<String>,
         initial: T,
     ) {
-        self.topics
-            .write()
-            .unwrap()
-            .insert(name.into(), Arc::new(RwLockTopic::new(initial)));
+        let name = name.into();
+        let topic: Arc<RwLockTopic<T>> = Arc::new(RwLockTopic::new(initial));
+        self.topics.write().unwrap().insert(name.clone(), topic.clone());
+        self.debug_topics.write().unwrap().insert(name, topic);
     }
 
     /// Looks up a previously registered topic.
@@ -124,7 +167,7 @@ impl Captain {
     /// registered and how it's used, e.g. a typo'd name, or reading before any
     /// writer has claimed it), not runtime data conditions a caller could
     /// meaningfully recover from.
-    pub fn topic<T: Send + Sync + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
+    pub fn topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
         let erased = self.topics.read().unwrap().get(name).cloned().unwrap_or_else(|| {
             Self::fatal(format!(
                 "fatal: executor {:?} tried to read topic {name:?}, but no topic was ever \
@@ -149,7 +192,7 @@ impl Captain {
     /// called when actually registering, so re-claiming an already-registered topic
     /// (e.g. after [`crate::Runner::switch_executor`] restarts an executor) never
     /// re-runs it.
-    fn topic_or_register<T: Send + Sync + 'static>(
+    fn topic_or_register<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         name: &str,
         initial: impl FnOnce() -> T,
@@ -180,6 +223,7 @@ impl Captain {
         self.log_if_verbose(LogColor::Pink, format!("registered topic {name:?}"));
         let topic: Arc<RwLockTopic<T>> = Arc::new(RwLockTopic::new(initial()));
         topics.insert(name.to_string(), topic.clone());
+        self.debug_topics.write().unwrap().insert(name.to_string(), topic.clone());
         topic
     }
 
@@ -193,7 +237,7 @@ impl Captain {
     /// rather than letting just this executor's thread panic (which
     /// [`crate::Runner`] would otherwise have to detect and re-panic on when it
     /// joins the thread).
-    pub fn claim_writer<T: Clone + Send + Sync + 'static>(
+    pub fn claim_writer<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         topic_name: &str,
         executor_id: u8,

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AuRoRus Debug Playback</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <div id="main-row">
+    <div id="sidebar-toggle">
+      <button id="sidebar-toggle-btn" title="Show/hide session info" aria-label="Show/hide session info">&#9664;</button>
+    </div>
+
+    <aside id="sidebar">
+      <h1>Map</h1>
+      <span id="sidebar-map-name" class="readonly-value">No map recorded</span>
+
+      <h1>Vehicle model</h1>
+      <span id="sidebar-vehicle-model" class="readonly-value">-</span>
+
+      <h1>Session</h1>
+      <span id="sidebar-frequency" class="readonly-value"></span>
+      <span id="sidebar-duration" class="readonly-value"></span>
+    </aside>
+
+    <main id="canvas-area">
+      <canvas id="map-canvas"></canvas>
+
+      <div id="status-bar">
+        <span id="status-map-name">No map loaded</span>
+        <span id="status-vertical-size"></span>
+        <span id="status-speed"></span>
+        <span id="status-time"></span>
+      </div>
+
+      <div id="zoom-controls">
+        <button id="home-btn" title="Center start/finish, zoom to 10 m" aria-label="Home">&#8962;</button>
+        <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+      </div>
+    </main>
+  </div>
+
+  <div id="timeline-toggle">
+    <button id="timeline-toggle-btn" title="Show/hide timeline" aria-label="Show/hide timeline">&#9650;</button>
+  </div>
+
+  <section id="timeline-panel">
+    <div id="timeline-canvas-wrap">
+      <canvas id="timeline-canvas"></canvas>
+    </div>
+    <div id="timeline-tooltip" hidden></div>
+
+    <div id="transport-bar">
+      <button id="play-pause-btn" title="Play/pause">&#9654;</button>
+      <button id="seek-start-btn" title="Seek to start">&#9198;</button>
+      <label>Speed
+        <select id="speed-select">
+          <option value="0.1">0.1x</option>
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+          <option value="8">8x</option>
+        </select>
+      </label>
+      <label>Zoom
+        <input id="timeline-zoom-slider" type="range" min="0" max="1000" value="0" step="1" />
+      </label>
+      <span id="playback-time-label">0.00 s / 0.00 s</span>
+    </div>
+  </section>
+</div>
+<script src="/app.js"></script>
+<script src="/timeline.js"></script>
+</body>
+</html>

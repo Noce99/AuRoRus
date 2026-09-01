@@ -3,6 +3,7 @@
 //! [`crate::sensors`], [`crate::algorithms`], and [`crate::topics`].
 
 mod captain;
+mod debug_executor;
 mod executor;
 mod log;
 mod runner;
@@ -10,5 +11,5 @@ mod topic;
 
 pub use captain::Captain;
 pub use executor::Executor;
-pub use runner::{Runner, SwitchExecutorError};
+pub use runner::{Runner, StopHandle, SwitchExecutorError};
 pub use topic::{RwLockTopic, TopicError};

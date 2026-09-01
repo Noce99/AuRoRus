@@ -32,10 +32,38 @@ fn main() {
         )
         .boxed(),
     );
+
+    let mut runner = match &config.debug_output {
+        Some(path) => {
+            println!("recording debug session to {path:?}");
+            runner.debug_mode(config.debug_frequency_hz, path.clone())
+        }
+        None => runner,
+    };
+
     // Every executor here runs until stopped, and nothing ever stops them for
     // good - this blocks for the lifetime of the process, same as any other
-    // long-running server; Ctrl+C just kills the process. Any executor can
-    // still ask for a full restart via `Captain::request_restart`, which
-    // `run_until_stopped` handles by rebuilding everything fresh and looping.
+    // long-running server. Any executor can still ask for a full restart via
+    // `Captain::request_restart`, which `run_until_stopped` handles by
+    // rebuilding everything fresh and looping.
+    //
+    // Ctrl+C stops every executor cleanly (rather than just killing the
+    // process) so a `--debug` recording gets flushed and closed properly: it
+    // flips `Captain`'s running flag, every executor's `while
+    // captain.is_running(id)` loop (including the debug executor's) exits on
+    // its own, and `run_until_stopped` below only returns once every one of
+    // those threads - including the debug executor's final flush - has
+    // actually finished.
+    let stop_handle = runner.stop_handle();
+    ctrlc::set_handler(move || {
+        println!("Ctrl+C received - stopping...");
+        stop_handle.stop();
+    })
+    .expect("failed to set Ctrl+C handler");
+
     runner.run_until_stopped();
+
+    if let Some(path) = &config.debug_output {
+        println!("debug session saved to {path:?}");
+    }
 }

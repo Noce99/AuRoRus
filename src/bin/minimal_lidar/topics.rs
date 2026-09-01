@@ -2,10 +2,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // Lidar Topic
 pub const LIDAR_POINTS_NUMBER: usize = 1200;
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Scan {
     pub _timestamp: u128,
-    pub _distances: [f32; LIDAR_POINTS_NUMBER],
+    pub _distances: Vec<f32>,
 }
 impl Scan {
     pub fn new() -> Self {
@@ -13,7 +13,7 @@ impl Scan {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_micros();
-        let _distances = [0.0f32; LIDAR_POINTS_NUMBER];
+        let _distances = vec![0.0f32; LIDAR_POINTS_NUMBER];
         Scan {
             _timestamp,
             _distances,

@@ -40,6 +40,7 @@ fn load(path: &Path) -> Option<(SelectedMap, StartState)> {
                 width_px: map.raster.width_px,
                 height_px: map.raster.height_px,
                 pixels: map.raster.to_bytes(),
+                info: Some(map.info.clone()),
             };
             Some((selected, start_state(&map)))
         }

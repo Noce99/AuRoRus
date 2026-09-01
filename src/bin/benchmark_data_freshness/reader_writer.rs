@@ -5,14 +5,18 @@ use aurorus::{Captain, Executor};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// One published value: an array of `f32`s (sized at runtime by `--topic_size`)
-/// plus the [`Instant`] it was published at, so a reader can compute how old the
-/// value it just read is.
-#[derive(Clone)]
+/// plus the [`SystemTime`] it was published at, so a reader can compute how old
+/// the value it just read is. Wall-clock (not [`Instant`]) so the type can derive
+/// `serde::Serialize`/`Deserialize` - required of every topic type since
+/// [`aurorus::Captain::claim_writer`]/[`aurorus::Runner::register_topic`] need it
+/// for generic debug recording, and `Instant` (an opaque monotonic handle) has no
+/// portable representation to serialize.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TimestampedPayload {
-    pub timestamp: Instant,
+    pub timestamp: SystemTime,
     pub data: Vec<f32>,
 }
 
@@ -55,7 +59,7 @@ impl Executor for WriterExecutor {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let topic_size = self.topic_size;
         captain.claim_writer::<TimestampedPayload>(TOPIC_NAME, self.id, move || TimestampedPayload {
-            timestamp: Instant::now(),
+            timestamp: SystemTime::now(),
             data: vec![0.0f32; topic_size],
         });
     }
@@ -81,7 +85,7 @@ impl Executor for WriterExecutor {
                 })
                 .collect();
             let payload = TimestampedPayload {
-                timestamp: Instant::now(),
+                timestamp: SystemTime::now(),
                 data,
             };
 
@@ -160,7 +164,7 @@ impl Executor for ReaderExecutor {
 
         while captain.is_running(self.id) {
             let payload = topic.read();
-            let age = payload.timestamp.elapsed();
+            let age = SystemTime::now().duration_since(payload.timestamp).unwrap_or_default();
 
             // Touch the payload, standing in for real consumer work.
             let sum: f32 = payload.data.iter().sum();

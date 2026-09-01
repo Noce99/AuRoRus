@@ -16,7 +16,7 @@ pub const START_STATE_TOPIC_NAME: &str = "start_state";
 /// shape since it's the state [`crate::actuators::SimulatedVehicle`] starts
 /// advancing from. `speed_mps` is always `0.0`: the vehicle always starts at
 /// rest.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StartState {
     /// X coordinate of the start position in world coordinates, in meters -
     /// the middle of the start/finish line.

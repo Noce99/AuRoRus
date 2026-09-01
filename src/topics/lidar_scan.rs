@@ -12,7 +12,7 @@ pub const LIDAR_SCAN_TOPIC_NAME: &str = "lidar_scan";
 /// signal strength of the reading at `points[i]` - and both are expected to
 /// have exactly `num_lidar_points` entries, evenly spaced across `fov`
 /// radians.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LidarScan {
     /// When this scan was captured, as microseconds since the Unix epoch.
     pub time_stamp: u128,
