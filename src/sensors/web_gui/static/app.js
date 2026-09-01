@@ -571,7 +571,7 @@ setInterval(() => {
 }, HUMAN_COMMAND_POST_MS);
 
 // ---------------------------------------------------------------------
-// "R" -> restart everything
+// "R" -> restart everything, then reload this page
 // ---------------------------------------------------------------------
 
 window.addEventListener("keydown", (event) => {
@@ -582,6 +582,9 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() !== "r") return;
   event.preventDefault();
   fetch("/api/restart", { method: "POST" }).catch((err) => console.error(err));
+  // The restart tears down and relaunches the backend (including this page's
+  // server), so wait for the new generation to come back up before reloading.
+  setTimeout(() => window.location.reload(), 2000);
 });
 
 // ---------------------------------------------------------------------
