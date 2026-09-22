@@ -29,9 +29,16 @@ pub struct VescCommand {
     /// epoch - lets a consumer reading both [`VESC_COMMAND_TOPIC_NAME`] and
     /// [`HUMAN_VESC_COMMAND_TOPIC_NAME`] prefer whichever is fresher.
     pub time_stamp_us: u128,
-    /// Desired front-wheel steering angle, in radians (positive = left,
-    /// matching [`crate::environment::simulator::vehicle::bicycle`]'s
-    /// `steering_angle_rad` convention).
+    /// Desired front-wheel steering angle, in radians, matching
+    /// [`crate::environment::simulator::vehicle::bicycle`]'s
+    /// `steering_angle_rad` convention: a **positive** angle steers toward
+    /// increasing `heading_rad`.
+    ///
+    /// The world frame has x rightward and y *downward* (see
+    /// `crate::environment::simulator::raster::ImageTransform`), so
+    /// increasing heading rotates clockwise as the map is drawn - i.e.
+    /// positive is a **right** turn, negative a left one. That's the
+    /// convention `web_gui`'s WASD control follows, with D positive.
     pub servo_position_rad: f64,
     /// Desired forward speed, in meters/second.
     pub speed_mps: f64,

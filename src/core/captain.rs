@@ -258,9 +258,10 @@ impl Captain {
         topic
     }
 
-    /// Whether the executor with this `id` should keep running: true only if every
-    /// executor was told to stop via [`stop`](Self::stop), and this particular id
-    /// wasn't individually stopped (e.g. for a [`switch_executor`]-driven swap).
+    /// Whether the executor with this `id` should keep running: true only if
+    /// executors haven't all been told to stop via [`stop`](Self::stop), and this
+    /// particular id wasn't individually stopped (e.g. for a
+    /// [`switch_executor`]-driven swap).
     ///
     /// [`switch_executor`]: crate::Runner::switch_executor
     pub fn is_running(&self, id: u8) -> bool {

@@ -655,9 +655,10 @@ window.addEventListener("blur", () => {
 
 function currentHumanCommand() {
   const speed = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
-  // Positive steering_angle_rad is a right turn (heading rotates clockwise
-  // in this world frame - see bicycle.rs) - D is the right key, so D is
-  // positive and A is negative.
+  // Positive servo_position_rad steers toward increasing heading, which in
+  // this world frame (x right, y down) draws as clockwise - a right turn.
+  // See the `servo_position_rad` doc on topics/vesc_command.rs. D is the
+  // right key, so D is positive and A is negative.
   const steer = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
   return {
     servo_position_rad: steer * humanMaxSteeringRad,

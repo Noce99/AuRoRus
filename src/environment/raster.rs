@@ -1,8 +1,14 @@
-//! [`Raster`]: a 1-bit-per-pixel occupancy bitmap, independent of how it was
+//! [`Raster`]: a binary occupancy bitmap, independent of how it was
 //! produced - by [`crate::environment::simulator::raster::rasterize`] or
 //! loaded from disk via [`crate::environment::tiff::read`].
 
-/// A 1-bit-per-pixel raster: `true` means white, i.e. drivable track area.
+/// A binary occupancy raster: one `bool` per pixel, `true` meaning white,
+/// i.e. drivable track area.
+///
+/// One *logical* bit of information per pixel, but stored as a `Vec<bool>`,
+/// which is a whole byte each rather than a packed bitfield - so a
+/// 1200x1200 map is 1.44 MB, not 180 KB. Worth knowing before copying one
+/// around.
 #[derive(Debug)]
 pub struct Raster {
     pub width_px: u32,
