@@ -4,6 +4,7 @@
 
 use crate::session::Session;
 use crate::{assets, debug_api};
+use aurorus::web::not_found;
 use tiny_http::{Method, Request};
 
 pub fn handle(request: Request, session: &Session) {
@@ -16,6 +17,17 @@ pub fn handle(request: Request, session: &Session) {
         }
     };
 
+    // Assets shared with `web_gui` (the map canvas script, the base
+    // stylesheet) are served by `aurorus::web`; the rest are this UI's own.
+    if method == Method::Get
+        && let Some(response) = aurorus::web::shared_asset(&path)
+    {
+        if let Err(err) = request.respond(response) {
+            eprintln!("debug_web_interface: failed to send response: {err}");
+        }
+        return;
+    }
+
     let response = match (&method, path.as_str()) {
         (Method::Get, "/" | "/index.html") => assets::respond("index.html"),
         (Method::Get, "/style.css") => assets::respond("style.css"),
@@ -26,7 +38,7 @@ pub fn handle(request: Request, session: &Session) {
         (Method::Get, "/api/timeline") => debug_api::timeline(session),
         (Method::Get, "/api/vehicle_status_timeline") => debug_api::vehicle_status_timeline(session),
         (Method::Get, "/api/debug/state") => debug_api::state(session, query.as_deref()),
-        _ => debug_api::not_found(),
+        _ => not_found(),
     };
 
     if let Err(err) = request.respond(response) {

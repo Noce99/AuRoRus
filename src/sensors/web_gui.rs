@@ -56,13 +56,6 @@ impl Default for WebGuiConfig {
     }
 }
 
-/// Builds a `Content-Type: ...`-style header. Used by both [`assets`] and
-/// [`maps_api`] - a header name/value built from a `&'static str` constant
-/// is always valid ASCII, so parsing it can never fail.
-fn header(name: &str, value: &str) -> tiny_http::Header {
-    format!("{name}: {value}").parse().expect("header name/value are always valid ASCII")
-}
-
 /// Serves the map browser/generator web UI. Reads and writes map folders
 /// under `maps_root` directly off disk.
 pub struct WebGui {

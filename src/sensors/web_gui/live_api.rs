@@ -6,7 +6,8 @@
 //! [`super::maps_api`], which lists/generates map folders on disk.
 
 use super::WebGuiConfig;
-use super::maps_api::{bad_request, json_response, safe_map_folder};
+use super::maps_api::safe_map_folder;
+use crate::web::{bad_request, header, json_response};
 use crate::topics::{
     HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
     PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
@@ -63,7 +64,7 @@ pub fn map(captain: &Captain) -> ResponseBox {
 pub fn raster(captain: &Captain) -> ResponseBox {
     let selected = captain.topic::<SelectedMap>(MAP_TOPIC_NAME).read();
     Response::from_data(selected.pixels)
-        .with_header(super::header("Content-Type", "application/octet-stream"))
+        .with_header(header("Content-Type", "application/octet-stream"))
         .boxed()
 }
 
@@ -131,47 +132,10 @@ struct VehicleModelOption {
     label: &'static str,
 }
 
-/// Every [`VehicleModelKind`] paired with its API string (see [`kind_str`])
-/// and a human-readable label, in the order they should appear in a picker.
-const VEHICLE_MODEL_OPTIONS: &[(VehicleModelKind, &str, &str)] = &[
-    (VehicleModelKind::Bicycle, "bicycle", "Kinematic bicycle"),
-    (VehicleModelKind::DynamicBicycle, "dynamic_bicycle", "Dynamic bicycle (tire forces)"),
-    (
-        VehicleModelKind::NonlinearBicycle,
-        "nonlinear_bicycle",
-        "Nonlinear bicycle (tire saturation + load transfer)",
-    ),
-    (
-        VehicleModelKind::PacejkaBicycle,
-        "pacejka_bicycle",
-        "Pacejka bicycle (full Magic Formula)",
-    ),
-    (
-        VehicleModelKind::TwoTrack,
-        "two_track",
-        "Two-track (four-wheel, lateral load transfer)",
-    ),
-];
-
-/// The API string for `kind` - the inverse of [`parse_kind`].
-fn kind_str(kind: VehicleModelKind) -> &'static str {
-    VEHICLE_MODEL_OPTIONS
-        .iter()
-        .find(|(k, ..)| *k == kind)
-        .map(|(_, s, _)| *s)
-        .expect("VEHICLE_MODEL_OPTIONS lists every VehicleModelKind")
-}
-
-/// Parses an API string (as sent to [`select_vehicle_model`]) into a
-/// [`VehicleModelKind`], or `None` if it names no known model.
-fn parse_kind(s: &str) -> Option<VehicleModelKind> {
-    VEHICLE_MODEL_OPTIONS.iter().find(|(_, k, _)| *k == s).map(|(kind, ..)| *kind)
-}
-
 /// `GET /api/vehicle_models` - every selectable vehicle model kind, for a
 /// picker in the UI.
 pub fn vehicle_models() -> ResponseBox {
-    let options: Vec<VehicleModelOption> = VEHICLE_MODEL_OPTIONS
+    let options: Vec<VehicleModelOption> = VehicleModelKind::ALL
         .iter()
         .map(|(_, kind, label)| VehicleModelOption { kind, label })
         .collect();
@@ -187,7 +151,7 @@ struct LiveVehicleModel {
 /// from the `vehicle_model_status` topic.
 pub fn vehicle_model(captain: &Captain) -> ResponseBox {
     let status = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME).read();
-    json_response(&LiveVehicleModel { kind: kind_str(status.kind) }, 200)
+    json_response(&LiveVehicleModel { kind: status.kind.api_str() }, 200)
 }
 
 #[derive(serde::Deserialize)]
@@ -204,7 +168,7 @@ pub fn select_vehicle_model(request: &mut Request, captain: &Captain, writer_id:
         Err(response) => return response,
     };
 
-    let Some(kind) = parse_kind(&body.kind) else {
+    let Some(kind) = VehicleModelKind::from_api_str(&body.kind) else {
         return bad_request(&format!("unknown vehicle model kind: {:?}", body.kind));
     };
 

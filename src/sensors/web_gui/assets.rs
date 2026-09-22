@@ -1,6 +1,7 @@
-//! Serves the embedded frontend - `index.html`, `style.css`, `app.js` -
-//! built into the binary via `include_str!`, so it has no runtime asset
-//! path to get wrong.
+//! Serves the frontend assets specific to `web_gui` - `index.html`,
+//! `style.css`, `app.js` - built into the binary via `include_str!`, so
+//! there's no runtime asset path to get wrong. The shared map-canvas
+//! script and base stylesheet come from [`crate::web`] instead.
 
 use tiny_http::{Response, ResponseBox};
 
@@ -18,5 +19,7 @@ pub fn respond(file_name: &str) -> ResponseBox {
         "app.js" => (APP_JS, "text/javascript; charset=utf-8"),
         _ => unreachable!("respond is only called with the three routed asset names"),
     };
-    Response::from_string(body).with_header(super::header("Content-Type", content_type)).boxed()
+    Response::from_string(body)
+        .with_header(crate::web::header("Content-Type", content_type))
+        .boxed()
 }

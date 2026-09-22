@@ -6,6 +6,7 @@ use super::assets;
 use super::live_api;
 use super::maps_api;
 use crate::Captain;
+use crate::web::not_found;
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
 
@@ -15,6 +16,17 @@ use tiny_http::{Method, Request, ResponseBox};
 pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8, config: &WebGuiConfig) {
     let method = request.method().clone();
     let path = request.url().split('?').next().unwrap_or("/").to_string();
+
+    // Assets shared with the other web UI (the map canvas script, the base
+    // stylesheet) are served by `crate::web`; the rest are this UI's own.
+    if method == Method::Get
+        && let Some(response) = crate::web::shared_asset(&path)
+    {
+        if let Err(err) = request.respond(response) {
+            eprintln!("web_gui: failed to send response: {err}");
+        }
+        return;
+    }
 
     let response = match (&method, path.as_str()) {
         (Method::Get, "/" | "/index.html") => assets::respond("index.html"),
@@ -35,7 +47,7 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Post, "/api/vehicle_model_selection") => live_api::select_vehicle_model(&mut request, captain, writer_id),
         (Method::Post, "/api/restart") => live_api::restart(captain),
         (Method::Post, "/api/place_at_start") => live_api::place_at_start(captain, writer_id),
-        _ => maps_api::not_found(),
+        _ => not_found(),
     };
 
     if let Err(err) = request.respond(response) {
@@ -47,11 +59,11 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
 fn route_map_get(path: &str, maps_root: &Path) -> ResponseBox {
     let rest = &path["/api/maps/".len()..];
     let Some((name, suffix)) = rest.split_once('/') else {
-        return maps_api::not_found();
+        return not_found();
     };
     match suffix {
         "info" => maps_api::info(name, maps_root),
         "raster" => maps_api::raster(name, maps_root),
-        _ => maps_api::not_found(),
+        _ => not_found(),
     }
 }

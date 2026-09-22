@@ -6,14 +6,22 @@
 //! spread across 5 fixed rate tiers. See `README.md` for the full design rationale
 //! and measured numbers.
 
+// `cli`, `progress` and `verifier` are byte-identical between the two
+// benchmarks, so they live once in `src/bin/bench_common/` and are pulled in
+// here by path. A plain `mod` can't reach outside this binary's own
+// directory, and these are binary-only helpers that have no business in the
+// library's public API.
+#[path = "../bench_common/cli.rs"]
 mod cli;
+#[path = "../bench_common/progress.rs"]
 mod progress;
+#[path = "../bench_common/verifier.rs"]
+mod verifier;
 mod reader_writer;
 mod report;
-mod verifier;
 
 use aurorus::{Executor, Runner};
-use reader_writer::{ReaderExecutor, WriterExecutor};
+use reader_writer::{Payload, ReaderExecutor, TOPIC_NAME, WriterExecutor};
 use report::Report;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -119,7 +127,7 @@ fn main() {
     }
     println!("===================================");
 
-    let consistent = verifier::verify_consistency(&runner);
+    let consistent = verifier::verify_consistency::<Payload>(&runner, TOPIC_NAME, |p| p);
     println!(
         "\nData integrity check: {}",
         if consistent {

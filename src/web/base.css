@@ -1,0 +1,154 @@
+/* ---------------------------------------------------------------------
+ * Styles shared by every web UI in this project: the page reset, the map
+ * canvas and its status bar, the zoom controls, the sidebar collapse
+ * toggle, and the button look.
+ *
+ * Anything a particular UI lays out differently - the sidebar's own
+ * contents, the debug timeline, the generate modal - stays in that UI's
+ * own style.css, which is loaded after this file and so can override
+ * whatever it needs to.
+ *
+ * Served at /base.css by both binaries.
+ * --------------------------------------------------------------------- */
+
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #101418;
+  color: #e8e8e8;
+}
+
+#sidebar.collapsed {
+  margin-left: -240px;
+}
+
+#sidebar-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  background: #545a63;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#sidebar-toggle-btn {
+  background: none;
+  border: none;
+  color: #e8e8e8;
+  cursor: pointer;
+  padding: 6px 2px;
+  font-size: 11px;
+  transition: transform 0.18s ease;
+}
+
+#sidebar.collapsed ~ #sidebar-toggle #sidebar-toggle-btn,
+body:has(#sidebar.collapsed) #sidebar-toggle-btn {
+  transform: rotate(180deg);
+}
+
+/* ---------- canvas area ---------- */
+
+#canvas-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #008080;
+}
+
+#map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+#map-canvas.panning {
+  cursor: grabbing;
+}
+
+#status-bar {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  background: rgba(20, 24, 28, 0.75);
+  border: 1px solid #303640;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: #ff8ae8;
+  display: flex;
+  gap: 14px;
+  pointer-events: none;
+}
+
+/* ---------- zoom controls ---------- */
+
+#zoom-controls {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: rgba(20, 24, 28, 0.55);
+  border: 1px solid #303640;
+  border-radius: 8px;
+  padding: 10px 8px;
+}
+
+#home-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #303640;
+  background: #22272e;
+  color: #e8e8e8;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#home-btn:hover {
+  background: #2b323b;
+}
+
+#zoom-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 20px;
+  height: 220px;
+  accent-color: #3f6dc9;
+}
+
+button {
+  font: inherit;
+  border: 1px solid #303640;
+  border-radius: 6px;
+  background: #2b323b;
+  color: #e8e8e8;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #37404b;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

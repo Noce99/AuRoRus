@@ -38,6 +38,52 @@ pub enum VehicleModelKind {
     TwoTrack,
 }
 
+impl VehicleModelKind {
+    /// Every kind, in the order a picker should offer them, each paired
+    /// with the stable string the web APIs use for it and a human-readable
+    /// label.
+    ///
+    /// The single source of truth for all three: `web_gui` serves it from
+    /// `GET /api/vehicle_models`, `debug_web_interface` resolves a recorded
+    /// kind through it, and both frontends render the labels they're given
+    /// rather than keeping their own copies.
+    pub const ALL: &'static [(Self, &'static str, &'static str)] = &[
+        (Self::Bicycle, "bicycle", "Kinematic bicycle"),
+        (Self::DynamicBicycle, "dynamic_bicycle", "Dynamic bicycle (tire forces)"),
+        (
+            Self::NonlinearBicycle,
+            "nonlinear_bicycle",
+            "Nonlinear bicycle (tire saturation + load transfer)",
+        ),
+        (Self::PacejkaBicycle, "pacejka_bicycle", "Pacejka bicycle (full Magic Formula)"),
+        (Self::TwoTrack, "two_track", "Two-track (four-wheel, lateral load transfer)"),
+    ];
+
+    /// This kind's stable API string - the inverse of [`from_api_str`](Self::from_api_str).
+    pub fn api_str(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(kind, ..)| *kind == self)
+            .map(|(_, s, _)| *s)
+            .expect("ALL lists every VehicleModelKind")
+    }
+
+    /// This kind's human-readable label, for a picker or a status line.
+    pub fn label(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(kind, ..)| *kind == self)
+            .map(|(.., label)| *label)
+            .expect("ALL lists every VehicleModelKind")
+    }
+
+    /// Parses an API string back into a kind, or `None` if it names no
+    /// known model.
+    pub fn from_api_str(s: &str) -> Option<Self> {
+        Self::ALL.iter().find(|(_, api, _)| *api == s).map(|(kind, ..)| *kind)
+    }
+}
+
 /// The vehicle model kind a driver of the selection (e.g. `web_gui`)
 /// currently wants running. [`crate::actuators::SimulatedVehicle`] polls
 /// this and switches models whenever it no longer matches the currently
@@ -54,4 +100,45 @@ pub struct VehicleModelSelection {
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VehicleModelStatus {
     pub kind: VehicleModelKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The three copies of this mapping that used to exist (web_gui's
+    /// options table, debug_web_interface's `kind_str`, and a hardcoded
+    /// label object in its JavaScript) could drift apart silently. Now
+    /// there's one, and this checks it's complete.
+    #[test]
+    fn every_kind_round_trips_through_its_api_string() {
+        for (kind, api, label) in VehicleModelKind::ALL {
+            assert_eq!(kind.api_str(), *api);
+            assert_eq!(kind.label(), *label);
+            assert_eq!(VehicleModelKind::from_api_str(api), Some(*kind));
+            assert!(!label.is_empty());
+        }
+    }
+
+    #[test]
+    fn an_unknown_api_string_is_rejected() {
+        assert_eq!(VehicleModelKind::from_api_str("hovercraft"), None);
+    }
+
+    /// `api_str`/`label` panic on a kind missing from `ALL`, so a new
+    /// variant must be added there too - this is what catches that.
+    #[test]
+    fn all_lists_every_variant() {
+        let kinds = [
+            VehicleModelKind::Bicycle,
+            VehicleModelKind::DynamicBicycle,
+            VehicleModelKind::NonlinearBicycle,
+            VehicleModelKind::PacejkaBicycle,
+            VehicleModelKind::TwoTrack,
+        ];
+        assert_eq!(VehicleModelKind::ALL.len(), kinds.len());
+        for kind in kinds {
+            assert!(VehicleModelKind::ALL.iter().any(|(k, ..)| *k == kind), "{kind:?} missing from ALL");
+        }
+    }
 }

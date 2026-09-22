@@ -3,6 +3,7 @@
 //! (`Map::load`, `read_info`, `GenerationConfig`, `generate`).
 
 use crate::environment::{self, GenerationConfig, Map, MapGenerationError, random_seed};
+use crate::web::{bad_request, error_response, header, json_response, not_found};
 use std::path::{Path, PathBuf};
 use tiny_http::{Request, Response, ResponseBox};
 
@@ -64,7 +65,7 @@ pub fn raster(name: &str, maps_root: &Path) -> ResponseBox {
     };
 
     Response::from_data(map.raster.to_bytes())
-        .with_header(super::header("Content-Type", "application/octet-stream"))
+        .with_header(header("Content-Type", "application/octet-stream"))
         .boxed()
 }
 
@@ -158,10 +159,10 @@ struct GenerateParams {
 
 impl GenerateParams {
     /// The values [`GenerationConfig::default`] would use, for
-    /// pre-filling the generate popup - with a freshly rolled seed, the
-    /// same "current unix time" default `generate_map`'s CLI uses, rather
-    /// than the fixed `0` [`GenerationConfig::default`] itself falls back
-    /// to (meant for library callers that always pass an explicit seed).
+    /// pre-filling the generate popup - with a freshly rolled seed (the
+    /// same [`random_seed`] `generate_map`'s CLI defaults to), rather than
+    /// the fixed `0` [`GenerationConfig::default`] itself falls back to,
+    /// which is meant for library callers that always pass an explicit one.
     fn defaults() -> Self {
         let d = GenerationConfig::default();
         Self {
@@ -226,27 +227,3 @@ pub(super) fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
     Some(maps_root.join(name))
 }
 
-pub(super) fn json_response<T: serde::Serialize>(value: &T, status: u16) -> ResponseBox {
-    let body = serde_json::to_string(value).expect("serializing a well-formed API response never fails");
-    Response::from_string(body)
-        .with_status_code(status)
-        .with_header(super::header("Content-Type", "application/json"))
-        .boxed()
-}
-
-#[derive(serde::Serialize)]
-struct ErrorBody {
-    error: String,
-}
-
-fn error_response(status: u16, message: &str) -> ResponseBox {
-    json_response(&ErrorBody { error: message.to_string() }, status)
-}
-
-pub(super) fn bad_request(message: &str) -> ResponseBox {
-    error_response(400, message)
-}
-
-pub fn not_found() -> ResponseBox {
-    error_response(404, "not found")
-}

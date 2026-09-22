@@ -31,3 +31,4 @@ pub mod debug_format;
 pub mod environment;
 pub mod sensors;
 pub mod topics;
+pub mod web;

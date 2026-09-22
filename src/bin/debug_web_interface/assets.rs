@@ -2,6 +2,7 @@
 //! `app.js`, `timeline.js` - built into the binary via `include_str!`, same
 //! approach as `web_gui`'s `assets` module.
 
+use aurorus::web::header;
 use tiny_http::{Response, ResponseBox};
 
 const INDEX_HTML: &str = include_str!("static/index.html");
@@ -17,5 +18,5 @@ pub fn respond(file_name: &str) -> ResponseBox {
         "timeline.js" => (TIMELINE_JS, "text/javascript; charset=utf-8"),
         _ => unreachable!("respond is only called with the four routed asset names"),
     };
-    Response::from_string(body).with_header(crate::debug_api::header("Content-Type", content_type)).boxed()
+    Response::from_string(body).with_header(header("Content-Type", content_type)).boxed()
 }

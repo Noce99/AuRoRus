@@ -1,14 +1,21 @@
 "use strict";
 
 // ---------------------------------------------------------------------
+// web_gui's frontend: everything specific to driving the vehicle live -
+// the map list and generator, the model picker, WASD control, and the
+// live topic polling behind them.
+//
+// The map canvas itself (drawing, panning, zooming, the redraw loop) is
+// shared with debug_web_interface and lives in /map_view.js, loaded before
+// this file. `fetchJSON` and `startPolling` come from there too.
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------
 
-/** @type {{name:string, info:object, offscreen:HTMLCanvasElement}|null} */
-let currentMap = null;
-
 /** Name of the map the `map` topic currently holds (server-side selection),
- *  or null - tracked separately from `currentMap.name` so polling can tell
+ *  or null - tracked separately from the loaded map so polling can tell
  *  when the live selection has actually changed. */
 let liveMapName = null;
 
@@ -27,127 +34,9 @@ let vehicleStatusAtMs = 0;
  *  when the live selection has actually changed (e.g. from another tab). */
 let liveVehicleModelKind = null;
 
-/** World-space view: how many meters of world height are visible, and
- *  which world point (in meters, same frame as MapInfo) is centered. */
-const view = {
-  verticalSizeM: 10,
-  centerX: 0,
-  centerY: 0,
-};
-
-const canvas = document.getElementById("map-canvas");
-const ctx = canvas.getContext("2d");
-
 // ---------------------------------------------------------------------
-// Small helpers
+// Vehicle pose
 // ---------------------------------------------------------------------
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-async function fetchJSON(url, options) {
-  const response = await fetch(url, options);
-  const body = await response.json();
-  if (!response.ok) {
-    throw new Error(body && body.error ? body.error : `request failed (${response.status})`);
-  }
-  return body;
-}
-
-function maxVerticalSizeM() {
-  if (!currentMap) return 100;
-  return currentMap.info.height_px * currentMap.info.resolution_m_per_px;
-}
-
-const MIN_VERTICAL_SIZE_M = 0.01;
-
-// ---------------------------------------------------------------------
-// Canvas sizing (device-pixel aware)
-// ---------------------------------------------------------------------
-
-function resizeCanvasToDisplaySize() {
-  const rect = canvas.parentElement.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.max(1, Math.round(rect.width * dpr));
-  const height = Math.max(1, Math.round(rect.height * dpr));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-}
-
-// ---------------------------------------------------------------------
-// World <-> screen transforms (device pixels)
-// ---------------------------------------------------------------------
-
-function scalePxPerMeter() {
-  return canvas.height / view.verticalSizeM;
-}
-
-function screenToWorld(screenX, screenY) {
-  const scale = scalePxPerMeter();
-  return {
-    x: (screenX - canvas.width / 2) / scale + view.centerX,
-    y: (screenY - canvas.height / 2) / scale + view.centerY,
-  };
-}
-
-function worldToScreen(worldX, worldY) {
-  const scale = scalePxPerMeter();
-  return {
-    x: (worldX - view.centerX) * scale + canvas.width / 2,
-    y: (worldY - view.centerY) * scale + canvas.height / 2,
-  };
-}
-
-// Client (CSS) pixels -> device pixels, for mouse/wheel event coordinates.
-function clientToDevice(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  return { x: (clientX - rect.left) * dpr, y: (clientY - rect.top) * dpr };
-}
-
-// ---------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------
-
-function draw(nowMs) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#008080";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  if (!currentMap) return;
-
-  const info = currentMap.info;
-  const scale = scalePxPerMeter();
-  const pixelScale = scale * info.resolution_m_per_px;
-  const e = (info.origin.x - view.centerX) * scale + canvas.width / 2;
-  const f = (info.origin.y - view.centerY) * scale + canvas.height / 2;
-
-  ctx.imageSmoothingEnabled = false;
-  ctx.setTransform(pixelScale, 0, 0, pixelScale, e, f);
-  ctx.drawImage(currentMap.offscreen, 0, 0);
-
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const a = worldToScreen(info.start_finish_line.a.x, info.start_finish_line.a.y);
-  const b = worldToScreen(info.start_finish_line.b.x, info.start_finish_line.b.y);
-  ctx.strokeStyle = "#ff3b3b";
-  ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
-  ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.stroke();
-
-  drawVehicle(nowMs);
-}
-
-// ---------------------------------------------------------------------
-// Vehicle
-// ---------------------------------------------------------------------
-
-const VEHICLE_LENGTH_M = 0.45;
-const VEHICLE_WIDTH_M = 0.25;
 
 /** Never dead-reckon further than this past the last sample: if polling
  *  stalls (tab backgrounded, server busy) we'd rather park the vehicle a
@@ -156,8 +45,8 @@ const MAX_EXTRAPOLATION_MS = 150;
 
 /** The last sample advanced to `nowMs` along its own heading at its own
  *  speed - the same straight-line motion the simulator itself integrates
- *  between ticks. Steering curvature within one poll period is not modelled,
- *  which at a 33 ms period and 8 m/s is a few millimetres of error. */
+ *  between ticks. Steering curvature within one poll period is not
+ *  modelled, which at a 33 ms period and 8 m/s is a few millimetres. */
 function predictedVehiclePose(nowMs) {
   if (!vehicleStatus) return null;
   const dt_s = Math.min(Math.max(nowMs - vehicleStatusAtMs, 0), MAX_EXTRAPOLATION_MS) / 1000;
@@ -169,201 +58,10 @@ function predictedVehiclePose(nowMs) {
   };
 }
 
-function drawVehicle(nowMs) {
-  const pose = predictedVehiclePose(nowMs);
-  if (!pose) return;
-
-  const { x, y } = worldToScreen(pose.x_m, pose.y_m);
-  const scale = scalePxPerMeter();
-  const lengthPx = VEHICLE_LENGTH_M * scale;
-  const widthPx = VEHICLE_WIDTH_M * scale;
-
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.translate(x, y);
-  ctx.rotate(pose.heading_rad);
-
-  ctx.fillStyle = "#ffb020";
-  ctx.fillRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
-  ctx.strokeStyle = "#101418";
-  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  ctx.strokeRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
-
-  // Small triangle marking the front, so heading is visible at a glance.
-  ctx.beginPath();
-  ctx.moveTo(lengthPx / 2, 0);
-  ctx.lineTo(lengthPx / 2 - widthPx * 0.4, -widthPx * 0.35);
-  ctx.lineTo(lengthPx / 2 - widthPx * 0.4, widthPx * 0.35);
-  ctx.closePath();
-  ctx.fillStyle = "#101418";
-  ctx.fill();
-
-  ctx.restore();
-}
-
-// ---------------------------------------------------------------------
-// Render loop
-//
-// Everything that wants the canvas repainted calls `requestRedraw()`; the
-// single `requestAnimationFrame` loop below is the only thing that ever
-// paints. That decouples painting from whatever triggered it - a burst of
-// `mousemove` events (which can arrive far faster than the display
-// refreshes) collapses into one paint per frame instead of one each - and
-// keeps the vehicle moving smoothly at display rate between status polls,
-// via `predictedVehiclePose`.
-// ---------------------------------------------------------------------
-
-let needsRedraw = true;
-
-function requestRedraw() {
-  needsRedraw = true;
-}
-
-function renderLoop(nowMs) {
-  requestAnimationFrame(renderLoop);
-
+MapView.init({
+  vehiclePoseAt: predictedVehiclePose,
   // A moving vehicle changes the picture every frame even with no input.
-  const moving = vehicleStatus !== null && Math.abs(vehicleStatus.speed_mps) > 1e-3;
-  if (!needsRedraw && !moving) return;
-  needsRedraw = false;
-
-  resizeCanvasToDisplaySize();
-  draw(nowMs);
-  updateStatusBar(nowMs);
-}
-
-requestAnimationFrame(renderLoop);
-
-// ---------------------------------------------------------------------
-// Status bar
-// ---------------------------------------------------------------------
-
-const statusName = document.getElementById("status-map-name");
-const statusVerticalSize = document.getElementById("status-vertical-size");
-const statusSpeed = document.getElementById("status-speed");
-
-/** Writes `text` only when it actually differs from what the element
- *  already shows. The render loop runs this every frame, and an unconditional
- *  `textContent` write dirties layout even when the string is identical. */
-function setText(element, text) {
-  if (element.textContent !== text) element.textContent = text;
-}
-
-function updateStatusBar(nowMs) {
-  const pose = predictedVehiclePose(nowMs);
-  setText(statusName, currentMap ? currentMap.name : "No map loaded");
-  setText(statusVerticalSize, `Vertical size: ${view.verticalSizeM.toFixed(2)} m`);
-  setText(statusSpeed, pose ? `Speed: ${pose.speed_mps.toFixed(2)} m/s` : "");
-}
-
-// ---------------------------------------------------------------------
-// Zoom (mouse wheel + slider) and pan (left-button drag)
-// ---------------------------------------------------------------------
-
-function setVerticalSize(size) {
-  view.verticalSizeM = clamp(size, MIN_VERTICAL_SIZE_M, maxVerticalSizeM());
-  // Pushed here, where the zoom actually changes, rather than from the
-  // render loop - the slider is a DOM write and has no business running
-  // once per frame.
-  syncZoomSlider();
-}
-
-function zoomAt(deviceX, deviceY, factor) {
-  const before = screenToWorld(deviceX, deviceY);
-  setVerticalSize(view.verticalSizeM * factor);
-  const after = screenToWorld(deviceX, deviceY);
-  view.centerX += before.x - after.x;
-  view.centerY += before.y - after.y;
-  requestRedraw();
-}
-
-canvas.addEventListener(
-  "wheel",
-  (event) => {
-    event.preventDefault();
-    const { x, y } = clientToDevice(event.clientX, event.clientY);
-    const factor = Math.exp(event.deltaY * 0.0015);
-    zoomAt(x, y, factor);
-  },
-  { passive: false }
-);
-
-let dragging = false;
-let lastDevice = { x: 0, y: 0 };
-
-canvas.addEventListener("mousedown", (event) => {
-  if (event.button !== 0) return;
-  dragging = true;
-  canvas.classList.add("panning");
-  lastDevice = clientToDevice(event.clientX, event.clientY);
-});
-
-window.addEventListener("mousemove", (event) => {
-  if (!dragging) return;
-  const device = clientToDevice(event.clientX, event.clientY);
-  const scale = scalePxPerMeter();
-  view.centerX -= (device.x - lastDevice.x) / scale;
-  view.centerY -= (device.y - lastDevice.y) / scale;
-  lastDevice = device;
-  requestRedraw();
-});
-
-window.addEventListener("mouseup", () => {
-  dragging = false;
-  canvas.classList.remove("panning");
-});
-
-// ---------------------------------------------------------------------
-// Zoom slider (log-scaled, top = zoomed in) and home button
-// ---------------------------------------------------------------------
-
-const zoomSlider = document.getElementById("zoom-slider");
-const SLIDER_STEPS = 1000;
-
-function sliderFromVerticalSize(sizeM) {
-  const logMin = Math.log(MIN_VERTICAL_SIZE_M);
-  const logMax = Math.log(maxVerticalSizeM());
-  const t = (Math.log(sizeM) - logMin) / (logMax - logMin);
-  return Math.round(clamp(t, 0, 1) * SLIDER_STEPS);
-}
-
-function verticalSizeFromSlider(value) {
-  const logMin = Math.log(MIN_VERTICAL_SIZE_M);
-  const logMax = Math.log(maxVerticalSizeM());
-  const t = value / SLIDER_STEPS;
-  return Math.exp(logMin + t * (logMax - logMin));
-}
-
-let syncingSlider = false;
-
-function syncZoomSlider() {
-  syncingSlider = true;
-  zoomSlider.value = String(sliderFromVerticalSize(view.verticalSizeM));
-  syncingSlider = false;
-}
-
-zoomSlider.addEventListener("input", () => {
-  if (syncingSlider || !currentMap) return;
-  setVerticalSize(verticalSizeFromSlider(Number(zoomSlider.value)));
-  requestRedraw();
-});
-
-document.getElementById("home-btn").addEventListener("click", () => {
-  if (!currentMap) return;
-  const line = currentMap.info.start_finish_line;
-  view.centerX = (line.a.x + line.b.x) / 2;
-  view.centerY = (line.a.y + line.b.y) / 2;
-  setVerticalSize(10);
-  requestRedraw();
-});
-
-// ---------------------------------------------------------------------
-// Sidebar collapse
-// ---------------------------------------------------------------------
-
-const sidebar = document.getElementById("sidebar");
-document.getElementById("sidebar-toggle-btn").addEventListener("click", () => {
-  sidebar.classList.toggle("collapsed");
+  isAnimating: () => vehicleStatus !== null && Math.abs(vehicleStatus.speed_mps) > 1e-3,
 });
 
 // ---------------------------------------------------------------------
@@ -371,19 +69,6 @@ document.getElementById("sidebar-toggle-btn").addEventListener("click", () => {
 // ---------------------------------------------------------------------
 
 const mapListEl = document.getElementById("map-list");
-
-function buildImageData(bytes, width, height) {
-  const rgba = new Uint8ClampedArray(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    const drivable = bytes[i] === 255;
-    const o = i * 4;
-    rgba[o] = drivable ? 235 : 30;
-    rgba[o + 1] = drivable ? 235 : 34;
-    rgba[o + 2] = drivable ? 235 : 40;
-    rgba[o + 3] = 255;
-  }
-  return new ImageData(rgba, width, height);
-}
 
 // The sidebar only ever *requests* a map via `/api/map_selection` -
 // `map_server` is the one that actually reads it off disk and republishes
@@ -394,16 +79,7 @@ async function loadLiveMap(name, widthPx, heightPx) {
   if (!rasterResponse.ok) throw new Error(`failed to load live raster for ${name}`);
   const bytes = new Uint8Array(await rasterResponse.arrayBuffer());
 
-  const offscreen = document.createElement("canvas");
-  offscreen.width = widthPx;
-  offscreen.height = heightPx;
-  offscreen.getContext("2d").putImageData(buildImageData(bytes, widthPx, heightPx), 0, 0);
-
-  currentMap = { name, info, offscreen };
-  const line = info.start_finish_line;
-  view.centerX = (line.a.x + line.b.x) / 2;
-  view.centerY = (line.a.y + line.b.y) / 2;
-  setVerticalSize(10);
+  MapView.setMap({ name, info, offscreen: MapView.offscreenFromRaster(bytes, widthPx, heightPx) });
 }
 
 // Writes the wanted map folder to `map_selection` - `map_server` picks it
@@ -455,10 +131,9 @@ async function pollLiveMap() {
   if (live.name) {
     await loadLiveMap(live.name, live.width_px, live.height_px);
   } else {
-    currentMap = null;
+    MapView.setMap(null);
   }
-  renderMapList(await fetchJSON("/api/maps"), liveMapName);
-  requestRedraw();
+  await refreshMapList();
 }
 
 const LIVE_MAP_POLL_MS = 500;
@@ -467,8 +142,8 @@ const VEHICLE_STATUS_POLL_MS = 33;
 async function pollVehicleStatus() {
   const status = await fetchJSON("/api/vehicle_status");
   // A still vehicle produces an identical sample every poll; repainting for
-  // those is pure waste, and `renderLoop` already keeps painting by itself
-  // while the vehicle is moving.
+  // those is pure waste, and MapView already keeps painting by itself while
+  // `isAnimating()` holds.
   const moved =
     vehicleStatus === null ||
     status.x_m !== vehicleStatus.x_m ||
@@ -477,24 +152,7 @@ async function pollVehicleStatus() {
     status.speed_mps !== vehicleStatus.speed_mps;
   vehicleStatus = status;
   vehicleStatusAtMs = performance.now();
-  if (moved) requestRedraw();
-}
-
-/** Runs `poll` every `intervalMs`, but only ever with one request in
- *  flight: the next wait starts when the last response lands. `setInterval`
- *  would instead keep firing into a slow or stalled server and pile
- *  requests up behind each other. */
-function startPolling(poll, intervalMs) {
-  const tick = async () => {
-    const startedMs = performance.now();
-    try {
-      await poll();
-    } catch (err) {
-      console.error(err);
-    }
-    setTimeout(tick, Math.max(0, intervalMs - (performance.now() - startedMs)));
-  };
-  tick();
+  if (moved) MapView.requestRedraw();
 }
 
 // ---------------------------------------------------------------------
@@ -535,7 +193,13 @@ vehicleModelSelectEl.addEventListener("change", () => {
 // above (this tab's dropdown, or another client's).
 async function pollVehicleModel() {
   const live = await fetchJSON("/api/vehicle_model");
-  if (live.kind === liveVehicleModelKind) return;
+  // The dropdown's own value has to be checked too, not just the last kind
+  // we saw: this poll starts before `populateVehicleModelOptions` has added
+  // any `<option>`s, and assigning `.value` on an empty `<select>` silently
+  // does nothing. Tracking only `liveVehicleModelKind` would record the
+  // kind as applied, and every later poll would early-return - leaving the
+  // dropdown showing the wrong model for the rest of the session.
+  if (live.kind === liveVehicleModelKind && vehicleModelSelectEl.value === live.kind) return;
   liveVehicleModelKind = live.kind;
   vehicleModelSelectEl.value = live.kind;
 }
@@ -601,6 +265,8 @@ form.addEventListener("submit", async (event) => {
     await refreshMapList();
     await selectMap(generated.name);
   } catch (err) {
+    // Includes the 409 the server returns when a map of that name already
+    // exists - the message tells the user to pick another name.
     showError(err.message);
   } finally {
     confirmBtn.disabled = false;
@@ -698,41 +364,34 @@ setInterval(() => sendHumanCommand(currentHumanCommand()), HUMAN_COMMAND_HEARTBE
 
 // ---------------------------------------------------------------------
 // "R" -> restart everything, then reload this page
-// ---------------------------------------------------------------------
-
-window.addEventListener("keydown", (event) => {
-  if (isTypingTarget(event.target)) return;
-  // Ignore held-key auto-repeat and modified presses, so this doesn't fire
-  // on every repeat while held, or steal the browser's own Ctrl/Cmd+R reload.
-  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key.toLowerCase() !== "r") return;
-  event.preventDefault();
-  fetch("/api/restart", { method: "POST" }).catch((err) => console.error(err));
-  // The restart tears down and relaunches the backend (including this page's
-  // server), so wait for the new generation to come back up before reloading.
-  setTimeout(() => window.location.reload(), 2000);
-});
-
-// ---------------------------------------------------------------------
 // "P" -> place the vehicle at the start line
 // ---------------------------------------------------------------------
 
 window.addEventListener("keydown", (event) => {
   if (isTypingTarget(event.target)) return;
+  // Ignore held-key auto-repeat and modified presses, so these don't fire
+  // on every repeat while held, or steal the browser's own Ctrl/Cmd+R reload.
   if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key.toLowerCase() !== "p") return;
-  event.preventDefault();
-  fetch("/api/place_at_start", { method: "POST" }).catch((err) => console.error(err));
+
+  switch (event.key.toLowerCase()) {
+    case "r":
+      event.preventDefault();
+      fetch("/api/restart", { method: "POST" }).catch((err) => console.error(err));
+      // The restart tears down and relaunches the backend (including this
+      // page's server), so wait for the new generation to come back up
+      // before reloading.
+      setTimeout(() => window.location.reload(), 2000);
+      break;
+    case "p":
+      event.preventDefault();
+      fetch("/api/place_at_start", { method: "POST" }).catch((err) => console.error(err));
+      break;
+  }
 });
 
 // ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
-
-// The ResizeObserver already fires for every size change of the canvas's
-// container, including the ones a window resize causes - a `resize`
-// listener on top of it only bought a second redraw for the same event.
-new ResizeObserver(requestRedraw).observe(canvas.parentElement);
 
 fetchJSON("/api/config")
   .then((config) => {
@@ -751,7 +410,6 @@ refreshMapList()
     if (!live.name && maps.length > 0) {
       await selectMap(maps[0].name);
     }
-    requestRedraw();
   })
   .catch((err) => console.error(err));
 

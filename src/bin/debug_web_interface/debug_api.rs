@@ -4,34 +4,8 @@
 
 use crate::session::Session;
 use aurorus::topics::VehicleModelKind;
+use aurorus::web::{header, json_response, not_found};
 use tiny_http::{Response, ResponseBox};
-
-pub(super) fn header(name: &str, value: &str) -> tiny_http::Header {
-    format!("{name}: {value}").parse().expect("header name/value are always valid ASCII")
-}
-
-pub(super) fn json_response<T: serde::Serialize>(value: &T, status: u16) -> ResponseBox {
-    let body = serde_json::to_string(value).expect("serializing a well-formed API response never fails");
-    Response::from_string(body).with_status_code(status).with_header(header("Content-Type", "application/json")).boxed()
-}
-
-pub(super) fn not_found() -> ResponseBox {
-    json_response(&serde_json::json!({ "error": "not found" }), 404)
-}
-
-/// The API string for `kind`, mirroring `web_gui`'s `live_api::kind_str` - kept
-/// as its own small copy here (rather than shared) since it's the only piece
-/// of that module playback actually needs, and duplicating five match arms is
-/// cheaper than threading a shared dependency between the two binaries.
-fn kind_str(kind: VehicleModelKind) -> &'static str {
-    match kind {
-        VehicleModelKind::Bicycle => "bicycle",
-        VehicleModelKind::DynamicBicycle => "dynamic_bicycle",
-        VehicleModelKind::NonlinearBicycle => "nonlinear_bicycle",
-        VehicleModelKind::PacejkaBicycle => "pacejka_bicycle",
-        VehicleModelKind::TwoTrack => "two_track",
-    }
-}
 
 #[derive(serde::Serialize)]
 struct TopicSummary {
@@ -60,6 +34,10 @@ struct SessionSummary<'a> {
     executors: Vec<ExecutorSummary>,
     map: Option<MapSummary<'a>>,
     vehicle_model: Option<&'static str>,
+    /// The same kind's human-readable label, so the frontend can display it
+    /// without keeping its own copy of the mapping - see
+    /// [`VehicleModelKind::ALL`].
+    vehicle_model_label: Option<&'static str>,
 }
 
 /// `GET /api/session` - everything the frontend needs up front except the
@@ -91,7 +69,8 @@ pub fn session(session: &Session) -> ResponseBox {
             duration_us: session.duration_us,
             executors,
             map,
-            vehicle_model: session.vehicle_model_kind.map(kind_str),
+            vehicle_model: session.vehicle_model_kind.map(VehicleModelKind::api_str),
+            vehicle_model_label: session.vehicle_model_kind.map(VehicleModelKind::label),
         },
         200,
     )
