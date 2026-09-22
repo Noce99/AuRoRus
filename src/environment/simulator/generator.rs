@@ -16,7 +16,9 @@ use crate::environment::simulator::voronoi_loop::{self, LoopConstructionError};
 use crate::environment::tiff;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error returned by [`generate`].
 #[derive(Debug)]
@@ -27,6 +29,10 @@ pub enum MapGenerationError {
     Tiff(tiff::TiffWriteError),
     RaceLine(race_line::RaceLineWriteError),
     Info(info::InfoWriteError),
+    /// The target folder already holds a map and `overwrite` was `false` -
+    /// see [`generate`]. Generating over it would silently destroy that map,
+    /// so the caller has to say explicitly that it wants that.
+    FolderExists(PathBuf),
     Io(std::io::Error),
 }
 
@@ -39,6 +45,11 @@ impl std::fmt::Display for MapGenerationError {
             Self::Tiff(err) => write!(f, "{err}"),
             Self::RaceLine(err) => write!(f, "{err}"),
             Self::Info(err) => write!(f, "{err}"),
+            Self::FolderExists(path) => write!(
+                f,
+                "a map already exists at {path:?} - pick another name, delete it first, \
+                 or generate with overwrite enabled"
+            ),
             Self::Io(err) => write!(f, "{err}"),
         }
     }
@@ -64,7 +75,17 @@ pub struct GeneratedMap {
 /// Runs one full map generation and writes it to a new folder under
 /// `config.output_root`, named `folder_name` if given, or a
 /// timestamp+seed-derived name otherwise (see [`default_folder_name`]).
-pub fn generate(config: &GenerationConfig, folder_name: Option<&str>) -> Result<GeneratedMap, MapGenerationError> {
+///
+/// Refuses - with [`MapGenerationError::FolderExists`] - to write into a
+/// folder that already holds a map, unless `overwrite` is `true`. Writing
+/// the three output files into an existing map's folder would replace that
+/// map in place with no way to get it back, so a caller that genuinely
+/// wants that has to ask for it.
+pub fn generate(
+    config: &GenerationConfig,
+    folder_name: Option<&str>,
+    overwrite: bool,
+) -> Result<GeneratedMap, MapGenerationError> {
     config.validate().map_err(MapGenerationError::InvalidConfig)?;
 
     let mut rng = StdRng::seed_from_u64(config.seed);
@@ -109,6 +130,9 @@ pub fn generate(config: &GenerationConfig, folder_name: Option<&str>) -> Result<
         .map(String::from)
         .unwrap_or_else(|| default_folder_name(config.seed));
     let folder = config.output_root.join(folder_name);
+    if !overwrite && holds_a_map(&folder) {
+        return Err(MapGenerationError::FolderExists(folder));
+    }
     let race_lines_dir = folder.join(RACE_LINES_DIR_NAME);
     std::fs::create_dir_all(&race_lines_dir)?;
 
@@ -133,6 +157,37 @@ pub fn generate(config: &GenerationConfig, folder_name: Option<&str>) -> Result<
     info::write(&map_info, &folder.join(INFO_FILE_NAME)).map_err(MapGenerationError::Info)?;
 
     Ok(GeneratedMap { folder, num_race_line_points: speeds.len(), width_px, height_px })
+}
+
+/// Whether `folder` already holds a generated map, i.e. has the `info.json`
+/// every map is identified by (see [`crate::environment::Map::load`]). An
+/// empty or unrelated folder doesn't count - only a real map is worth
+/// refusing to clobber.
+fn holds_a_map(folder: &Path) -> bool {
+    folder.join(INFO_FILE_NAME).exists()
+}
+
+/// A fresh seed for one generation run, for callers that don't have an
+/// explicit one to use (`web_gui`'s generate popup, `generate_map` without
+/// `--seed`).
+///
+/// Derived from the wall clock at *nanosecond* resolution and mixed with a
+/// per-process counter, so two runs started in the same second - two quick
+/// clicks of "Generate Map", say - can't come out with the same seed. A
+/// second-resolution seed (what this used to be) made them produce not just
+/// the same map but the same [`default_folder_name`], so the second run
+/// silently overwrote the first.
+pub fn random_seed() -> u64 {
+    /// Distinguishes two calls that land in the same nanosecond. Scaled by
+    /// the golden-ratio constant so consecutive counter values land far
+    /// apart rather than in adjacent seeds.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    nanos.wrapping_add(counter.wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
 /// `<compact-UTC-timestamp>_seed<seed>`, e.g. `20260828T153000Z_seed42` -
@@ -175,7 +230,7 @@ mod tests {
     #[test]
     fn generate_writes_all_three_outputs() {
         let config = scratch_config("outputs");
-        let result = generate(&config, Some("run")).expect("generation should succeed with these params");
+        let result = generate(&config, Some("run"), false).expect("generation should succeed with these params");
 
         assert!(result.folder.join(MAP_TIFF_FILE_NAME).exists());
         assert!(result.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME).exists());
@@ -188,8 +243,8 @@ mod tests {
     #[test]
     fn same_seed_is_reproducible() {
         let config = scratch_config("repro");
-        let first = generate(&config, Some("a")).expect("first generation should succeed");
-        let second = generate(&config, Some("b")).expect("second generation should succeed");
+        let first = generate(&config, Some("a"), false).expect("first generation should succeed");
+        let second = generate(&config, Some("b"), false).expect("second generation should succeed");
 
         let csv_a = std::fs::read(first.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME)).unwrap();
         let csv_b = std::fs::read(second.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME)).unwrap();
@@ -203,9 +258,43 @@ mod tests {
     }
 
     #[test]
+    fn generating_over_an_existing_map_is_refused_unless_overwrite_is_set() {
+        let config = scratch_config("clobber");
+        let first = generate(&config, Some("run"), false).expect("first generation should succeed");
+        let original = std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap();
+
+        let different = GenerationConfig { seed: config.seed + 1, ..config.clone() };
+        let err = generate(&different, Some("run"), false)
+            .expect_err("generating over an existing map must be refused");
+        assert!(matches!(err, MapGenerationError::FolderExists(_)));
+        // ...and the original map is still exactly as it was.
+        assert_eq!(std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(), original);
+
+        // With overwrite it goes through, and really does replace the map.
+        generate(&different, Some("run"), true).expect("overwrite: true should succeed");
+        assert_ne!(std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(), original);
+
+        std::fs::remove_dir_all(&config.output_root).ok();
+    }
+
+    #[test]
+    fn freshly_rolled_seeds_differ_within_the_same_second() {
+        // The bug this guards: a seed at one-second resolution handed two
+        // back-to-back generations the same seed *and* the same default
+        // folder name, so the second silently overwrote the first.
+        let seeds: Vec<u64> = (0..100).map(|_| random_seed()).collect();
+        let unique: std::collections::HashSet<u64> = seeds.iter().copied().collect();
+        assert_eq!(unique.len(), seeds.len(), "every freshly rolled seed must be distinct");
+
+        let names: std::collections::HashSet<String> =
+            seeds.iter().map(|&s| default_folder_name(s)).collect();
+        assert_eq!(names.len(), seeds.len(), "distinct seeds must give distinct folder names");
+    }
+
+    #[test]
     fn generated_map_loads_back_correctly() {
         let config = scratch_config("load");
-        let generated = generate(&config, Some("run")).expect("generation should succeed with these params");
+        let generated = generate(&config, Some("run"), false).expect("generation should succeed with these params");
 
         let map = crate::environment::Map::load(&generated.folder).expect("loading a freshly generated map should succeed");
 

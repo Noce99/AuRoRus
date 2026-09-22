@@ -2,9 +2,8 @@
 //! generation. Built entirely on the existing [`crate::environment`] module
 //! (`Map::load`, `read_info`, `GenerationConfig`, `generate`).
 
-use crate::environment::{self, GenerationConfig, Map};
+use crate::environment::{self, GenerationConfig, Map, MapGenerationError, random_seed};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Request, Response, ResponseBox};
 
 /// One map's summary, as listed by [`list`].
@@ -78,7 +77,9 @@ pub fn generate_defaults() -> ResponseBox {
 /// `POST /api/maps/generate` - validates the given (or defaulted)
 /// parameters and, if they're valid, generates a new map under
 /// `maps_root`. Returns `400` with `{ "error": "..." }` on the first
-/// invalid parameter, before doing any generation work.
+/// invalid parameter, before doing any generation work, and `409` if a map
+/// with the requested name already exists and the body didn't ask to
+/// replace it (`"overwrite": true`).
 pub fn generate(request: &mut Request, maps_root: &Path) -> ResponseBox {
     let mut body = String::new();
     if let Err(err) = request.as_reader().read_to_string(&mut body) {
@@ -104,12 +105,13 @@ pub fn generate(request: &mut Request, maps_root: &Path) -> ResponseBox {
         None => None,
     };
 
+    let overwrite = params.overwrite.unwrap_or(false);
     let config = params.into_generation_config(maps_root.to_path_buf());
     if let Err(message) = config.validate() {
         return bad_request(&message);
     }
 
-    match environment::generate(&config, folder_name.as_deref()) {
+    match environment::generate(&config, folder_name.as_deref(), overwrite) {
         Ok(generated) => {
             let name = generated.folder.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
             json_response(
@@ -122,6 +124,9 @@ pub fn generate(request: &mut Request, maps_root: &Path) -> ResponseBox {
                 200,
             )
         }
+        // A name collision is the client's to resolve (pick another name, or
+        // re-send with "overwrite": true), not a server fault - 409, not 500.
+        Err(err @ MapGenerationError::FolderExists(_)) => error_response(409, &err.to_string()),
         Err(err) => error_response(500, &err.to_string()),
     }
 }
@@ -145,6 +150,10 @@ struct GenerateParams {
     max_speed_mps: Option<f64>,
     max_lateral_accel_mps2: Option<f64>,
     name: Option<String>,
+    /// Replace an existing map of the same name instead of failing with
+    /// `409`. Never defaulted to `true`, and deliberately absent from
+    /// [`Self::defaults`] so the generate popup can't pre-fill it.
+    overwrite: Option<bool>,
 }
 
 impl GenerateParams {
@@ -169,6 +178,7 @@ impl GenerateParams {
             max_speed_mps: Some(d.max_speed_mps),
             max_lateral_accel_mps2: Some(d.max_lateral_accel_mps2),
             name: None,
+            overwrite: None,
         }
     }
 
@@ -204,10 +214,6 @@ struct GeneratedMapSummary {
     width_px: u32,
     height_px: u32,
     num_race_line_points: usize,
-}
-
-fn random_seed() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Validates `name` as a map folder name: non-empty, and free of any path

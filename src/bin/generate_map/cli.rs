@@ -8,12 +8,15 @@ use std::path::PathBuf;
 pub struct Config {
     pub generation: GenerationConfig,
     pub folder_name: Option<String>,
+    /// Set by `--force`: replace an existing map of the same name instead
+    /// of refusing to clobber it. See [`aurorus::environment::generate`].
+    pub overwrite: bool,
 }
 
 /// Parses CLI flags from `argv`, each optional and falling back to
-/// [`GenerationConfig::default`] (except `--seed`, which defaults to the
-/// current unix time so re-running without it produces a fresh map every
-/// time). Prints usage and exits the process on `-h`/`--help`, an unknown
+/// [`GenerationConfig::default`] (except `--seed`, which defaults to a
+/// freshly rolled one so re-running without it produces a different map
+/// every time). Prints usage and exits the process on `-h`/`--help`, an unknown
 /// argument, a flag missing its value, or an invalid value.
 pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
@@ -30,7 +33,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let usage = format!(
         "Usage: {program} [OPTIONS]\n\n\
          Options:\n  \
-         --seed N                  RNG seed (default: current unix time)\n  \
+         --seed N                  RNG seed (default: freshly rolled)\n  \
          --sites N                 number of Voronoi seed points (default: {})\n  \
          --area-width M             bounded area width, meters (default: {})\n  \
          --area-height M            bounded area height, meters (default: {})\n  \
@@ -42,6 +45,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
          --max-lateral-accel M      m/s^2 (default: {})\n  \
          --out DIR                  output root (default: {:?})\n  \
          --name NAME                override the generated folder's name\n  \
+         --force                    overwrite an existing map of that name\n  \
          --config-dir DIR           folder to load config/ files from (default: {:?})\n  \
          -h, --help                 print this message",
         defaults.num_sites,
@@ -63,12 +67,9 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
         std::process::exit(1);
     };
 
-    let default_seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let mut generation = GenerationConfig { seed: default_seed, ..defaults };
+    let mut generation = GenerationConfig { seed: aurorus::environment::random_seed(), ..defaults };
     let mut folder_name = None;
+    let mut overwrite = false;
 
     let mut args = raw_args.into_iter();
     while let Some(flag) = args.next() {
@@ -130,6 +131,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                     next_value(&mut args, |s| Some(s.to_string())).unwrap_or_else(|| fail(invalid_message(&flag))),
                 )
             }
+            "--force" => overwrite = true,
             "--config-dir" => {
                 // Already consumed by config_dir_from() above to load
                 // `defaults` - just skip its value here.
@@ -139,7 +141,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
         }
     }
 
-    Config { generation, folder_name }
+    Config { generation, folder_name, overwrite }
 }
 
 /// Consumes the next arg as the current flag's value and runs it through

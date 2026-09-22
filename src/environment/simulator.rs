@@ -17,4 +17,4 @@ mod voronoi_loop;
 pub mod vehicle;
 
 pub use config::GenerationConfig;
-pub use generator::{GeneratedMap, MapGenerationError, generate};
+pub use generator::{GeneratedMap, MapGenerationError, generate, random_seed};

@@ -7,7 +7,7 @@ fn main() {
     let config = cli::parse_config(std::env::args());
     let start = Instant::now();
 
-    match generate(&config.generation, config.folder_name.as_deref()) {
+    match generate(&config.generation, config.folder_name.as_deref(), config.overwrite) {
         Ok(map) => {
             let elapsed = start.elapsed();
             println!("Generated map at {}", map.folder.display());
