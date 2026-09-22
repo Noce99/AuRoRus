@@ -6,10 +6,9 @@ use crate::environment::Map;
 use crate::topics::{
     MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap, START_STATE_TOPIC_NAME, StartState,
 };
-use crate::{Captain, Executor};
+use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::path::Path;
-use std::thread;
 use std::time::Duration;
 
 /// Every tunable parameter [`MapServer`] needs - loaded from
@@ -99,6 +98,7 @@ impl Executor for MapServer {
         let map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let selection_topic = captain.topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME);
+        let mut ticker = Ticker::from_interval(Duration::from_millis(self.config.poll_interval_ms));
 
         while captain.is_running(self.id) {
             let wanted = selection_topic.read();
@@ -119,7 +119,7 @@ impl Executor for MapServer {
                 }
             }
 
-            thread::sleep(Duration::from_millis(self.config.poll_interval_ms));
+            ticker.wait();
         }
     }
 

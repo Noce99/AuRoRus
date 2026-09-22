@@ -6,10 +6,12 @@ mod captain;
 mod debug_executor;
 mod executor;
 mod log;
+mod rate;
 mod runner;
 mod topic;
 
 pub use captain::Captain;
 pub use executor::Executor;
+pub use rate::Ticker;
 pub use runner::{Runner, StopHandle, SwitchExecutorError};
 pub use topic::{RwLockTopic, TopicError};

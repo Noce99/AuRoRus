@@ -4,11 +4,11 @@
 
 use crate::core::captain::Captain;
 use crate::core::executor::Executor;
+use crate::core::rate::Ticker;
 use crate::debug_format::DebugFileWriter;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How long a rolling window is, for measuring the achieved recording rate against
@@ -67,8 +67,7 @@ impl Executor for DebugExecutor {
         let session_start_us = writer.session_start_unix_micros();
         let mut last_bytes: HashMap<String, Vec<u8>> = HashMap::new();
 
-        let interval = Duration::from_secs_f64(1.0 / self.frequency_hz);
-        let mut next_tick = Instant::now() + interval;
+        let mut ticker = Ticker::new(self.frequency_hz);
 
         let mut window_start = Instant::now();
         let mut window_ticks: u32 = 0;
@@ -97,16 +96,7 @@ impl Executor for DebugExecutor {
             }
             writer.maybe_flush().expect("failed to flush the debug file");
 
-            // Precise pacing, matching `benchmark_data_freshness`'s `WriterExecutor::run`.
-            next_tick += interval;
-            let sleep = next_tick.saturating_duration_since(Instant::now());
-            if sleep > Duration::from_micros(100) {
-                thread::sleep(sleep);
-            } else {
-                while Instant::now() < next_tick {
-                    thread::yield_now();
-                }
-            }
+            ticker.wait();
 
             window_ticks += 1;
             if window_start.elapsed() >= RATE_WINDOW {

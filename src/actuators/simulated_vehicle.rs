@@ -16,10 +16,8 @@ use crate::topics::{
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME,
     VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
-use crate::{Captain, Executor};
+use crate::{Captain, Executor, Ticker};
 use std::any::Any;
-use std::thread;
-use std::time::Duration;
 
 /// The physical limits a [`VehicleModel`]'s simulated actuators can't
 /// exceed, no matter how far the current state is from the desired
@@ -450,8 +448,13 @@ impl Executor for SimulatedVehicle {
         let mut applied_place_request = place_at_start_topic.read().requested;
         let mut state = state_from_start(applied_start, applied_kind);
         let mut steering_angle_rad = 0.0;
+        // The model integrates a fixed `dt_s` per tick, so the loop has to
+        // actually run at `tick_rate_hz` for simulated time to track real
+        // time - which is what `Ticker` (unlike a fixed sleep) guarantees.
+        // Keeping `dt_s` nominal rather than measuring each period keeps the
+        // physics deterministic and reproducible.
         let dt_s = 1.0 / self.config.tick_rate_hz;
-        let interval = Duration::from_secs_f64(dt_s);
+        let mut ticker = Ticker::new(self.config.tick_rate_hz);
 
         while captain.is_running(self.id) {
             let wanted_kind = model_selection_topic.read().kind;
@@ -492,7 +495,7 @@ impl Executor for SimulatedVehicle {
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
 
-            thread::sleep(interval);
+            ticker.wait();
         }
     }
 

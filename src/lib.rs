@@ -22,7 +22,7 @@
 
 mod core;
 
-pub use core::{Captain, Executor, Runner, RwLockTopic, StopHandle, SwitchExecutorError, TopicError};
+pub use core::{Captain, Executor, Runner, RwLockTopic, StopHandle, SwitchExecutorError, Ticker, TopicError};
 
 pub mod actuators;
 pub mod algorithms;

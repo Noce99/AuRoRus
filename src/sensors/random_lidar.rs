@@ -2,11 +2,9 @@
 //! [`LidarScan`]s, for exercising algorithms without real hardware.
 
 use crate::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
-use crate::{Captain, Executor};
+use crate::{Captain, Executor, Ticker};
 use rand::RngExt;
 use std::any::Any;
-use std::thread;
-use std::time::Duration;
 
 /// Every tunable parameter [`RandomLidar`] needs - loaded from
 /// `config/sensors/random_lidar.toml` (see [`Default`]) or from an arbitrary
@@ -72,7 +70,7 @@ impl Executor for RandomLidar {
 
     fn run(&mut self, captain: &Captain) {
         let topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
-        let interval = Duration::from_secs_f64(1.0 / self.config.rate_hz);
+        let mut ticker = Ticker::new(self.config.rate_hz);
         let mut rng = rand::rng();
         let intensity_range = self.config.intensity_min..=self.config.intensity_max;
 
@@ -91,7 +89,7 @@ impl Executor for RandomLidar {
                 )
                 .expect("lost writer authorization for the lidar_scan topic");
 
-            thread::sleep(interval);
+            ticker.wait();
         }
     }
 

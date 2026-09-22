@@ -1,11 +1,10 @@
 //! The shared payload type and the two executors that publish/consume it.
 
 use crate::report::Report;
-use aurorus::{Captain, Executor};
+use aurorus::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// One published value: an array of `f32`s, sized at runtime by `--topic_size`.
 pub type Payload = Vec<f32>;
@@ -53,8 +52,7 @@ impl Executor for WriterExecutor {
     fn run(&mut self, captain: &Captain) {
         let topic = captain.topic::<Payload>(TOPIC_NAME);
 
-        let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
-        let mut next_update = Instant::now() + interval;
+        let mut ticker = Ticker::new(self.rate_hz);
         let mut frame = 0u64;
         let mut samples: Vec<u64> = Vec::new();
 
@@ -80,17 +78,7 @@ impl Executor for WriterExecutor {
             samples.push(start.elapsed().as_nanos() as u64);
             frame += 1;
 
-            // Precise timing at the target rate.
-            next_update += interval;
-            let sleep_duration = next_update.saturating_duration_since(Instant::now());
-            if sleep_duration > Duration::from_micros(100) {
-                thread::sleep(sleep_duration);
-            } else if sleep_duration > Duration::ZERO {
-                // Busy wait for precise timing.
-                while Instant::now() < next_update {
-                    thread::yield_now();
-                }
-            }
+            ticker.wait();
         }
 
         *self.report.lock().unwrap() = Some(Report::from_samples(
@@ -150,7 +138,7 @@ impl Executor for ReaderExecutor {
 
     fn run(&mut self, captain: &Captain) {
         let topic = captain.topic::<Payload>(TOPIC_NAME);
-        let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
+        let mut ticker = Ticker::new(self.rate_hz);
         let mut samples: Vec<u64> = Vec::new();
 
         while captain.is_running(self.id) {
@@ -163,7 +151,7 @@ impl Executor for ReaderExecutor {
             std::hint::black_box(sum);
 
             samples.push(start.elapsed().as_nanos() as u64);
-            thread::sleep(interval);
+            ticker.wait();
         }
 
         self.sink.lock().unwrap().extend(samples);

@@ -1,8 +1,6 @@
 use crate::topics::{SCAN_TOPIC_NAME, Scan};
-use aurorus::{Captain, Executor};
+use aurorus::{Captain, Executor, Ticker};
 use std::any::Any;
-use std::thread;
-use std::time::Duration;
 
 pub struct Lidar {
     pub id: u8,
@@ -28,12 +26,12 @@ impl Executor for Lidar {
 
         println!("{} Started!", self.name);
 
-        let interval = Duration::from_secs_f64(1.0 / self.rate_hz);
+        let mut ticker = Ticker::new(self.rate_hz);
         while captain.is_running(self.id) {
             scan_topic
                 .write(self.id, Scan::new())
                 .expect("lost writer authorization for lidar_scan topic");
-            thread::sleep(interval);
+            ticker.wait();
         }
 
         println!("{} Finished!", self.name);
