@@ -81,7 +81,15 @@ pub fn session(session: &Session) -> ResponseBox {
 pub fn map_raster(session: &Session) -> ResponseBox {
     match &session.map {
         Some(map) => {
-            Response::from_data(map.pixels.clone()).with_header(header("Content-Type", "application/octet-stream")).boxed()
+            let len = map.pixels.len();
+            Response::new(
+                tiny_http::StatusCode(200),
+                vec![header("Content-Type", "application/octet-stream")],
+                std::io::Cursor::new(map.pixels.clone()),
+                Some(len),
+                None,
+            )
+            .boxed()
         }
         None => not_found(),
     }

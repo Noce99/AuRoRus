@@ -38,7 +38,7 @@ fn load(path: &Path) -> Option<(SelectedMap, StartState)> {
                 path: Some(path.to_path_buf()),
                 width_px: map.raster.width_px,
                 height_px: map.raster.height_px,
-                pixels: map.raster.to_bytes(),
+                pixels: map.raster.to_bytes().into(),
                 info: Some(map.info.clone()),
             };
             Some((selected, start_state(&map)))
@@ -100,16 +100,28 @@ impl Executor for MapServer {
         let selection_topic = captain.topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME);
         let mut ticker = Ticker::from_interval(Duration::from_millis(self.config.poll_interval_ms));
 
+        // Which map is currently published, tracked here rather than read back
+        // off the topic every poll. This executor is the `map` topic's only
+        // writer, so it already knows; reading it back would clone the whole
+        // `SelectedMap` - `MapInfo` and all - just to compare one path.
+        // Seeded once from the topic so a mid-run restart of just this
+        // executor (`Runner::switch_executor`) doesn't reload a map that's
+        // already published.
+        let mut published_path = map_topic.read().path;
+
         while captain.is_running(self.id) {
             let wanted = selection_topic.read();
-            let current = map_topic.read();
 
-            if wanted.path != current.path {
+            if wanted.path != published_path {
                 let next = match &wanted.path {
                     None => Some((SelectedMap::default(), StartState::default())),
                     Some(path) => load(path),
                 };
+                // Left unchanged when `load` fails, so a selection pointing at
+                // an unreadable map is retried on the next poll instead of
+                // being recorded as published.
                 if let Some((next_map, next_start_state)) = next {
+                    published_path = next_map.path.clone();
                     map_topic
                         .write(self.id, next_map)
                         .expect("lost writer authorization for the map topic");

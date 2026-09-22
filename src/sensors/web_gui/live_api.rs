@@ -63,9 +63,15 @@ pub fn map(captain: &Captain) -> ResponseBox {
 /// as [`super::maps_api::raster`].
 pub fn raster(captain: &Captain) -> ResponseBox {
     let selected = captain.topic::<SelectedMap>(MAP_TOPIC_NAME).read();
-    Response::from_data(selected.pixels)
-        .with_header(header("Content-Type", "application/octet-stream"))
-        .boxed()
+    let len = selected.pixels.len();
+    Response::new(
+        tiny_http::StatusCode(200),
+        vec![header("Content-Type", "application/octet-stream")],
+        std::io::Cursor::new(selected.pixels),
+        Some(len),
+        None,
+    )
+    .boxed()
 }
 
 #[derive(serde::Deserialize)]

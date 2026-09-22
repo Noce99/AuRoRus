@@ -6,6 +6,7 @@
 
 use crate::environment::MapInfo;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Name of the topic [`SelectedMap`] is published on.
 pub const MAP_TOPIC_NAME: &str = "map";
@@ -35,7 +36,15 @@ pub struct SelectedMap {
     pub height_px: u32,
     /// The raster pixels themselves - `width_px * height_px` bytes,
     /// row-major.
-    pub pixels: Vec<u8>,
+    ///
+    /// Behind an [`Arc`] because [`crate::RwLockTopic::read`] hands every
+    /// reader an owned clone of the whole topic, and for a 1200x1200 map
+    /// that's 1.44 MB copied per read - paid by every `GET /api/map` (which
+    /// only wants the name and dimensions) and by `MapServer`'s own poll
+    /// loop. Sharing the buffer makes those clones a refcount bump; the
+    /// pixels are never mutated in place, only replaced wholesale when a
+    /// different map is loaded.
+    pub pixels: Arc<[u8]>,
     /// This map's full metadata, or `None` if no map has been loaded yet.
     pub info: Option<MapInfo>,
 }
@@ -48,4 +57,51 @@ pub struct SelectedMap {
 pub struct MapSelection {
     /// Wanted map folder, or `None` for no map selected.
     pub path: Option<PathBuf>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `RwLockTopic::read` clones the whole value, so this is what keeps a
+    /// `GET /api/map` (name and dimensions only) and `MapServer`'s poll loop
+    /// from copying a 1.44 MB raster each time.
+    #[test]
+    fn cloning_a_selected_map_shares_its_pixels_rather_than_copying_them() {
+        let selected = SelectedMap {
+            path: Some("maps/track".into()),
+            width_px: 2,
+            height_px: 2,
+            pixels: vec![255u8, 0, 255, 0].into(),
+            info: None,
+        };
+
+        let copy = selected.clone();
+
+        assert!(
+            Arc::ptr_eq(&selected.pixels, &copy.pixels),
+            "cloning SelectedMap must share the raster, not duplicate it"
+        );
+        assert_eq!(&*copy.pixels, &[255u8, 0, 255, 0]);
+    }
+
+    /// The raster still has to survive a recording round trip - the debug
+    /// format serializes every topic, and `Arc` is only cheap in-process.
+    #[test]
+    fn pixels_survive_a_serde_round_trip() {
+        let selected = SelectedMap {
+            path: None,
+            width_px: 2,
+            height_px: 1,
+            pixels: vec![7u8, 9].into(),
+            info: None,
+        };
+
+        let encoded = bincode::serde::encode_to_vec(&selected, bincode::config::standard()).unwrap();
+        let (decoded, _): (SelectedMap, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+
+        assert_eq!(&*decoded.pixels, &[7u8, 9]);
+        assert_eq!(decoded.width_px, 2);
+    }
 }

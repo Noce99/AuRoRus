@@ -40,7 +40,7 @@ pub struct DecodedMap {
     pub name: Option<String>,
     pub width_px: u32,
     pub height_px: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: std::sync::Arc<[u8]>,
     pub info: Option<MapInfo>,
 }
 
@@ -189,10 +189,10 @@ mod tests {
             path: Some("maps/track_a".into()),
             width_px: 2,
             height_px: 2,
-            pixels: vec![255, 0, 0, 255],
+            pixels: vec![255, 0, 0, 255].into(),
             info: None,
         };
-        let map_b = SelectedMap { path: Some("maps/track_b".into()), width_px: 1, height_px: 1, pixels: vec![0], info: None };
+        let map_b = SelectedMap { path: Some("maps/track_b".into()), width_px: 1, height_px: 1, pixels: vec![0].into(), info: None };
         writer.write_sample(map_id, 0, &encode(&map_a)).unwrap();
         writer.write_sample(map_id, 5_000, &encode(&map_b)).unwrap();
 
