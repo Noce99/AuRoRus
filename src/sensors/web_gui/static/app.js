@@ -12,8 +12,14 @@ let currentMap = null;
  *  when the live selection has actually changed. */
 let liveMapName = null;
 
-/** @type {{x_m:number, y_m:number, heading_rad:number, speed_mps:number}|null} */
+/** The most recent sample from `/api/vehicle_status`, and the
+ *  `performance.now()` at which it arrived. Rendering never draws this
+ *  sample directly - it draws `predictedVehiclePose()`, which dead-reckons
+ *  forward from it, so the vehicle moves at display rate instead of
+ *  stepping once per poll.
+ *  @type {{x_m:number, y_m:number, heading_rad:number, speed_mps:number}|null} */
 let vehicleStatus = null;
+let vehicleStatusAtMs = 0;
 
 /** Vehicle model kind the `vehicle_model_status` topic currently holds
  *  (server-side, actually-running model), or null before the first poll -
@@ -106,7 +112,7 @@ function clientToDevice(clientX, clientY) {
 // Rendering
 // ---------------------------------------------------------------------
 
-function draw() {
+function draw(nowMs) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#008080";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -133,9 +139,7 @@ function draw() {
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
 
-  drawVehicle();
-  updateStatusBar();
-  syncZoomSlider();
+  drawVehicle(nowMs);
 }
 
 // ---------------------------------------------------------------------
@@ -145,10 +149,31 @@ function draw() {
 const VEHICLE_LENGTH_M = 0.45;
 const VEHICLE_WIDTH_M = 0.25;
 
-function drawVehicle() {
-  if (!vehicleStatus) return;
+/** Never dead-reckon further than this past the last sample: if polling
+ *  stalls (tab backgrounded, server busy) we'd rather park the vehicle a
+ *  little behind than fling it across the map on stale data. */
+const MAX_EXTRAPOLATION_MS = 150;
 
-  const { x, y } = worldToScreen(vehicleStatus.x_m, vehicleStatus.y_m);
+/** The last sample advanced to `nowMs` along its own heading at its own
+ *  speed - the same straight-line motion the simulator itself integrates
+ *  between ticks. Steering curvature within one poll period is not modelled,
+ *  which at a 33 ms period and 8 m/s is a few millimetres of error. */
+function predictedVehiclePose(nowMs) {
+  if (!vehicleStatus) return null;
+  const dt_s = Math.min(Math.max(nowMs - vehicleStatusAtMs, 0), MAX_EXTRAPOLATION_MS) / 1000;
+  return {
+    x_m: vehicleStatus.x_m + vehicleStatus.speed_mps * Math.cos(vehicleStatus.heading_rad) * dt_s,
+    y_m: vehicleStatus.y_m + vehicleStatus.speed_mps * Math.sin(vehicleStatus.heading_rad) * dt_s,
+    heading_rad: vehicleStatus.heading_rad,
+    speed_mps: vehicleStatus.speed_mps,
+  };
+}
+
+function drawVehicle(nowMs) {
+  const pose = predictedVehiclePose(nowMs);
+  if (!pose) return;
+
+  const { x, y } = worldToScreen(pose.x_m, pose.y_m);
   const scale = scalePxPerMeter();
   const lengthPx = VEHICLE_LENGTH_M * scale;
   const widthPx = VEHICLE_WIDTH_M * scale;
@@ -156,7 +181,7 @@ function drawVehicle() {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.translate(x, y);
-  ctx.rotate(vehicleStatus.heading_rad);
+  ctx.rotate(pose.heading_rad);
 
   ctx.fillStyle = "#ffb020";
   ctx.fillRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
@@ -176,10 +201,38 @@ function drawVehicle() {
   ctx.restore();
 }
 
-function frame() {
-  resizeCanvasToDisplaySize();
-  draw();
+// ---------------------------------------------------------------------
+// Render loop
+//
+// Everything that wants the canvas repainted calls `requestRedraw()`; the
+// single `requestAnimationFrame` loop below is the only thing that ever
+// paints. That decouples painting from whatever triggered it - a burst of
+// `mousemove` events (which can arrive far faster than the display
+// refreshes) collapses into one paint per frame instead of one each - and
+// keeps the vehicle moving smoothly at display rate between status polls,
+// via `predictedVehiclePose`.
+// ---------------------------------------------------------------------
+
+let needsRedraw = true;
+
+function requestRedraw() {
+  needsRedraw = true;
 }
+
+function renderLoop(nowMs) {
+  requestAnimationFrame(renderLoop);
+
+  // A moving vehicle changes the picture every frame even with no input.
+  const moving = vehicleStatus !== null && Math.abs(vehicleStatus.speed_mps) > 1e-3;
+  if (!needsRedraw && !moving) return;
+  needsRedraw = false;
+
+  resizeCanvasToDisplaySize();
+  draw(nowMs);
+  updateStatusBar(nowMs);
+}
+
+requestAnimationFrame(renderLoop);
 
 // ---------------------------------------------------------------------
 // Status bar
@@ -189,10 +242,18 @@ const statusName = document.getElementById("status-map-name");
 const statusVerticalSize = document.getElementById("status-vertical-size");
 const statusSpeed = document.getElementById("status-speed");
 
-function updateStatusBar() {
-  statusName.textContent = currentMap ? currentMap.name : "No map loaded";
-  statusVerticalSize.textContent = `Vertical size: ${view.verticalSizeM.toFixed(2)} m`;
-  statusSpeed.textContent = vehicleStatus ? `Speed: ${vehicleStatus.speed_mps.toFixed(2)} m/s` : "";
+/** Writes `text` only when it actually differs from what the element
+ *  already shows. The render loop runs this every frame, and an unconditional
+ *  `textContent` write dirties layout even when the string is identical. */
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+function updateStatusBar(nowMs) {
+  const pose = predictedVehiclePose(nowMs);
+  setText(statusName, currentMap ? currentMap.name : "No map loaded");
+  setText(statusVerticalSize, `Vertical size: ${view.verticalSizeM.toFixed(2)} m`);
+  setText(statusSpeed, pose ? `Speed: ${pose.speed_mps.toFixed(2)} m/s` : "");
 }
 
 // ---------------------------------------------------------------------
@@ -201,6 +262,10 @@ function updateStatusBar() {
 
 function setVerticalSize(size) {
   view.verticalSizeM = clamp(size, MIN_VERTICAL_SIZE_M, maxVerticalSizeM());
+  // Pushed here, where the zoom actually changes, rather than from the
+  // render loop - the slider is a DOM write and has no business running
+  // once per frame.
+  syncZoomSlider();
 }
 
 function zoomAt(deviceX, deviceY, factor) {
@@ -209,7 +274,7 @@ function zoomAt(deviceX, deviceY, factor) {
   const after = screenToWorld(deviceX, deviceY);
   view.centerX += before.x - after.x;
   view.centerY += before.y - after.y;
-  frame();
+  requestRedraw();
 }
 
 canvas.addEventListener(
@@ -240,7 +305,7 @@ window.addEventListener("mousemove", (event) => {
   view.centerX -= (device.x - lastDevice.x) / scale;
   view.centerY -= (device.y - lastDevice.y) / scale;
   lastDevice = device;
-  frame();
+  requestRedraw();
 });
 
 window.addEventListener("mouseup", () => {
@@ -280,7 +345,7 @@ function syncZoomSlider() {
 zoomSlider.addEventListener("input", () => {
   if (syncingSlider || !currentMap) return;
   setVerticalSize(verticalSizeFromSlider(Number(zoomSlider.value)));
-  frame();
+  requestRedraw();
 });
 
 document.getElementById("home-btn").addEventListener("click", () => {
@@ -289,7 +354,7 @@ document.getElementById("home-btn").addEventListener("click", () => {
   view.centerX = (line.a.x + line.b.x) / 2;
   view.centerY = (line.a.y + line.b.y) / 2;
   setVerticalSize(10);
-  frame();
+  requestRedraw();
 });
 
 // ---------------------------------------------------------------------
@@ -393,15 +458,43 @@ async function pollLiveMap() {
     currentMap = null;
   }
   renderMapList(await fetchJSON("/api/maps"), liveMapName);
-  frame();
+  requestRedraw();
 }
 
 const LIVE_MAP_POLL_MS = 500;
-const VEHICLE_STATUS_POLL_MS = 50;
+const VEHICLE_STATUS_POLL_MS = 33;
 
 async function pollVehicleStatus() {
-  vehicleStatus = await fetchJSON("/api/vehicle_status");
-  frame();
+  const status = await fetchJSON("/api/vehicle_status");
+  // A still vehicle produces an identical sample every poll; repainting for
+  // those is pure waste, and `renderLoop` already keeps painting by itself
+  // while the vehicle is moving.
+  const moved =
+    vehicleStatus === null ||
+    status.x_m !== vehicleStatus.x_m ||
+    status.y_m !== vehicleStatus.y_m ||
+    status.heading_rad !== vehicleStatus.heading_rad ||
+    status.speed_mps !== vehicleStatus.speed_mps;
+  vehicleStatus = status;
+  vehicleStatusAtMs = performance.now();
+  if (moved) requestRedraw();
+}
+
+/** Runs `poll` every `intervalMs`, but only ever with one request in
+ *  flight: the next wait starts when the last response lands. `setInterval`
+ *  would instead keep firing into a slow or stalled server and pile
+ *  requests up behind each other. */
+function startPolling(poll, intervalMs) {
+  const tick = async () => {
+    const startedMs = performance.now();
+    try {
+      await poll();
+    } catch (err) {
+      console.error(err);
+    }
+    setTimeout(tick, Math.max(0, intervalMs - (performance.now() - startedMs)));
+  };
+  tick();
 }
 
 // ---------------------------------------------------------------------
@@ -522,7 +615,13 @@ form.addEventListener("submit", async (event) => {
  *  fallbacks for the brief window before that first fetch resolves. */
 let humanMaxSpeedMps = 3.0;
 let humanMaxSteeringRad = 0.35;
-const HUMAN_COMMAND_POST_MS = 50;
+
+/** How often the currently held command is re-sent even though nothing
+ *  changed. The command itself goes out the instant a key goes down or up
+ *  (see `sendHumanCommandIfChanged`), so this is purely a safety net: if one
+ *  POST is lost, the server would otherwise hold that stale command until
+ *  the next key event - which, with a key held down, might be never. */
+const HUMAN_COMMAND_HEARTBEAT_MS = 250;
 
 const keys = { w: false, a: false, s: false, d: false };
 
@@ -534,20 +633,24 @@ window.addEventListener("keydown", (event) => {
   if (isTypingTarget(event.target)) return;
   const key = event.key.toLowerCase();
   if (!(key in keys)) return;
-  keys[key] = true;
   event.preventDefault();
+  if (keys[key]) return; // auto-repeat, not a new press
+  keys[key] = true;
+  sendHumanCommandIfChanged();
 });
 
 window.addEventListener("keyup", (event) => {
   const key = event.key.toLowerCase();
   if (!(key in keys)) return;
   keys[key] = false;
+  sendHumanCommandIfChanged();
 });
 
 // Also release every key when focus leaves the window/tab, so the car
 // doesn't keep driving after e.g. alt-tabbing away mid-turn.
 window.addEventListener("blur", () => {
   keys.w = keys.a = keys.s = keys.d = false;
+  sendHumanCommandIfChanged();
 });
 
 function currentHumanCommand() {
@@ -562,13 +665,35 @@ function currentHumanCommand() {
   };
 }
 
-setInterval(() => {
+/** The last command actually sent, so `sendHumanCommandIfChanged` can tell
+ *  a real change from a repeat. `null` until the first send. */
+let lastSentCommand = null;
+
+function sendHumanCommand(command) {
+  lastSentCommand = command;
   fetch("/api/human_vesc_command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(currentHumanCommand()),
+    body: JSON.stringify(command),
   }).catch((err) => console.error(err));
-}, HUMAN_COMMAND_POST_MS);
+}
+
+// Sending on the key edge rather than on a timer is what makes the controls
+// feel immediate: a press used to wait up to one full post interval before
+// it was even put on the wire.
+function sendHumanCommandIfChanged() {
+  const command = currentHumanCommand();
+  if (
+    lastSentCommand !== null &&
+    command.servo_position_rad === lastSentCommand.servo_position_rad &&
+    command.speed_mps === lastSentCommand.speed_mps
+  ) {
+    return;
+  }
+  sendHumanCommand(command);
+}
+
+setInterval(() => sendHumanCommand(currentHumanCommand()), HUMAN_COMMAND_HEARTBEAT_MS);
 
 // ---------------------------------------------------------------------
 // "R" -> restart everything, then reload this page
@@ -603,8 +728,10 @@ window.addEventListener("keydown", (event) => {
 // Startup
 // ---------------------------------------------------------------------
 
-new ResizeObserver(frame).observe(canvas.parentElement);
-window.addEventListener("resize", frame);
+// The ResizeObserver already fires for every size change of the canvas's
+// container, including the ones a window resize causes - a `resize`
+// listener on top of it only bought a second redraw for the same event.
+new ResizeObserver(requestRedraw).observe(canvas.parentElement);
 
 fetchJSON("/api/config")
   .then((config) => {
@@ -613,9 +740,9 @@ fetchJSON("/api/config")
   })
   .catch((err) => console.error(err));
 
-setInterval(() => pollLiveMap().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
-setInterval(() => pollVehicleStatus().catch((err) => console.error(err)), VEHICLE_STATUS_POLL_MS);
-setInterval(() => pollVehicleModel().catch((err) => console.error(err)), LIVE_MAP_POLL_MS);
+startPolling(pollLiveMap, LIVE_MAP_POLL_MS);
+startPolling(pollVehicleStatus, VEHICLE_STATUS_POLL_MS);
+startPolling(pollVehicleModel, LIVE_MAP_POLL_MS);
 
 refreshMapList()
   .then(async (maps) => {
@@ -623,7 +750,7 @@ refreshMapList()
     if (!live.name && maps.length > 0) {
       await selectMap(maps[0].name);
     }
-    frame();
+    requestRedraw();
   })
   .catch((err) => console.error(err));
 
