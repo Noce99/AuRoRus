@@ -105,11 +105,21 @@ pub fn compute(closed_points: &[Point2], track_width_m: f64) -> StartFinishSegme
     let dx = p1.x - p0.x;
     let dy = p1.y - p0.y;
     let len = (dx * dx + dy * dy).sqrt();
-    let (nx, ny) = if len > 1e-12 { (-dy / len, dx / len) } else { (1.0, 0.0) };
+    let (nx, ny) = if len > 1e-12 {
+        (-dy / len, dx / len)
+    } else {
+        (1.0, 0.0)
+    };
     let half = track_width_m / 2.0;
     StartFinishSegment {
-        a: Point2 { x: p0.x + nx * half, y: p0.y + ny * half },
-        b: Point2 { x: p0.x - nx * half, y: p0.y - ny * half },
+        a: Point2 {
+            x: p0.x + nx * half,
+            y: p0.y + ny * half,
+        },
+        b: Point2 {
+            x: p0.x - nx * half,
+            y: p0.y - ny * half,
+        },
     }
 }
 
@@ -122,7 +132,10 @@ mod tests {
         let points = [Point2 { x: 0.0, y: 0.0 }, Point2 { x: 1.0, y: 0.0 }];
         let seg = compute(&points, 4.0);
 
-        let mid = Point2 { x: (seg.a.x + seg.b.x) / 2.0, y: (seg.a.y + seg.b.y) / 2.0 };
+        let mid = Point2 {
+            x: (seg.a.x + seg.b.x) / 2.0,
+            y: (seg.a.y + seg.b.y) / 2.0,
+        };
         assert!(mid.x.abs() < 1e-9 && mid.y.abs() < 1e-9);
 
         let seg_len = seg.a.distance(&seg.b);
@@ -165,20 +178,20 @@ mod tests {
         // right next to it, so it should be rejected in favor of the
         // isolated straight run.
         let mut points = vec![
-            Point2 { x: 0.0, y: 0.0 },   // 0
-            Point2 { x: 1.0, y: 1.0 },   // 1: sharp turn into the inflection
-            Point2 { x: 2.0, y: 1.5 },   // 2
-            Point2 { x: 3.0, y: 2.0 },   // 3: inflection - zero turn angle
-            Point2 { x: 4.0, y: 2.5 },   // 4
-            Point2 { x: 5.0, y: 3.0 },   // 5: sharp turn out of the inflection
-            Point2 { x: 5.5, y: 4.0 },   // 6
-            Point2 { x: 5.5, y: 5.0 },   // 7: turns toward the straight run
-            Point2 { x: 5.5, y: 6.0 },   // 8
-            Point2 { x: 5.5, y: 7.0 },   // 9: straight run, far from any turn
-            Point2 { x: 5.5, y: 8.0 },   // 10
-            Point2 { x: 5.5, y: 9.0 },   // 11
-            Point2 { x: 5.0, y: 10.0 },  // 12: turns away again
-            Point2 { x: 4.0, y: 10.0 },  // 13
+            Point2 { x: 0.0, y: 0.0 },  // 0
+            Point2 { x: 1.0, y: 1.0 },  // 1: sharp turn into the inflection
+            Point2 { x: 2.0, y: 1.5 },  // 2
+            Point2 { x: 3.0, y: 2.0 },  // 3: inflection - zero turn angle
+            Point2 { x: 4.0, y: 2.5 },  // 4
+            Point2 { x: 5.0, y: 3.0 },  // 5: sharp turn out of the inflection
+            Point2 { x: 5.5, y: 4.0 },  // 6
+            Point2 { x: 5.5, y: 5.0 },  // 7: turns toward the straight run
+            Point2 { x: 5.5, y: 6.0 },  // 8
+            Point2 { x: 5.5, y: 7.0 },  // 9: straight run, far from any turn
+            Point2 { x: 5.5, y: 8.0 },  // 10
+            Point2 { x: 5.5, y: 9.0 },  // 11
+            Point2 { x: 5.0, y: 10.0 }, // 12: turns away again
+            Point2 { x: 4.0, y: 10.0 }, // 13
         ];
         // Indices 7-10 all measure a zero single-point turn angle, but 8 and
         // 9 are the only ones whose whole track_width_m neighborhood stays

@@ -11,6 +11,7 @@ pub const DEFAULT_CONFIG_ROOT: &str = "config";
 
 /// Reads `path` and deserializes it as TOML into `T`.
 pub fn load<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
-    let text = std::fs::read_to_string(path).map_err(|err| format!("failed to read {path:?}: {err}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|err| format!("failed to read {path:?}: {err}"))?;
     toml::from_str(&text).map_err(|err| format!("failed to parse {path:?}: {err}"))
 }

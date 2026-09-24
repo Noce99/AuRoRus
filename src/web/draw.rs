@@ -102,8 +102,15 @@ impl RasterQuery {
             query_param(url, "epoch").and_then(|s| s.parse().ok()),
             query_param(url, "write_count").and_then(|s| s.parse().ok()),
         ) {
-            (Some(topic), Some(shape), Some(epoch), Some(write_count)) => Ok(Self { topic, shape, epoch, write_count }),
-            _ => Err(bad_request("expected topic, shape, epoch and write_count query parameters")),
+            (Some(topic), Some(shape), Some(epoch), Some(write_count)) => Ok(Self {
+                topic,
+                shape,
+                epoch,
+                write_count,
+            }),
+            _ => Err(bad_request(
+                "expected topic, shape, epoch and write_count query parameters",
+            )),
         }
     }
 }
@@ -140,7 +147,8 @@ mod tests {
 
     #[test]
     fn a_client_holds_a_layer_only_at_the_same_epoch_and_write_count() {
-        let request: DrawRequest = serde_json::from_str(r#"{"epoch": 7, "known": {"draw/A": 3}}"#).unwrap();
+        let request: DrawRequest =
+            serde_json::from_str(r#"{"epoch": 7, "known": {"draw/A": 3}}"#).unwrap();
 
         assert!(request.holds(7, "draw/A", 3));
         assert!(!request.holds(7, "draw/A", 4));
@@ -162,17 +170,32 @@ mod tests {
 
         let stripped = without_raster_pixels(drawing);
 
-        let Shape::Raster { pixels, width_px, .. } = &stripped.shapes[0] else { unreachable!() };
+        let Shape::Raster {
+            pixels, width_px, ..
+        } = &stripped.shapes[0]
+        else {
+            unreachable!()
+        };
         assert!(pixels.is_empty());
         assert_eq!(*width_px, 2);
     }
 
     #[test]
     fn raster_query_parses_every_parameter() {
-        let query = RasterQuery::parse("/api/draw/raster?topic=draw%2FMapServer&shape=0&epoch=5&write_count=2")
-            .ok()
-            .expect("every parameter is present and valid");
-        assert_eq!(query, RasterQuery { topic: "draw/MapServer".into(), shape: 0, epoch: 5, write_count: 2 });
+        let query = RasterQuery::parse(
+            "/api/draw/raster?topic=draw%2FMapServer&shape=0&epoch=5&write_count=2",
+        )
+        .ok()
+        .expect("every parameter is present and valid");
+        assert_eq!(
+            query,
+            RasterQuery {
+                topic: "draw/MapServer".into(),
+                shape: 0,
+                epoch: 5,
+                write_count: 2
+            }
+        );
         assert!(RasterQuery::parse("/api/draw/raster?topic=draw%2FMapServer").is_err());
     }
 }

@@ -154,7 +154,11 @@ mod tests {
             resolution_m_per_px: 0.05,
             width_px: 100,
             height_px: 100,
-            origin: ImageOrigin { x: -2.5, y: -2.5, theta_rad: 0.0 },
+            origin: ImageOrigin {
+                x: -2.5,
+                y: -2.5,
+                theta_rad: 0.0,
+            },
             start_finish_line: StartFinishLine {
                 a: WorldPoint { x: 0.0, y: 1.0 },
                 b: WorldPoint { x: 0.0, y: -1.0 },
@@ -170,7 +174,8 @@ mod tests {
     #[test]
     fn written_json_round_trips_expected_fields() {
         let info = sample_info();
-        let path = std::env::temp_dir().join(format!("aurorus_info_test_{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("aurorus_info_test_{}.json", std::process::id()));
         write(&info, &path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();

@@ -19,7 +19,9 @@ pub struct Config {
 /// every time). Prints usage and exits the process on `-h`/`--help`, an unknown
 /// argument, a flag missing its value, or an invalid value.
 pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
-    let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
+    let program = args
+        .next()
+        .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
 
     // A first pass just for --config-dir, so it can be used below to load
     // the defaults every other flag's help text and override base rely on -
@@ -67,7 +69,10 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
         std::process::exit(1);
     };
 
-    let mut generation = GenerationConfig { seed: aurorus::environment::random_seed(), ..defaults };
+    let mut generation = GenerationConfig {
+        seed: aurorus::environment::random_seed(),
+        ..defaults
+    };
     let mut folder_name = None;
     let mut overwrite = false;
 
@@ -79,20 +84,23 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                 std::process::exit(0);
             }
             "--seed" => {
-                generation.seed =
-                    next_value(&mut args, |s| s.parse::<u64>().ok()).unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.seed = next_value(&mut args, |s| s.parse::<u64>().ok())
+                    .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--sites" => {
-                generation.num_sites = next_value(&mut args, |s| s.parse::<usize>().ok().filter(|&v| v > 0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.num_sites =
+                    next_value(&mut args, |s| s.parse::<usize>().ok().filter(|&v| v > 0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--area-width" => {
-                generation.area_width_m = next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.area_width_m =
+                    next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--area-height" => {
-                generation.area_height_m = next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.area_height_m =
+                    next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--resolution" => {
                 generation.resolution_m_per_px =
@@ -100,12 +108,14 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                         .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--track-width" => {
-                generation.track_width_m = next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.track_width_m =
+                    next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--spacing" => {
-                generation.point_spacing_m = next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.point_spacing_m =
+                    next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--target-area-fraction" => {
                 generation.target_area_fraction = next_value(&mut args, |s| {
@@ -114,8 +124,9 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                 .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--max-speed" => {
-                generation.max_speed_mps = next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                generation.max_speed_mps =
+                    next_value(&mut args, |s| s.parse::<f64>().ok().filter(|&v| v > 0.0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--max-lateral-accel" => {
                 generation.max_lateral_accel_mps2 =
@@ -128,26 +139,35 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
             }
             "--name" => {
                 folder_name = Some(
-                    next_value(&mut args, |s| Some(s.to_string())).unwrap_or_else(|| fail(invalid_message(&flag))),
+                    next_value(&mut args, |s| Some(s.to_string()))
+                        .unwrap_or_else(|| fail(invalid_message(&flag))),
                 )
             }
             "--force" => overwrite = true,
             "--config-dir" => {
                 // Already consumed by config_dir_from() above to load
                 // `defaults` - just skip its value here.
-                next_value(&mut args, |s| Some(PathBuf::from(s))).unwrap_or_else(|| fail(invalid_message(&flag)));
+                next_value(&mut args, |s| Some(PathBuf::from(s)))
+                    .unwrap_or_else(|| fail(invalid_message(&flag)));
             }
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
 
-    Config { generation, folder_name, overwrite }
+    Config {
+        generation,
+        folder_name,
+        overwrite,
+    }
 }
 
 /// Consumes the next arg as the current flag's value and runs it through
 /// `validate`, or `None` if there's no next arg at all (i.e. the flag was
 /// the last argument) or it fails validation.
-fn next_value<T>(args: &mut impl Iterator<Item = String>, validate: impl FnOnce(&str) -> Option<T>) -> Option<T> {
+fn next_value<T>(
+    args: &mut impl Iterator<Item = String>,
+    validate: impl FnOnce(&str) -> Option<T>,
+) -> Option<T> {
     args.next().and_then(|value| validate(&value))
 }
 

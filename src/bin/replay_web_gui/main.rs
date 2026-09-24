@@ -25,9 +25,16 @@ fn main() {
         eprintln!("replay_web_gui: failed to bind {}: {err}", config.bind_addr);
         std::process::exit(1);
     });
-    println!("replay_web_gui: serving {:?} on http://{}", config.file, config.bind_addr);
+    println!(
+        "replay_web_gui: serving {:?} on http://{}",
+        config.file, config.bind_addr
+    );
 
-    let file_name = config.file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let file_name = config
+        .file
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
     for request in server.incoming_requests() {
         handlers::handle(request, &session, &file_name);
     }

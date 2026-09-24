@@ -13,8 +13,8 @@ mod points;
 pub(crate) mod raster;
 pub(crate) mod smoothing;
 mod start_finish;
-mod voronoi_loop;
 pub mod vehicle;
+mod voronoi_loop;
 
 pub use config::GenerationConfig;
 pub use generator::{GeneratedMap, MapGenerationError, generate, random_seed};

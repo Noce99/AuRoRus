@@ -6,7 +6,8 @@
 
 use crate::environment::Map;
 use crate::topics::{
-    Color, Drawing, MAP_SELECTION_TOPIC_NAME, Shape, MAP_TOPIC_NAME, MapSelection, SelectedMap, START_STATE_TOPIC_NAME, StartState,
+    Color, Drawing, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, START_STATE_TOPIC_NAME,
+    SelectedMap, Shape, StartState,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -72,7 +73,10 @@ fn drawing(map: &SelectedMap) -> Drawing {
             pixels: map.pixels.clone(),
         },
         Shape::Polyline {
-            points: vec![[line.a.x as f32, line.a.y as f32], [line.b.x as f32, line.b.y as f32]],
+            points: vec![
+                [line.a.x as f32, line.a.y as f32],
+                [line.b.x as f32, line.b.y as f32],
+            ],
             closed: false,
             width_px: 2.0,
             color: Color::RED,
@@ -96,7 +100,12 @@ fn start_state(map: &Map) -> StartState {
         (Some(p0), Some(p1)) => (p1.y - p0.y).atan2(p1.x - p0.x),
         _ => 0.0,
     };
-    StartState { x_m, y_m, heading_rad, speed_mps: 0.0 }
+    StartState {
+        x_m,
+        y_m,
+        heading_rad,
+        speed_mps: 0.0,
+    }
 }
 
 /// Claims [`MAP_TOPIC_NAME`] and [`START_STATE_TOPIC_NAME`] and republishes
@@ -111,7 +120,11 @@ pub struct MapServer {
 
 impl MapServer {
     pub fn new(name: impl Into<String>, config: MapServerConfig) -> Self {
-        Self { id: 0, name: name.into(), config }
+        Self {
+            id: 0,
+            name: name.into(),
+            config,
+        }
     }
 }
 
@@ -187,7 +200,9 @@ impl Executor for MapServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::environment::{ImageOrigin, MapInfo, MapSource, Raster, SpeedPoint, StartFinishLine, WorldPoint};
+    use crate::environment::{
+        ImageOrigin, MapInfo, MapSource, Raster, SpeedPoint, StartFinishLine, WorldPoint,
+    };
     use std::path::PathBuf;
 
     fn test_map(line: StartFinishLine, race_line: Vec<SpeedPoint>) -> Map {
@@ -197,7 +212,11 @@ mod tests {
                 resolution_m_per_px: 0.05,
                 width_px: 10,
                 height_px: 10,
-                origin: ImageOrigin { x: 0.0, y: 0.0, theta_rad: 0.0 },
+                origin: ImageOrigin {
+                    x: 0.0,
+                    y: 0.0,
+                    theta_rad: 0.0,
+                },
                 start_finish_line: line,
                 generated_at: String::new(),
                 source: MapSource::Random,
@@ -212,11 +231,21 @@ mod tests {
 
     #[test]
     fn start_state_is_centered_on_the_start_finish_line() {
-        let line =
-            StartFinishLine { a: WorldPoint { x: 1.0, y: 3.0 }, b: WorldPoint { x: 1.0, y: -1.0 } };
+        let line = StartFinishLine {
+            a: WorldPoint { x: 1.0, y: 3.0 },
+            b: WorldPoint { x: 1.0, y: -1.0 },
+        };
         let race_line = vec![
-            SpeedPoint { x: 1.0, y: 1.0, speed_mps: 0.0 },
-            SpeedPoint { x: 2.0, y: 1.0, speed_mps: 0.0 },
+            SpeedPoint {
+                x: 1.0,
+                y: 1.0,
+                speed_mps: 0.0,
+            },
+            SpeedPoint {
+                x: 2.0,
+                y: 1.0,
+                speed_mps: 0.0,
+            },
         ];
         let map = test_map(line, race_line);
 
@@ -229,10 +258,21 @@ mod tests {
 
     #[test]
     fn start_state_heading_is_tangent_to_the_track_direction() {
-        let line = StartFinishLine { a: WorldPoint { x: 0.0, y: 1.0 }, b: WorldPoint { x: 0.0, y: -1.0 } };
+        let line = StartFinishLine {
+            a: WorldPoint { x: 0.0, y: 1.0 },
+            b: WorldPoint { x: 0.0, y: -1.0 },
+        };
         let race_line = vec![
-            SpeedPoint { x: 0.0, y: 0.0, speed_mps: 0.0 },
-            SpeedPoint { x: 0.0, y: 1.0, speed_mps: 0.0 },
+            SpeedPoint {
+                x: 0.0,
+                y: 0.0,
+                speed_mps: 0.0,
+            },
+            SpeedPoint {
+                x: 0.0,
+                y: 1.0,
+                speed_mps: 0.0,
+            },
         ];
         let map = test_map(line, race_line);
 
@@ -243,8 +283,18 @@ mod tests {
 
     #[test]
     fn start_state_falls_back_to_zero_heading_with_too_few_race_line_points() {
-        let line = StartFinishLine { a: WorldPoint { x: 0.0, y: 1.0 }, b: WorldPoint { x: 0.0, y: -1.0 } };
-        let map = test_map(line, vec![SpeedPoint { x: 0.0, y: 0.0, speed_mps: 0.0 }]);
+        let line = StartFinishLine {
+            a: WorldPoint { x: 0.0, y: 1.0 },
+            b: WorldPoint { x: 0.0, y: -1.0 },
+        };
+        let map = test_map(
+            line,
+            vec![SpeedPoint {
+                x: 0.0,
+                y: 0.0,
+                speed_mps: 0.0,
+            }],
+        );
 
         assert_eq!(start_state(&map).heading_rad, 0.0);
     }

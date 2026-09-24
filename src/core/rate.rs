@@ -62,7 +62,10 @@ impl Ticker {
     /// whose config names a period (e.g. `poll_interval_ms`) rather than a
     /// rate.
     pub fn from_interval(interval: Duration) -> Self {
-        Self { interval, next_tick: Instant::now() }
+        Self {
+            interval,
+            next_tick: Instant::now(),
+        }
     }
 
     /// The period between ticks.

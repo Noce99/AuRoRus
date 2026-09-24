@@ -5,7 +5,8 @@
 
 use crate::session::Session;
 use aurorus::web::draw::{
-    DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster, without_raster_pixels,
+    DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster,
+    without_raster_pixels,
 };
 use aurorus::web::{json_response, not_found, read_json};
 use tiny_http::{Request, ResponseBox};
@@ -22,7 +23,11 @@ struct SessionSummary<'a> {
 /// timeline ([`timeline`]) and what's drawn ([`draw`]).
 pub fn session(session: &Session, file_name: &str) -> ResponseBox {
     json_response(
-        &SessionSummary { file_name, frequency_hz: session.frequency_hz, duration_us: session.duration_us },
+        &SessionSummary {
+            file_name,
+            frequency_hz: session.frequency_hz,
+            duration_us: session.duration_us,
+        },
         200,
     )
 }
@@ -52,7 +57,11 @@ pub fn timeline(session: &Session) -> ResponseBox {
             topics: executor
                 .topics
                 .iter()
-                .map(|topic| TimelineTopic { name: &topic.name, color_index: topic.color_index, timestamps_us: &topic.timestamps_us })
+                .map(|topic| TimelineTopic {
+                    name: &topic.name,
+                    color_index: topic.color_index,
+                    timestamps_us: &topic.timestamps_us,
+                })
                 .collect(),
         })
         .collect();
@@ -78,19 +87,29 @@ pub fn draw(request: &mut Request, session: &Session) -> ResponseBox {
             let drawing = if body.holds(session.epoch, &track.topic, version.write_count) {
                 None
             } else {
-                session.drawing(track, version.write_count).map(without_raster_pixels)
+                session
+                    .drawing(track, version.write_count)
+                    .map(without_raster_pixels)
             };
             DrawLayer {
                 topic: track.topic.clone(),
                 writer: Some(track.writer.clone()),
                 write_count: version.write_count,
-                age_ms: version.written_at_us.map(|written_at_us| t_us.saturating_sub(written_at_us) as f64 / 1000.0),
+                age_ms: version
+                    .written_at_us
+                    .map(|written_at_us| t_us.saturating_sub(written_at_us) as f64 / 1000.0),
                 drawing,
             }
         })
         .collect();
 
-    json_response(&DrawResponse { epoch: session.epoch, layers }, 200)
+    json_response(
+        &DrawResponse {
+            epoch: session.epoch,
+            layers,
+        },
+        200,
+    )
 }
 
 /// `GET /api/draw/raster?...` - see `aurorus::web::draw`. Any recorded
@@ -105,7 +124,10 @@ pub fn draw_raster(url: &str, session: &Session) -> ResponseBox {
     if query.epoch != session.epoch {
         return stale_raster();
     }
-    let Some(drawing) = session.track(&query.topic).and_then(|track| session.drawing(track, query.write_count)) else {
+    let Some(drawing) = session
+        .track(&query.topic)
+        .and_then(|track| session.drawing(track, query.write_count))
+    else {
         return not_found();
     };
     raster_response(&drawing, query.shape)

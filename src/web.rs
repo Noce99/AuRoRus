@@ -34,7 +34,9 @@ pub const BASE_CSS: &str = include_str!("web/base.css");
 /// `tiny_http` has no option for it, so it's set on the listening socket
 /// instead, which Linux (and macOS) accepted sockets inherit. Elsewhere this
 /// is a plain bind.
-pub fn bind_http(addr: impl ToSocketAddrs) -> Result<tiny_http::Server, Box<dyn Error + Send + Sync>> {
+pub fn bind_http(
+    addr: impl ToSocketAddrs,
+) -> Result<tiny_http::Server, Box<dyn Error + Send + Sync>> {
     let listener = TcpListener::bind(addr)?;
     #[cfg(unix)]
     set_nodelay(&listener)?;
@@ -56,7 +58,11 @@ fn set_nodelay(listener: &TcpListener) -> std::io::Result<()> {
             std::mem::size_of::<libc::c_int>() as libc::socklen_t,
         )
     };
-    if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 /// Sends `response` to `request` with a `Connection: close` header, so the
@@ -89,15 +95,23 @@ pub fn respond_and_close(request: Request, response: ResponseBox) -> io::Result<
         .position(|pair| pair == b"\r\n")
         .map(|i| i + 2)
         .expect("tiny_http always writes a CRLF-terminated status line");
-    raw.splice(status_line_end..status_line_end, b"Connection: close\r\n".iter().copied());
+    raw.splice(
+        status_line_end..status_line_end,
+        b"Connection: close\r\n".iter().copied(),
+    );
 
     let mut writer = request.into_writer();
     // Same as `Request::respond`: a client that hung up before reading its
     // response isn't this server's error.
-    writer.write_all(&raw).and_then(|()| writer.flush()).or_else(|err| match err.kind() {
-        ErrorKind::BrokenPipe | ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => Ok(()),
-        _ => Err(err),
-    })
+    writer
+        .write_all(&raw)
+        .and_then(|()| writer.flush())
+        .or_else(|err| match err.kind() {
+            ErrorKind::BrokenPipe | ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
+                Ok(())
+            }
+            _ => Err(err),
+        })
 }
 
 /// Builds a `Content-Type: ...`-style header. A header name/value built
@@ -128,7 +142,8 @@ pub fn shared_asset(path: &str) -> Option<ResponseBox> {
 
 /// Serializes `value` as a JSON response with the given status code.
 pub fn json_response<T: serde::Serialize>(value: &T, status: u16) -> ResponseBox {
-    let body = serde_json::to_string(value).expect("serializing a well-formed API response never fails");
+    let body =
+        serde_json::to_string(value).expect("serializing a well-formed API response never fails");
     Response::from_string(body)
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
@@ -143,7 +158,12 @@ struct ErrorBody {
 /// A JSON `{"error": "..."}` body with the given status code - the shape
 /// both frontends' `fetchJSON` knows how to surface.
 pub fn error_response(status: u16, message: &str) -> ResponseBox {
-    json_response(&ErrorBody { error: message.to_string() }, status)
+    json_response(
+        &ErrorBody {
+            error: message.to_string(),
+        },
+        status,
+    )
 }
 
 pub fn bad_request(message: &str) -> ResponseBox {
@@ -156,7 +176,9 @@ pub fn not_found() -> ResponseBox {
 
 /// Reads `request`'s body and parses it as JSON, or returns the 400
 /// response to send back instead.
-pub fn read_json<T: serde::de::DeserializeOwned>(request: &mut tiny_http::Request) -> Result<T, ResponseBox> {
+pub fn read_json<T: serde::de::DeserializeOwned>(
+    request: &mut tiny_http::Request,
+) -> Result<T, ResponseBox> {
     let mut body = String::new();
     if let Err(err) = request.as_reader().read_to_string(&mut body) {
         return Err(bad_request(&format!("failed to read request body: {err}")));
@@ -222,7 +244,9 @@ mod tests {
         });
 
         let mut stream = TcpStream::connect(addr).unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         stream.write_all(raw_request.as_bytes()).unwrap();
         let mut response = String::new();
         let mut buf = [0u8; 1024];
@@ -243,7 +267,10 @@ mod tests {
         let (head, body) = response.split_once("\r\n\r\n").unwrap();
         let mut lines = head.split("\r\n");
         assert_eq!(lines.next(), Some("HTTP/1.1 200 OK"));
-        assert!(lines.any(|line| line.eq_ignore_ascii_case("connection: close")), "{head}");
+        assert!(
+            lines.any(|line| line.eq_ignore_ascii_case("connection: close")),
+            "{head}"
+        );
         assert_eq!(body, "hello");
     }
 

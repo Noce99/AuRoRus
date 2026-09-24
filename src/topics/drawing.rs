@@ -45,7 +45,11 @@ impl Drawing {
 
     /// A drawing of `shapes` that never fades, painted at z-index `0`.
     pub fn new(shapes: Vec<Shape>) -> Self {
-        Self { shapes, stale_after_ms: None, z_index: 0 }
+        Self {
+            shapes,
+            stale_after_ms: None,
+            z_index: 0,
+        }
     }
 
     /// Sets [`stale_after_ms`](Self::stale_after_ms).
@@ -121,26 +125,71 @@ pub enum Shape {
         color: Color,
     },
     /// A set of dots of a fixed on-screen size, e.g. LIDAR hits.
-    Points { points: Vec<[f32; 2]>, radius_px: f32, color: Color },
+    Points {
+        points: Vec<[f32; 2]>,
+        radius_px: f32,
+        color: Color,
+    },
     /// Connected line segments through `points`, joined back to the first
     /// point if `closed`.
-    Polyline { points: Vec<[f32; 2]>, closed: bool, width_px: f32, color: Color },
+    Polyline {
+        points: Vec<[f32; 2]>,
+        closed: bool,
+        width_px: f32,
+        color: Color,
+    },
     /// A circle, filled or outlined.
-    Circle { x_m: f64, y_m: f64, radius_m: f64, filled: bool, color: Color },
+    Circle {
+        x_m: f64,
+        y_m: f64,
+        radius_m: f64,
+        filled: bool,
+        color: Color,
+    },
     /// An arc of the circle centered on (`x_m`, `y_m`), outlined from
     /// direction `start_rad` counterclockwise (increasing angle) to
     /// `end_rad`. A span of `2 * pi` or more draws the full circle.
-    CircularArc { x_m: f64, y_m: f64, radius_m: f64, start_rad: f64, end_rad: f64, width_px: f32, color: Color },
+    CircularArc {
+        x_m: f64,
+        y_m: f64,
+        radius_m: f64,
+        start_rad: f64,
+        end_rad: f64,
+        width_px: f32,
+        color: Color,
+    },
     /// A circular sector ("pie slice"): the region bounded by the two radii
     /// at `start_rad` and `end_rad` and the [`Shape::CircularArc`] between
     /// them, with the same conventions - filled or outlined.
-    CircularSector { x_m: f64, y_m: f64, radius_m: f64, start_rad: f64, end_rad: f64, filled: bool, color: Color },
+    CircularSector {
+        x_m: f64,
+        y_m: f64,
+        radius_m: f64,
+        start_rad: f64,
+        end_rad: f64,
+        filled: bool,
+        color: Color,
+    },
     /// A rectangle centered on (`x_m`, `y_m`), `length_m` along
     /// `heading_rad` and `width_m` across it, filled or outlined. A square
     /// is one with equal sides.
-    Rect { x_m: f64, y_m: f64, length_m: f64, width_m: f64, heading_rad: f64, filled: bool, color: Color },
+    Rect {
+        x_m: f64,
+        y_m: f64,
+        length_m: f64,
+        width_m: f64,
+        heading_rad: f64,
+        filled: bool,
+        color: Color,
+    },
     /// A text label anchored (centered) at (`x_m`, `y_m`).
-    Text { x_m: f64, y_m: f64, text: String, size_px: f32, color: Color },
+    Text {
+        x_m: f64,
+        y_m: f64,
+        text: String,
+        size_px: f32,
+        color: Color,
+    },
     /// A grayscale image: one byte per pixel, row-major, `0` drawn darkest
     /// and `255` lightest - e.g. an occupancy map (`255` drivable). Pixel
     /// `(0, 0)`'s corner sits at (`origin_x_m`, `origin_y_m`), and rows grow
@@ -183,9 +232,24 @@ mod tests {
                 rear_axle_m: 0.16,
                 color: Color::AMBER,
             },
-            Shape::Points { points: vec![[1.0, 2.0]], radius_px: 2.5, color: Color::RED },
-            Shape::Polyline { points: vec![[0.0, 0.0], [1.0, 1.0]], closed: true, width_px: 2.0, color: Color::BLUE },
-            Shape::Circle { x_m: 0.0, y_m: 0.0, radius_m: 1.0, filled: false, color: Color::GREEN },
+            Shape::Points {
+                points: vec![[1.0, 2.0]],
+                radius_px: 2.5,
+                color: Color::RED,
+            },
+            Shape::Polyline {
+                points: vec![[0.0, 0.0], [1.0, 1.0]],
+                closed: true,
+                width_px: 2.0,
+                color: Color::BLUE,
+            },
+            Shape::Circle {
+                x_m: 0.0,
+                y_m: 0.0,
+                radius_m: 1.0,
+                filled: false,
+                color: Color::GREEN,
+            },
             Shape::CircularArc {
                 x_m: 0.0,
                 y_m: 0.0,
@@ -204,8 +268,22 @@ mod tests {
                 filled: true,
                 color: Color::GREEN.with_alpha(64),
             },
-            Shape::Rect { x_m: 0.0, y_m: 0.0, length_m: 1.0, width_m: 1.0, heading_rad: 0.0, filled: true, color: Color::WHITE },
-            Shape::Text { x_m: 0.0, y_m: 0.0, text: "hi".into(), size_px: 12.0, color: Color::BLACK.with_alpha(128) },
+            Shape::Rect {
+                x_m: 0.0,
+                y_m: 0.0,
+                length_m: 1.0,
+                width_m: 1.0,
+                heading_rad: 0.0,
+                filled: true,
+                color: Color::WHITE,
+            },
+            Shape::Text {
+                x_m: 0.0,
+                y_m: 0.0,
+                text: "hi".into(),
+                size_px: 12.0,
+                color: Color::BLACK.with_alpha(128),
+            },
             Shape::Raster {
                 origin_x_m: 0.0,
                 origin_y_m: 0.0,
@@ -219,14 +297,21 @@ mod tests {
         .z_index(-3);
 
         let encoded = bincode::serde::encode_to_vec(&drawing, bincode::config::standard()).unwrap();
-        let (decoded, _): (Drawing, _) = bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        let (decoded, _): (Drawing, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
 
         assert_eq!(decoded, drawing);
     }
 
     #[test]
     fn shapes_serialize_to_json_keyed_by_their_snake_case_kind() {
-        let shape = Shape::Circle { x_m: 1.0, y_m: 2.0, radius_m: 3.0, filled: true, color: Color::RED };
+        let shape = Shape::Circle {
+            x_m: 1.0,
+            y_m: 2.0,
+            radius_m: 3.0,
+            filled: true,
+            color: Color::RED,
+        };
 
         let json = serde_json::to_value(&shape).unwrap();
 

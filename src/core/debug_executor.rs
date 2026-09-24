@@ -47,7 +47,12 @@ pub(crate) struct DebugExecutor {
 
 impl DebugExecutor {
     pub(crate) fn new(path: PathBuf, frequency_hz: f64) -> Self {
-        Self { id: 0, path, frequency_hz, resume_existing: false }
+        Self {
+            id: 0,
+            path,
+            frequency_hz,
+            resume_existing: false,
+        }
     }
 }
 
@@ -80,7 +85,9 @@ impl Executor for DebugExecutor {
 
         while captain.is_running(self.id) {
             for (name, topic) in captain.debug_topics_snapshot() {
-                let Some(writer_id) = topic.writer() else { continue }; // only "topics somebody is writing"
+                let Some(writer_id) = topic.writer() else {
+                    continue;
+                }; // only "topics somebody is writing"
                 let write_count = topic.meta().write_count;
                 // Still the seed, or nothing new since the last snapshot - skip without encoding.
                 if write_count == 0 || last_write_count.get(&name) == Some(&write_count) {
@@ -91,7 +98,8 @@ impl Executor for DebugExecutor {
                 // must stay consistent with whatever a `resume()`d writer already
                 // wrote before a restart, and an `Instant` from a previous process
                 // can't be reconstructed from the file - only a wall-clock epoch can.
-                let elapsed_us = (meta.written_at_unix_us as u128).saturating_sub(session_start_us) as u64;
+                let elapsed_us =
+                    (meta.written_at_unix_us as u128).saturating_sub(session_start_us) as u64;
                 let topic_id = writer
                     .topic_id(&name, &captain.name_of(writer_id))
                     .expect("failed to write to the debug file");
@@ -100,7 +108,9 @@ impl Executor for DebugExecutor {
                     .expect("failed to write to the debug file");
                 last_write_count.insert(name, meta.write_count);
             }
-            writer.maybe_flush().expect("failed to flush the debug file");
+            writer
+                .maybe_flush()
+                .expect("failed to flush the debug file");
 
             ticker.wait();
 
@@ -133,6 +143,11 @@ impl Executor for DebugExecutor {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(Self { id: self.id, path: self.path.clone(), frequency_hz: self.frequency_hz, resume_existing: true })
+        Box::new(Self {
+            id: self.id,
+            path: self.path.clone(),
+            frequency_hz: self.frequency_hz,
+            resume_existing: true,
+        })
     }
 }

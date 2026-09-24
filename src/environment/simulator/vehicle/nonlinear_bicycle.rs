@@ -116,7 +116,10 @@ fn normal_loads(params: NonlinearTireParams, acceleration_mps2: f64) -> (f64, f6
     let static_fz_f = params.mass_kg * GRAVITY_MPS2 * params.lr_m / wheelbase_m;
     let static_fz_r = params.mass_kg * GRAVITY_MPS2 * params.lf_m / wheelbase_m;
     let transfer_n = params.mass_kg * acceleration_mps2 * params.cg_height_m / wheelbase_m;
-    ((static_fz_f - transfer_n).max(0.0), (static_fz_r + transfer_n).max(0.0))
+    (
+        (static_fz_f - transfer_n).max(0.0),
+        (static_fz_r + transfer_n).max(0.0),
+    )
 }
 
 /// The commanded longitudinal force actually deliverable through one axle,
@@ -224,15 +227,26 @@ fn derivative(
     let rear_lateral_mps = state.vy_mps - params.lr_m * state.yaw_rate_rad_s;
     let alpha_f = (front_lateral_mps / vx_reg).atan() - steering_angle_rad;
     let alpha_r = (rear_lateral_mps / vx_reg).atan();
-    let fyf_raw = -params.tire_mu * fz_f * (params.pacejka_c * (params.pacejka_b * alpha_f).atan()).sin()
+    let fyf_raw = -params.tire_mu
+        * fz_f
+        * (params.pacejka_c * (params.pacejka_b * alpha_f).atan()).sin()
         * low_speed_force_scale(state.vx_mps, front_lateral_mps);
-    let fyr_raw = -params.tire_mu * fz_r * (params.pacejka_c * (params.pacejka_b * alpha_r).atan()).sin()
+    let fyr_raw = -params.tire_mu
+        * fz_r
+        * (params.pacejka_c * (params.pacejka_b * alpha_r).atan()).sin()
         * low_speed_force_scale(state.vx_mps, rear_lateral_mps);
 
     let fx_total_n = params.mass_kg * acceleration_mps2;
-    let (fx_f, remaining_f) = axle_combined_slip(params.tire_mu, fz_f, params.front_drive_fraction * fx_total_n);
-    let (fx_r, remaining_r) =
-        axle_combined_slip(params.tire_mu, fz_r, (1.0 - params.front_drive_fraction) * fx_total_n);
+    let (fx_f, remaining_f) = axle_combined_slip(
+        params.tire_mu,
+        fz_f,
+        params.front_drive_fraction * fx_total_n,
+    );
+    let (fx_r, remaining_r) = axle_combined_slip(
+        params.tire_mu,
+        fz_r,
+        (1.0 - params.front_drive_fraction) * fx_total_n,
+    );
 
     let fyf = fyf_raw * remaining_f;
     let fyr = fyr_raw * remaining_r;
@@ -253,7 +267,11 @@ fn derivative(
 /// `state` advanced linearly by `deriv` scaled by `dt_s` - the building
 /// block for combining RK4 stages. Heading is left unwrapped here; [`step`]
 /// wraps the final result.
-fn advance_state(state: NonlinearBicycleState, deriv: NonlinearDerivative, dt_s: f64) -> NonlinearBicycleState {
+fn advance_state(
+    state: NonlinearBicycleState,
+    deriv: NonlinearDerivative,
+    dt_s: f64,
+) -> NonlinearBicycleState {
     NonlinearBicycleState {
         x_m: state.x_m + deriv.dx_dt * dt_s,
         y_m: state.y_m + deriv.dy_dt * dt_s,
@@ -301,11 +319,16 @@ pub fn step(
         heading_rad: state.heading_rad
             + (dt_s / 6.0)
                 * (k1.dheading_dt + 2.0 * k2.dheading_dt + 2.0 * k3.dheading_dt + k4.dheading_dt),
-        vx_mps: state.vx_mps + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
-        vy_mps: state.vy_mps + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
+        vx_mps: state.vx_mps
+            + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
+        vy_mps: state.vy_mps
+            + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
         yaw_rate_rad_s: state.yaw_rate_rad_s
             + (dt_s / 6.0)
-                * (k1.dyaw_rate_dt + 2.0 * k2.dyaw_rate_dt + 2.0 * k3.dyaw_rate_dt + k4.dyaw_rate_dt),
+                * (k1.dyaw_rate_dt
+                    + 2.0 * k2.dyaw_rate_dt
+                    + 2.0 * k3.dyaw_rate_dt
+                    + k4.dyaw_rate_dt),
     };
     next.heading_rad = wrap_to_pi(next.heading_rad);
     next
@@ -329,7 +352,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn default_geometry_validates() {
         assert!(test_params().validate().is_ok());
@@ -337,15 +359,24 @@ mod tests {
 
     #[test]
     fn non_positive_cg_height_is_rejected() {
-        let params = NonlinearTireParams { cg_height_m: 0.0, ..test_params() };
+        let params = NonlinearTireParams {
+            cg_height_m: 0.0,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
     #[test]
     fn front_drive_fraction_out_of_range_is_rejected() {
-        let params = NonlinearTireParams { front_drive_fraction: 1.5, ..test_params() };
+        let params = NonlinearTireParams {
+            front_drive_fraction: 1.5,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
-        let params = NonlinearTireParams { front_drive_fraction: -0.1, ..test_params() };
+        let params = NonlinearTireParams {
+            front_drive_fraction: -0.1,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
@@ -394,8 +425,14 @@ mod tests {
 
     #[test]
     fn straight_line_zero_steering_and_no_slip_matches_simple_kinematics() {
-        let state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - 10.0).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -411,15 +448,28 @@ mod tests {
         // can't be generating any lateral force, so steering with zero
         // throttle should leave a standing vehicle exactly where it is.
         let params = test_params();
-        let mut state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..100 {
             state = step(state, params, 0.4, 0.0, dt_s);
         }
         assert_eq!(
             state,
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 }
+            NonlinearBicycleState {
+                x_m: 0.0,
+                y_m: 0.0,
+                heading_rad: 0.0,
+                vx_mps: 0.0,
+                vy_mps: 0.0,
+                yaw_rate_rad_s: 0.0
+            }
         );
     }
 
@@ -428,8 +478,14 @@ mod tests {
         // See dynamic_bicycle's test of the same name - a wheel rolling
         // straight backward with no steering has zero actual slip, so it
         // should produce zero lateral force just like straight forward.
-        let state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - (-10.0)).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -443,29 +499,51 @@ mod tests {
     fn steering_still_turns_the_vehicle_while_reversing() {
         // See dynamic_bicycle's test of the same name.
         let params = test_params();
-        let mut state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -3.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -3.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..50 {
             state = step(state, params, 0.35, 0.0, dt_s);
         }
-        assert!(state.yaw_rate_rad_s.abs() > 0.5, "expected steering to meaningfully turn the vehicle in reverse: {state:?}");
+        assert!(
+            state.yaw_rate_rad_s.abs() > 0.5,
+            "expected steering to meaningfully turn the vehicle in reverse: {state:?}"
+        );
     }
 
     #[test]
     fn steering_while_accelerating_into_reverse_does_not_diverge() {
         // See dynamic_bicycle's test of the same name.
         let params = test_params();
-        let mut state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         let (target_speed, max_accel, max_decel) = (-3.0_f64, 4.0_f64, 8.0_f64);
         for _ in 0..300 {
             let err = target_speed - state.vx_mps;
-            let accel = if err >= 0.0 { (err / dt_s).min(max_accel) } else { (err / dt_s).max(-max_decel) };
+            let accel = if err >= 0.0 {
+                (err / dt_s).min(max_accel)
+            } else {
+                (err / dt_s).max(-max_decel)
+            };
             state = step(state, params, 0.2, accel, dt_s);
             assert!(state.vy_mps.is_finite() && state.yaw_rate_rad_s.is_finite());
-            assert!(state.yaw_rate_rad_s.abs() < 10.0, "yaw rate diverged while reversing under steering: {state:?}");
+            assert!(
+                state.yaw_rate_rad_s.abs() < 10.0,
+                "yaw rate diverged while reversing under steering: {state:?}"
+            );
         }
     }
 
@@ -475,8 +553,14 @@ mod tests {
         // crate::environment::simulator::vehicle::dynamic_bicycle's test of
         // the same name - see LOW_SPEED_FLOOR_MPS.
         let params = test_params();
-        let mut state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..300 {
             state = step(state, params, 0.4, 4.0, dt_s);
@@ -493,8 +577,14 @@ mod tests {
     #[test]
     fn constant_steering_settles_into_a_bounded_steady_turn() {
         let params = test_params();
-        let mut state =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.001;
         for _ in 0..5000 {
             state = step(state, params, 0.1, 0.0, dt_s);
@@ -508,8 +598,14 @@ mod tests {
     #[test]
     fn heavy_acceleration_reduces_cornering_grip_under_constant_steering() {
         let params = test_params();
-        let initial =
-            NonlinearBicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let initial = NonlinearBicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.001;
         let steps = 500;
 

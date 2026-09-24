@@ -149,7 +149,8 @@ pub fn step(
             + (dt_s / 6.0)
                 * (k1.dheading_dt + 2.0 * k2.dheading_dt + 2.0 * k3.dheading_dt + k4.dheading_dt),
         speed_mps: state.speed_mps
-            + (dt_s / 6.0) * (k1.dspeed_dt + 2.0 * k2.dspeed_dt + 2.0 * k3.dspeed_dt + k4.dspeed_dt),
+            + (dt_s / 6.0)
+                * (k1.dspeed_dt + 2.0 * k2.dspeed_dt + 2.0 * k3.dspeed_dt + k4.dspeed_dt),
     };
     next.heading_rad = wrap_to_pi(next.heading_rad);
     next
@@ -160,7 +161,10 @@ mod tests {
     use super::*;
 
     fn test_params() -> BicycleParams {
-        BicycleParams { lf_m: 1.0, lr_m: 1.0 }
+        BicycleParams {
+            lf_m: 1.0,
+            lr_m: 1.0,
+        }
     }
 
     #[test]
@@ -170,13 +174,21 @@ mod tests {
 
     #[test]
     fn non_positive_lf_is_rejected() {
-        let params = BicycleParams { lf_m: 0.0, ..test_params() };
+        let params = BicycleParams {
+            lf_m: 0.0,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
     #[test]
     fn zero_dt_returns_state_unchanged() {
-        let state = BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.4, speed_mps: 3.0 };
+        let state = BicycleState {
+            x_m: 1.0,
+            y_m: 2.0,
+            heading_rad: 0.4,
+            speed_mps: 3.0,
+        };
         let next = step(state, test_params(), 0.2, 1.0, 0.0);
         assert!((next.x_m - state.x_m).abs() < 1e-12);
         assert!((next.y_m - state.y_m).abs() < 1e-12);
@@ -189,7 +201,12 @@ mod tests {
         // beta = 0 when steering_angle_rad = 0, so this reduces to
         // constant-velocity straight-line motion with a=0; RK4 is exact
         // (zero truncation error) for a constant derivative.
-        let state = BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 5.0 };
+        let state = BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 5.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - 10.0).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -208,7 +225,12 @@ mod tests {
         let beta = ((params.lr_m / (params.lf_m + params.lr_m)) * steering_angle_rad.tan()).atan();
         let radius = params.lr_m / beta.sin();
 
-        let mut state = BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 5.0 };
+        let mut state = BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 5.0,
+        };
         // Center of the circle, computed once from the initial state.
         let phi0 = state.heading_rad + beta;
         let center_x = state.x_m - radius * phi0.sin();

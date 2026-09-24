@@ -117,11 +117,16 @@ impl Session {
                 color_index: color_index_for(&meta.name),
                 timestamps_us: versions.iter().map(|(t_us, _)| *t_us).collect(),
             };
-            executor_topics.entry(meta.writer_name.clone()).or_insert_with(|| {
-                executor_order.push(meta.writer_name.clone());
-                Vec::new()
-            });
-            executor_topics.get_mut(&meta.writer_name).unwrap().push(entry);
+            executor_topics
+                .entry(meta.writer_name.clone())
+                .or_insert_with(|| {
+                    executor_order.push(meta.writer_name.clone());
+                    Vec::new()
+                });
+            executor_topics
+                .get_mut(&meta.writer_name)
+                .unwrap()
+                .push(entry);
         }
         let executors = executor_order
             .into_iter()
@@ -132,17 +137,37 @@ impl Session {
             .collect();
         drawings.sort_by(|a, b| a.topic.cmp(&b.topic));
 
-        let duration_us = reader.samples.iter().map(|sample| sample.timestamp_us).max().unwrap_or(0);
-        let epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+        let duration_us = reader
+            .samples
+            .iter()
+            .map(|sample| sample.timestamp_us)
+            .max()
+            .unwrap_or(0);
+        let epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
 
-        Ok(Session { frequency_hz: reader.frequency_hz, duration_us, executors, drawings, epoch, samples: reader.samples })
+        Ok(Session {
+            frequency_hz: reader.frequency_hz,
+            duration_us,
+            executors,
+            drawings,
+            epoch,
+            samples: reader.samples,
+        })
     }
 
     /// Which version of `track` is shown at `t_us`: the last one written at
     /// or before it - matching how a live topic read behaves.
     pub fn version_at(&self, track: &DrawingTrack, t_us: u64) -> DrawingVersion {
-        let count = track.versions.partition_point(|(written_at_us, _)| *written_at_us <= t_us);
-        DrawingVersion { write_count: count as u64, written_at_us: count.checked_sub(1).map(|i| track.versions[i].0) }
+        let count = track
+            .versions
+            .partition_point(|(written_at_us, _)| *written_at_us <= t_us);
+        DrawingVersion {
+            write_count: count as u64,
+            written_at_us: count.checked_sub(1).map(|i| track.versions[i].0),
+        }
     }
 
     /// Version `write_count` of `track`, decoded. An empty drawing for
@@ -156,7 +181,8 @@ impl Session {
         }
         let (_, sample_index) = track.versions.get(usize::try_from(write_count - 1).ok()?)?;
         let payload = &self.samples[*sample_index].payload;
-        let decoded = bincode::serde::decode_from_slice::<Drawing, _>(payload, bincode::config::standard());
+        let decoded =
+            bincode::serde::decode_from_slice::<Drawing, _>(payload, bincode::config::standard());
         Some(decoded.map(|(drawing, _)| drawing).unwrap_or_default())
     }
 
@@ -172,7 +198,8 @@ mod tests {
     use aurorus::topics::{Color, Shape};
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("aurorus_session_tests_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("aurorus_session_tests_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
     }
@@ -182,7 +209,11 @@ mod tests {
     }
 
     fn dot_at(x: f32) -> Drawing {
-        Drawing::new(vec![Shape::Points { points: vec![[x, 0.0]], radius_px: 2.0, color: Color::RED }])
+        Drawing::new(vec![Shape::Points {
+            points: vec![[x, 0.0]],
+            radius_px: 2.0,
+            color: Color::RED,
+        }])
     }
 
     #[test]
@@ -190,32 +221,74 @@ mod tests {
         let path = temp_path("session.debug");
         let mut writer = DebugFileWriter::create(&path, 100.0).unwrap();
 
-        let status_id = writer.topic_id("vehicle_status", "SimulatedVehicle").unwrap();
-        let draw_id = writer.topic_id("draw/SimulatedVehicle", "SimulatedVehicle").unwrap();
+        let status_id = writer
+            .topic_id("vehicle_status", "SimulatedVehicle")
+            .unwrap();
+        let draw_id = writer
+            .topic_id("draw/SimulatedVehicle", "SimulatedVehicle")
+            .unwrap();
         let map_id = writer.topic_id("draw/MapServer", "MapServer").unwrap();
 
         writer.write_sample(status_id, 500, &[1, 2, 3]).unwrap();
-        writer.write_sample(draw_id, 1_000, &encode(&dot_at(1.0))).unwrap();
-        writer.write_sample(draw_id, 2_000, &encode(&dot_at(2.0))).unwrap();
-        writer.write_sample(map_id, 5_000, b"not a drawing").unwrap();
+        writer
+            .write_sample(draw_id, 1_000, &encode(&dot_at(1.0)))
+            .unwrap();
+        writer
+            .write_sample(draw_id, 2_000, &encode(&dot_at(2.0)))
+            .unwrap();
+        writer
+            .write_sample(map_id, 5_000, b"not a drawing")
+            .unwrap();
         writer.flush().unwrap();
 
         let session = Session::load(&path).unwrap();
         assert_eq!(session.duration_us, 5_000);
         assert_eq!(session.executors.len(), 2);
-        let vehicle = session.executors.iter().find(|e| e.name == "SimulatedVehicle").unwrap();
+        let vehicle = session
+            .executors
+            .iter()
+            .find(|e| e.name == "SimulatedVehicle")
+            .unwrap();
         assert_eq!(vehicle.topics.len(), 2);
         assert_eq!(vehicle.topics[1].timestamps_us, vec![1_000, 2_000]);
 
         // Only drawing topics are drawing tracks, in topic-name order.
-        let topics: Vec<&str> = session.drawings.iter().map(|track| track.topic.as_str()).collect();
+        let topics: Vec<&str> = session
+            .drawings
+            .iter()
+            .map(|track| track.topic.as_str())
+            .collect();
         assert_eq!(topics, ["draw/MapServer", "draw/SimulatedVehicle"]);
 
         let track = session.track("draw/SimulatedVehicle").unwrap();
-        assert_eq!(session.version_at(track, 999), DrawingVersion { write_count: 0, written_at_us: None });
-        assert_eq!(session.version_at(track, 1_000), DrawingVersion { write_count: 1, written_at_us: Some(1_000) });
-        assert_eq!(session.version_at(track, 1_999), DrawingVersion { write_count: 1, written_at_us: Some(1_000) });
-        assert_eq!(session.version_at(track, 9_999), DrawingVersion { write_count: 2, written_at_us: Some(2_000) });
+        assert_eq!(
+            session.version_at(track, 999),
+            DrawingVersion {
+                write_count: 0,
+                written_at_us: None
+            }
+        );
+        assert_eq!(
+            session.version_at(track, 1_000),
+            DrawingVersion {
+                write_count: 1,
+                written_at_us: Some(1_000)
+            }
+        );
+        assert_eq!(
+            session.version_at(track, 1_999),
+            DrawingVersion {
+                write_count: 1,
+                written_at_us: Some(1_000)
+            }
+        );
+        assert_eq!(
+            session.version_at(track, 9_999),
+            DrawingVersion {
+                write_count: 2,
+                written_at_us: Some(2_000)
+            }
+        );
 
         assert_eq!(session.drawing(track, 0), Some(Drawing::default()));
         assert_eq!(session.drawing(track, 2), Some(dot_at(2.0)));

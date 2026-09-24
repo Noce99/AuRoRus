@@ -5,7 +5,10 @@
 //! [`crate::topics::Drawing`]).
 
 use crate::environment::MapInfo;
-use crate::topics::{Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, Shape, MAP_TOPIC_NAME, SelectedMap, VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+use crate::topics::{
+    Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape,
+    VEHICLE_STATUS_TOPIC_NAME, VehicleStatus,
+};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::Duration;
@@ -30,8 +33,9 @@ pub struct SimulatedLidarConfig {
 
 impl Default for SimulatedLidarConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/sensors/simulated_lidar.toml"))
-            .expect("config/sensors/simulated_lidar.toml must deserialize into SimulatedLidarConfig")
+        toml::from_str(include_str!("../../config/sensors/simulated_lidar.toml")).expect(
+            "config/sensors/simulated_lidar.toml must deserialize into SimulatedLidarConfig",
+        )
     }
 }
 
@@ -65,7 +69,13 @@ impl Executor for SimulatedLidar {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let config = self.config;
         captain.claim_writer::<LidarScan>(LIDAR_SCAN_TOPIC_NAME, self.id, move || {
-            LidarScan::new(Vec::new(), Vec::new(), config.min_distance_m, config.max_distance_m, config.fov_rad)
+            LidarScan::new(
+                Vec::new(),
+                Vec::new(),
+                config.min_distance_m,
+                config.max_distance_m,
+                config.fov_rad,
+            )
         });
         captain.claim_drawing(self.id);
     }
@@ -77,7 +87,8 @@ impl Executor for SimulatedLidar {
         let drawing_topic = captain.drawing(self.id);
         // Three missed scans in a row - but never tighter than the default, so
         // a fast lidar isn't flagged stale by a viewer's own polling jitter.
-        let stale_after = Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz));
+        let stale_after =
+            Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz));
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
@@ -89,13 +100,24 @@ impl Executor for SimulatedLidar {
                 .map(|i| {
                     let angle_rad = status.heading_rad + f64::from(ray_offset_rad(&self.config, i));
                     let (distance_m, hit) = match map.info.as_ref() {
-                        Some(info) => cast_ray(&map, info, status.x_m, status.y_m, angle_rad, self.config.max_distance_m),
+                        Some(info) => cast_ray(
+                            &map,
+                            info,
+                            status.x_m,
+                            status.y_m,
+                            angle_rad,
+                            self.config.max_distance_m,
+                        ),
                         None => (self.config.max_distance_m, false),
                     };
-                    let distance_m = distance_m.clamp(self.config.min_distance_m, self.config.max_distance_m);
+                    let distance_m =
+                        distance_m.clamp(self.config.min_distance_m, self.config.max_distance_m);
                     if hit {
                         let d = f64::from(distance_m);
-                        hits.push([(status.x_m + d * angle_rad.cos()) as f32, (status.y_m + d * angle_rad.sin()) as f32]);
+                        hits.push([
+                            (status.x_m + d * angle_rad.cos()) as f32,
+                            (status.y_m + d * angle_rad.sin()) as f32,
+                        ]);
                     }
                     (distance_m, if hit { 1.0 } else { 0.0 })
                 })
@@ -104,15 +126,25 @@ impl Executor for SimulatedLidar {
             lidar_topic
                 .write(
                     self.id,
-                    LidarScan::new(points, intensities, self.config.min_distance_m, self.config.max_distance_m, self.config.fov_rad),
+                    LidarScan::new(
+                        points,
+                        intensities,
+                        self.config.min_distance_m,
+                        self.config.max_distance_m,
+                        self.config.fov_rad,
+                    ),
                 )
                 .expect("lost writer authorization for the lidar_scan topic");
             drawing_topic
                 .write(
                     self.id,
-                    Drawing::new(vec![Shape::Points { points: hits, radius_px: 2.5, color: Color::RED }])
-                        .stale_after(stale_after)
-                        .z_index(5),
+                    Drawing::new(vec![Shape::Points {
+                        points: hits,
+                        radius_px: 2.5,
+                        color: Color::RED,
+                    }])
+                    .stale_after(stale_after)
+                    .z_index(5),
                 )
                 .expect("lost writer authorization for the lidar's drawing topic");
 
@@ -148,7 +180,14 @@ fn ray_offset_rad(config: &SimulatedLidarConfig, index: usize) -> f32 {
 /// (world frame) until it either hits an occupied pixel of `map`, leaves the
 /// raster, or travels `max_distance_m` - returning the traveled distance and
 /// whether it ended in a hit.
-fn cast_ray(map: &SelectedMap, info: &MapInfo, origin_x: f64, origin_y: f64, angle_rad: f64, max_distance_m: f32) -> (f32, bool) {
+fn cast_ray(
+    map: &SelectedMap,
+    info: &MapInfo,
+    origin_x: f64,
+    origin_y: f64,
+    angle_rad: f64,
+    max_distance_m: f32,
+) -> (f32, bool) {
     let step_m = info.resolution_m_per_px;
     let dx = angle_rad.cos();
     let dy = angle_rad.sin();
@@ -160,7 +199,11 @@ fn cast_ray(map: &SelectedMap, info: &MapInfo, origin_x: f64, origin_y: f64, ang
         let col = ((x - info.origin.x) / info.resolution_m_per_px).floor();
         let row = ((y - info.origin.y) / info.resolution_m_per_px).floor();
 
-        if col < 0.0 || row < 0.0 || col >= f64::from(info.width_px) || row >= f64::from(info.height_px) {
+        if col < 0.0
+            || row < 0.0
+            || col >= f64::from(info.width_px)
+            || row >= f64::from(info.height_px)
+        {
             return (max_distance_m, false);
         }
 
@@ -185,8 +228,15 @@ mod tests {
             resolution_m_per_px,
             width_px,
             height_px,
-            origin: ImageOrigin { x: 0.0, y: 0.0, theta_rad: 0.0 },
-            start_finish_line: StartFinishLine { a: WorldPoint { x: 0.0, y: 0.0 }, b: WorldPoint { x: 0.0, y: 0.0 } },
+            origin: ImageOrigin {
+                x: 0.0,
+                y: 0.0,
+                theta_rad: 0.0,
+            },
+            start_finish_line: StartFinishLine {
+                a: WorldPoint { x: 0.0, y: 0.0 },
+                b: WorldPoint { x: 0.0, y: 0.0 },
+            },
             generated_at: String::new(),
             source: MapSource::Random,
             track_width_m: 0.0,
@@ -196,7 +246,13 @@ mod tests {
     }
 
     fn map(width_px: u32, height_px: u32, pixels: Vec<u8>, info: MapInfo) -> SelectedMap {
-        SelectedMap { path: None, width_px, height_px, pixels: pixels.into(), info: Some(info) }
+        SelectedMap {
+            path: None,
+            width_px,
+            height_px,
+            pixels: pixels.into(),
+            info: Some(info),
+        }
     }
 
     #[test]
@@ -223,7 +279,10 @@ mod tests {
         let (distance_m, hit) = cast_ray(&map, &info, 0.05, 0.5, 0.0, 5.0);
 
         assert!(hit);
-        assert!((distance_m - 0.75).abs() < 0.15, "expected a hit near 0.75m, got {distance_m}");
+        assert!(
+            (distance_m - 0.75).abs() < 0.15,
+            "expected a hit near 0.75m, got {distance_m}"
+        );
     }
 
     #[test]
@@ -239,7 +298,13 @@ mod tests {
 
     #[test]
     fn ray_offsets_span_the_fov_symmetrically_around_the_forward_direction() {
-        let config = SimulatedLidarConfig { rate_hz: 10.0, num_points: 3, min_distance_m: 0.0, max_distance_m: 1.0, fov_rad: 2.0 };
+        let config = SimulatedLidarConfig {
+            rate_hz: 10.0,
+            num_points: 3,
+            min_distance_m: 0.0,
+            max_distance_m: 1.0,
+            fov_rad: 2.0,
+        };
 
         assert_eq!(ray_offset_rad(&config, 0), -1.0);
         assert_eq!(ray_offset_rad(&config, 1), 0.0);

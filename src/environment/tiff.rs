@@ -32,15 +32,20 @@ impl std::error::Error for TiffWriteError {}
 pub fn write(raster: &Raster, path: &Path) -> Result<(), TiffWriteError> {
     let mut encoder = fax::encoder::Encoder::new(fax::VecWriter::new());
     for y in 0..raster.height_px {
-        let pels = raster
-            .row(y)
-            .iter()
-            .map(|&is_white| if is_white { fax::Color::White } else { fax::Color::Black });
+        let pels = raster.row(y).iter().map(|&is_white| {
+            if is_white {
+                fax::Color::White
+            } else {
+                fax::Color::Black
+            }
+        });
         encoder
             .encode_line(pels, raster.width_px)
             .expect("VecWriter's BitWriter::Error is Infallible");
     }
-    let writer = encoder.finish().expect("VecWriter's BitWriter::Error is Infallible");
+    let writer = encoder
+        .finish()
+        .expect("VecWriter's BitWriter::Error is Infallible");
     let strip = writer.finish();
 
     let tiff_bytes = fax::tiff::wrap(&strip, raster.width_px, raster.height_px);
@@ -84,7 +89,8 @@ pub fn read(path: &Path) -> Result<Raster, TiffReadError> {
         return Err(TiffReadError::Invalid("not a little-endian TIFF".into()));
     }
     let ifd_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let entry_count = u16::from_le_bytes(bytes[ifd_offset..ifd_offset + 2].try_into().unwrap()) as usize;
+    let entry_count =
+        u16::from_le_bytes(bytes[ifd_offset..ifd_offset + 2].try_into().unwrap()) as usize;
 
     let (mut width, mut height, mut strip_offset, mut strip_len) = (None, None, None, None);
     for i in 0..entry_count {
@@ -103,8 +109,10 @@ pub fn read(path: &Path) -> Result<Raster, TiffReadError> {
 
     let width = width.ok_or_else(|| TiffReadError::Invalid("missing ImageWidth tag".into()))?;
     let height = height.ok_or_else(|| TiffReadError::Invalid("missing ImageLength tag".into()))?;
-    let strip_offset = strip_offset.ok_or_else(|| TiffReadError::Invalid("missing StripOffsets tag".into()))?;
-    let strip_len = strip_len.ok_or_else(|| TiffReadError::Invalid("missing StripByteCounts tag".into()))?;
+    let strip_offset =
+        strip_offset.ok_or_else(|| TiffReadError::Invalid("missing StripOffsets tag".into()))?;
+    let strip_len =
+        strip_len.ok_or_else(|| TiffReadError::Invalid("missing StripByteCounts tag".into()))?;
     let strip = bytes
         .get(strip_offset..strip_offset + strip_len)
         .ok_or_else(|| TiffReadError::Invalid("strip data out of bounds".into()))?;
@@ -141,7 +149,8 @@ mod tests {
         };
         let raster = rasterize(&centerline, 0.5, &transform);
 
-        let path = std::env::temp_dir().join(format!("aurorus_tiff_test_{}.tiff", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("aurorus_tiff_test_{}.tiff", std::process::id()));
         write(&raster, &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         std::fs::remove_file(&path).ok();
@@ -166,7 +175,10 @@ mod tests {
         };
         let raster = rasterize(&centerline, 0.5, &transform);
 
-        let path = std::env::temp_dir().join(format!("aurorus_tiff_round_trip_test_{}.tiff", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "aurorus_tiff_round_trip_test_{}.tiff",
+            std::process::id()
+        ));
         write(&raster, &path).unwrap();
         let read_back = read(&path).unwrap();
         std::fs::remove_file(&path).ok();

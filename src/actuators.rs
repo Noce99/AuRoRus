@@ -5,5 +5,6 @@
 mod simulated_vehicle;
 
 pub use simulated_vehicle::{
-    ActuatorLimits, SimulatedVehicle, SimulatedVehicleConfig, VehicleModel, VehicleState, default_model,
+    ActuatorLimits, SimulatedVehicle, SimulatedVehicleConfig, VehicleModel, VehicleState,
+    default_model,
 };

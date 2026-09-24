@@ -4,8 +4,9 @@
 use crate::core::log::LogColor;
 use crate::core::topic::{RwLockTopic, WriteMeta};
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
-    AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, DRAW_TOPIC_PREFIX, Drawing, VescCommand,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX,
+    AUTONOMOUS_CONTROL_TOPIC_PREFIX, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection,
+    DRAW_TOPIC_PREFIX, Drawing, VescCommand,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -79,7 +80,10 @@ impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T>
 
     fn read_json(&self, max_bytes: usize) -> (Option<serde_json::Value>, WriteMeta) {
         let stamped = self.read();
-        let mut writer = LimitedWriter { buf: Vec::new(), limit: max_bytes };
+        let mut writer = LimitedWriter {
+            buf: Vec::new(),
+            limit: max_bytes,
+        };
         let json = serde_json::to_writer(&mut writer, &stamped.value)
             .ok()
             .and_then(|()| serde_json::from_slice(&writer.buf).ok());
@@ -94,9 +98,14 @@ static LAST_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// A value never handed out before in this process, and - being microseconds since the Unix
 /// epoch - almost surely never handed out by an earlier run of it either.
 fn next_epoch() -> u64 {
-    let now_us = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+    let now_us = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
     let previous = LAST_EPOCH
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| Some(now_us.max(last + 1)))
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(now_us.max(last + 1))
+        })
         .expect("the update closure always returns Some");
     now_us.max(previous + 1)
 }
@@ -223,18 +232,28 @@ impl Captain {
     /// [`crate::core::debug_executor::DebugExecutor`] to enumerate every topic without knowing any of
     /// their concrete types.
     pub(crate) fn debug_topics_snapshot(&self) -> Vec<(String, Arc<dyn DebugTopic>)> {
-        self.debug_topics.read().unwrap().iter().map(|(name, topic)| (name.clone(), topic.clone())).collect()
+        self.debug_topics
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(name, topic)| (name.clone(), topic.clone()))
+            .collect()
     }
 
     /// Registers a new topic under `name`, seeded with `initial`.
-    pub(crate) fn register_topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
+    pub(crate) fn register_topic<
+        T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static,
+    >(
         &self,
         name: impl Into<String>,
         initial: T,
     ) {
         let name = name.into();
         let topic: Arc<RwLockTopic<T>> = Arc::new(RwLockTopic::new(initial));
-        self.topics.write().unwrap().insert(name.clone(), topic.clone());
+        self.topics
+            .write()
+            .unwrap()
+            .insert(name.clone(), topic.clone());
         self.debug_topics.write().unwrap().insert(name, topic);
     }
 
@@ -246,16 +265,25 @@ impl Captain {
     /// registered and how it's used, e.g. a typo'd name, or reading before any
     /// writer has claimed it), not runtime data conditions a caller could
     /// meaningfully recover from.
-    pub fn topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
-        let erased = self.topics.read().unwrap().get(name).cloned().unwrap_or_else(|| {
-            Self::fatal(format!(
-                "fatal: executor {:?} tried to read topic {name:?}, but no topic was ever \
+    pub fn topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
+        &self,
+        name: &str,
+    ) -> Arc<RwLockTopic<T>> {
+        let erased = self
+            .topics
+            .read()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| {
+                Self::fatal(format!(
+                    "fatal: executor {:?} tried to read topic {name:?}, but no topic was ever \
                  registered under that name - check for a typo, or make sure its writer's \
                  claim_writing_topics (which auto-registers it) runs before this executor's \
                  thread starts. Stopping.",
-                Self::current_executor_name(),
-            ));
-        });
+                    Self::current_executor_name(),
+                ));
+            });
         erased.downcast::<RwLockTopic<T>>().unwrap_or_else(|_| {
             Self::fatal(format!(
                 "fatal: executor {:?} tried to read topic {name:?}, but it was registered with \
@@ -290,7 +318,11 @@ impl Captain {
     /// [`claim_writer`](Self::claim_writer), then get the handle back in
     /// [`crate::Executor::run`] via [`drawing`](Self::drawing).
     pub fn claim_drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
-        self.claim_writer::<Drawing>(&self.drawing_topic_name(executor_id), executor_id, Drawing::default)
+        self.claim_writer::<Drawing>(
+            &self.drawing_topic_name(executor_id),
+            executor_id,
+            Drawing::default,
+        )
     }
 
     /// `executor_id`'s own [`Drawing`] topic, previously claimed via
@@ -309,7 +341,11 @@ impl Captain {
     /// see [`crate::autonomous_control`]. Call it from [`crate::Executor::claim_writing_topics`],
     /// then get the command topic back in [`crate::Executor::run`] via
     /// [`autonomous_control`](Self::autonomous_control).
-    pub fn claim_autonomous_control(&self, executor_id: u8, info: AutonomousAlgorithmInfo) -> Arc<RwLockTopic<VescCommand>> {
+    pub fn claim_autonomous_control(
+        &self,
+        executor_id: u8,
+        info: AutonomousAlgorithmInfo,
+    ) -> Arc<RwLockTopic<VescCommand>> {
         let name = self.name_of(executor_id);
         let info_topic = self.claim_writer::<AutonomousAlgorithmInfo>(
             &format!("{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{name}"),
@@ -319,14 +355,21 @@ impl Captain {
         info_topic
             .write(executor_id, info)
             .expect("claim_writer just made this executor the info topic's writer");
-        self.claim_writer::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"), executor_id, VescCommand::default)
+        self.claim_writer::<VescCommand>(
+            &format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"),
+            executor_id,
+            VescCommand::default,
+        )
     }
 
     /// `executor_id`'s own autonomous command topic, previously claimed via
     /// [`claim_autonomous_control`](Self::claim_autonomous_control). Terminates the program, like
     /// [`topic`](Self::topic), if it wasn't.
     pub fn autonomous_control(&self, executor_id: u8) -> Arc<RwLockTopic<VescCommand>> {
-        self.topic::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{}", self.name_of(executor_id)))
+        self.topic::<VescCommand>(&format!(
+            "{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{}",
+            self.name_of(executor_id)
+        ))
     }
 
     /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
@@ -350,26 +393,32 @@ impl Captain {
         initial: impl FnOnce() -> T,
     ) -> Arc<RwLockTopic<T>> {
         if let Some(existing) = self.topics.read().unwrap().get(name) {
-            return existing.clone().downcast::<RwLockTopic<T>>().unwrap_or_else(|_| {
-                Self::fatal(format!(
-                    "fatal: executor {:?} tried to claim topic {name:?}, but it was registered \
+            return existing
+                .clone()
+                .downcast::<RwLockTopic<T>>()
+                .unwrap_or_else(|_| {
+                    Self::fatal(format!(
+                        "fatal: executor {:?} tried to claim topic {name:?}, but it was registered \
                      with a different item type - two executors must agree on a topic's type. \
                      Stopping.",
-                    Self::current_executor_name(),
-                ));
-            });
+                        Self::current_executor_name(),
+                    ));
+                });
         }
 
         let mut topics = self.topics.write().unwrap();
         if let Some(existing) = topics.get(name) {
-            return existing.clone().downcast::<RwLockTopic<T>>().unwrap_or_else(|_| {
-                Self::fatal(format!(
-                    "fatal: executor {:?} tried to claim topic {name:?}, but it was registered \
+            return existing
+                .clone()
+                .downcast::<RwLockTopic<T>>()
+                .unwrap_or_else(|_| {
+                    Self::fatal(format!(
+                        "fatal: executor {:?} tried to claim topic {name:?}, but it was registered \
                      with a different item type - two executors must agree on a topic's type. \
                      Stopping.",
-                    Self::current_executor_name(),
-                ));
-            });
+                        Self::current_executor_name(),
+                    ));
+                });
         }
 
         self.log_if_verbose(
@@ -382,7 +431,10 @@ impl Captain {
         );
         let topic: Arc<RwLockTopic<T>> = Arc::new(RwLockTopic::new(initial()));
         topics.insert(name.to_string(), topic.clone());
-        self.debug_topics.write().unwrap().insert(name.to_string(), topic.clone());
+        self.debug_topics
+            .write()
+            .unwrap()
+            .insert(name.to_string(), topic.clone());
         topic
     }
 
@@ -404,7 +456,9 @@ impl Captain {
     ) -> Arc<RwLockTopic<T>> {
         let topic = self.topic_or_register::<T>(topic_name, executor_id, initial);
         if topic.set_writer(executor_id).is_err() {
-            let holder_id = topic.writer().expect("a writer must be set if set_writer failed");
+            let holder_id = topic
+                .writer()
+                .expect("a writer must be set if set_writer failed");
             Self::fatal(format!(
                 "fatal: executor {:?} (id {executor_id}) tried to become the writer of \
                  topic {topic_name:?}, but executor {:?} (id {holder_id}) already holds \
@@ -487,7 +541,9 @@ mod tests {
 
         captain.claim_drawing(3);
 
-        let topic = captain.try_topic::<Drawing>("draw/SimulatedLidar").expect("drawing topic should be registered");
+        let topic = captain
+            .try_topic::<Drawing>("draw/SimulatedLidar")
+            .expect("drawing topic should be registered");
         assert_eq!(topic.writer(), Some(3));
         assert!(Arc::ptr_eq(&topic, &captain.drawing(3)));
     }
@@ -504,7 +560,8 @@ mod tests {
         let captain = Captain::new();
         captain.register_topic("small", vec![1u8, 2, 3]);
         captain.register_topic("large", vec![0u8; 10_000]);
-        let topics: HashMap<String, Arc<dyn DebugTopic>> = captain.debug_topics_snapshot().into_iter().collect();
+        let topics: HashMap<String, Arc<dyn DebugTopic>> =
+            captain.debug_topics_snapshot().into_iter().collect();
 
         let (small, _) = topics["small"].read_json(1024);
         let (large, _) = topics["large"].read_json(1024);

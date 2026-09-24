@@ -84,7 +84,11 @@ struct Row {
 pub fn write(points: &[SpeedPoint], path: &Path) -> Result<(), RaceLineWriteError> {
     let mut writer = csv::Writer::from_path(path)?;
     for point in points {
-        writer.serialize(Row { x: point.x, y: point.y, speed: point.speed_mps })?;
+        writer.serialize(Row {
+            x: point.x,
+            y: point.y,
+            speed: point.speed_mps,
+        })?;
     }
     writer.flush()?;
     Ok(())
@@ -96,7 +100,11 @@ pub fn read(path: &Path) -> Result<Vec<SpeedPoint>, RaceLineReadError> {
     let mut points = Vec::new();
     for result in reader.deserialize() {
         let row: Row = result?;
-        points.push(SpeedPoint { x: row.x, y: row.y, speed_mps: row.speed });
+        points.push(SpeedPoint {
+            x: row.x,
+            y: row.y,
+            speed_mps: row.speed,
+        });
     }
     Ok(points)
 }
@@ -108,10 +116,19 @@ mod tests {
     #[test]
     fn written_csv_round_trips() {
         let points = vec![
-            SpeedPoint { x: 0.0, y: 0.0, speed_mps: 1.0 },
-            SpeedPoint { x: 1.0, y: 2.0, speed_mps: 3.5 },
+            SpeedPoint {
+                x: 0.0,
+                y: 0.0,
+                speed_mps: 1.0,
+            },
+            SpeedPoint {
+                x: 1.0,
+                y: 2.0,
+                speed_mps: 3.5,
+            },
         ];
-        let path = std::env::temp_dir().join(format!("aurorus_race_line_test_{}.csv", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("aurorus_race_line_test_{}.csv", std::process::id()));
         write(&points, &path).unwrap();
 
         let rows = read(&path).unwrap();

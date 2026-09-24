@@ -26,7 +26,9 @@ fn summary(captain: &Captain, name: String, topic: &Arc<dyn DebugTopic>) -> Topi
     TopicSummary {
         writer: topic.writer().map(|id| captain.name_of(id)),
         write_count: meta.write_count,
-        age_ms: meta.written_at.map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
+        age_ms: meta
+            .written_at
+            .map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
         name,
     }
 }
@@ -58,7 +60,11 @@ pub fn value(url: &str, captain: &Captain) -> ResponseBox {
     let Some(name) = query_param(url, "name") else {
         return bad_request("expected a name query parameter");
     };
-    let Some((name, topic)) = captain.debug_topics_snapshot().into_iter().find(|(n, _)| *n == name) else {
+    let Some((name, topic)) = captain
+        .debug_topics_snapshot()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+    else {
         return not_found();
     };
 
@@ -68,7 +74,9 @@ pub fn value(url: &str, captain: &Captain) -> ResponseBox {
             summary: TopicSummary {
                 writer: topic.writer().map(|id| captain.name_of(id)),
                 write_count: meta.write_count,
-                age_ms: meta.written_at.map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
+                age_ms: meta
+                    .written_at
+                    .map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
                 name,
             },
             written_at_unix_us: meta.written_at_unix_us,

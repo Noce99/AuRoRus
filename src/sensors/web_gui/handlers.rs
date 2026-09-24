@@ -15,7 +15,13 @@ use tiny_http::{Method, Request, ResponseBox};
 /// Handles one request end to end: routes it, then sends the response.
 /// `writer_id` is this `WebGui`'s own executor id, used to authorize its
 /// writes to `human_vesc_command`/`map_selection`.
-pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8, config: &WebGuiConfig) {
+pub fn handle(
+    mut request: Request,
+    maps_root: &Path,
+    captain: &Captain,
+    writer_id: u8,
+    config: &WebGuiConfig,
+) {
     let method = request.method().clone();
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or("/").to_string();
@@ -41,15 +47,21 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
         (Method::Get, path) if path.starts_with("/api/maps/") => route_map_get(path, maps_root),
         (Method::Get, "/api/map") => live_api::map(captain),
-        (Method::Post, "/api/map_selection") => live_api::select_map(&mut request, captain, writer_id, maps_root),
+        (Method::Post, "/api/map_selection") => {
+            live_api::select_map(&mut request, captain, writer_id, maps_root)
+        }
         (Method::Post, "/api/draw") => draw_api::layers(&mut request, captain),
         (Method::Get, "/api/draw/raster") => draw_api::raster(&url, captain),
         (Method::Get, "/api/topics") => topics_api::list(captain),
         (Method::Get, "/api/topic") => topics_api::value(&url, captain),
-        (Method::Post, "/api/human_vesc_command") => live_api::human_vesc_command(&mut request, captain, writer_id),
+        (Method::Post, "/api/human_vesc_command") => {
+            live_api::human_vesc_command(&mut request, captain, writer_id)
+        }
         (Method::Get, "/api/vehicle_models") => live_api::vehicle_models(),
         (Method::Get, "/api/vehicle_model") => live_api::vehicle_model(captain),
-        (Method::Post, "/api/vehicle_model_selection") => live_api::select_vehicle_model(&mut request, captain, writer_id),
+        (Method::Post, "/api/vehicle_model_selection") => {
+            live_api::select_vehicle_model(&mut request, captain, writer_id)
+        }
         (Method::Get, "/api/autonomous_algorithms") => live_api::autonomous_algorithms(captain),
         (Method::Post, "/api/autonomous_algorithm_selection") => {
             live_api::select_autonomous_algorithm(&mut request, captain, writer_id)

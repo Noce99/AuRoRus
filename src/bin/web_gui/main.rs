@@ -1,6 +1,8 @@
 use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
-use aurorus::sensors::{MapServer, MapServerConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig};
+use aurorus::sensors::{
+    MapServer, MapServerConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
+};
 use aurorus::topics::VehicleModelKind;
 use aurorus::{Executor, Runner};
 
@@ -9,14 +11,17 @@ mod cli;
 fn main() {
     let config = cli::parse_config(std::env::args());
 
-    let web_gui_config =
-        aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml")).unwrap_or_else(|_| WebGuiConfig::default());
-    let map_server_config = aurorus::config::load(&config.config_dir.join("sensors/map_server.toml"))
-        .unwrap_or_else(|_| MapServerConfig::default());
-    let simulated_lidar_config = aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
-        .unwrap_or_else(|_| SimulatedLidarConfig::default());
-    let vehicle_config = aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
-        .unwrap_or_else(|_| SimulatedVehicleConfig::default());
+    let web_gui_config = aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml"))
+        .unwrap_or_else(|_| WebGuiConfig::default());
+    let map_server_config =
+        aurorus::config::load(&config.config_dir.join("sensors/map_server.toml"))
+            .unwrap_or_else(|_| MapServerConfig::default());
+    let simulated_lidar_config =
+        aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
+            .unwrap_or_else(|_| SimulatedLidarConfig::default());
+    let vehicle_config =
+        aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
+            .unwrap_or_else(|_| SimulatedVehicleConfig::default());
 
     let mut runner = Runner::new();
     runner.activate_verbose();

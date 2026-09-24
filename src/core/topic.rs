@@ -109,7 +109,10 @@ impl<T: Send + Sync + 'static> RwLockTopic<T> {
     /// Creates a topic with no writer yet claimed, seeded with `initial`.
     pub fn new(initial: T) -> Self {
         Self {
-            data: RwLock::new(Stamped { value: initial, meta: WriteMeta::default() }),
+            data: RwLock::new(Stamped {
+                value: initial,
+                meta: WriteMeta::default(),
+            }),
             writer_id: OnceLock::new(),
         }
     }
@@ -147,8 +150,10 @@ impl<T: Clone + Send + Sync + 'static> RwLockTopic<T> {
         if self.writer_id.get() == Some(&executor_id) {
             // Read the clocks before taking the lock, to keep its hold time minimal.
             let written_at = Instant::now();
-            let written_at_unix_us =
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+            let written_at_unix_us = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64;
             let mut data = self.data.write().expect("RwLockTopic: lock poisoned");
             data.value = value;
             data.meta = WriteMeta {

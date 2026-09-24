@@ -18,7 +18,11 @@ pub struct Raster {
 
 impl Raster {
     pub(crate) fn new(width_px: u32, height_px: u32, white: Vec<bool>) -> Self {
-        Self { width_px, height_px, white }
+        Self {
+            width_px,
+            height_px,
+            white,
+        }
     }
 
     /// The pixels of row `y`, left to right.
@@ -31,6 +35,9 @@ impl Raster {
     /// drivable (white), `0` otherwise - no image codec needed, a consumer
     /// (e.g. a browser) can build an `ImageData` directly from these.
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.white.iter().map(|&white| if white { 255u8 } else { 0u8 }).collect()
+        self.white
+            .iter()
+            .map(|&white| if white { 255u8 } else { 0u8 })
+            .collect()
     }
 }

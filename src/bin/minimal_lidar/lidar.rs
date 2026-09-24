@@ -10,7 +10,11 @@ pub struct Lidar {
 
 impl Lidar {
     pub fn new(rate_hz: f64, name: String) -> Self {
-        Self { id: 0, rate_hz, name }
+        Self {
+            id: 0,
+            rate_hz,
+            name,
+        }
     }
 }
 

@@ -10,13 +10,14 @@
 
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
-use crate::web::{bad_request, json_response, read_json};
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AutonomousAlgorithmSelection,
-    AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
-    PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
-    VehicleModelSelection, VehicleModelStatus, VescCommand,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
+    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME,
+    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
+use crate::web::{bad_request, json_response, read_json};
 use crate::{Captain, WriteMeta};
 use std::path::Path;
 use tiny_http::{Request, ResponseBox};
@@ -62,7 +63,9 @@ fn stamped_json<T: serde::Serialize>(value: &T, meta: WriteMeta) -> ResponseBox 
         &StampedBody {
             value,
             written_at_unix_us: meta.written_at_unix_us,
-            age_ms: meta.written_at.map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
+            age_ms: meta
+                .written_at
+                .map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
             write_count: meta.write_count,
         },
         200,
@@ -89,7 +92,14 @@ pub fn map(captain: &Captain) -> ResponseBox {
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .map(str::to_string);
-    stamped_json(&LiveMap { name, width_px: selected.width_px, height_px: selected.height_px }, selected.meta)
+    stamped_json(
+        &LiveMap {
+            name,
+            width_px: selected.width_px,
+            height_px: selected.height_px,
+        },
+        selected.meta,
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -100,7 +110,12 @@ struct SelectMapBody {
 /// `POST /api/map_selection` - body `{"name": "..."}` (or `{"name": null}`
 /// to deselect) - writes the wanted map folder to `map_selection`, for
 /// [`crate::sensors::MapServer`] to pick up.
-pub fn select_map(request: &mut Request, captain: &Captain, writer_id: u8, maps_root: &Path) -> ResponseBox {
+pub fn select_map(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+    maps_root: &Path,
+) -> ResponseBox {
     let body: SelectMapBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -110,7 +125,9 @@ pub fn select_map(request: &mut Request, captain: &Captain, writer_id: u8, maps_
         None => None,
         Some(name) => match safe_map_folder(name, maps_root) {
             Some(path) => Some(path),
-            None => return bad_request("invalid name: must not be empty or contain '/', '\\', or '..'"),
+            None => {
+                return bad_request("invalid name: must not be empty or contain '/', '\\', or '..'");
+            }
         },
     };
 
@@ -138,7 +155,10 @@ pub fn human_vesc_command(request: &mut Request, captain: &Captain, writer_id: u
 
     captain
         .topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME)
-        .write(writer_id, VescCommand::new(body.servo_position_rad, body.speed_mps))
+        .write(
+            writer_id,
+            VescCommand::new(body.servo_position_rad, body.speed_mps),
+        )
         .expect("lost writer authorization for the human_vesc_command topic");
     json_response(&(), 200)
 }
@@ -156,7 +176,11 @@ struct VehicleModelOption {
 pub fn vehicle_models() -> ResponseBox {
     let options: Vec<VehicleModelOption> = VehicleModelKind::ALL
         .iter()
-        .map(|(_, kind, label, description)| VehicleModelOption { kind, label, description })
+        .map(|(_, kind, label, description)| VehicleModelOption {
+            kind,
+            label,
+            description,
+        })
         .collect();
     json_response(&options, 200)
 }
@@ -169,8 +193,15 @@ struct LiveVehicleModel {
 /// `GET /api/vehicle_model` - the vehicle model kind currently running, read
 /// from the `vehicle_model_status` topic, as a [`StampedBody`].
 pub fn vehicle_model(captain: &Captain) -> ResponseBox {
-    let status = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME).read();
-    stamped_json(&LiveVehicleModel { kind: status.kind.api_str() }, status.meta)
+    let status = captain
+        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
+        .read();
+    stamped_json(
+        &LiveVehicleModel {
+            kind: status.kind.api_str(),
+        },
+        status.meta,
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -181,7 +212,11 @@ struct SelectVehicleModelBody {
 /// `POST /api/vehicle_model_selection` - body `{"kind": "..."}` - writes the
 /// wanted vehicle model kind to `vehicle_model_selection`, for
 /// [`crate::actuators::SimulatedVehicle`] to pick up.
-pub fn select_vehicle_model(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn select_vehicle_model(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
     let body: SelectVehicleModelBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -222,7 +257,11 @@ struct SelectAutonomousAlgorithmBody {
 /// `autonomous_algorithm_selection`, for
 /// [`crate::autonomous_control::AutonomousControlsHandler`] to pick up.
 /// Rejects a name the handler hasn't listed as available.
-pub fn select_autonomous_algorithm(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn select_autonomous_algorithm(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
     let body: SelectAutonomousAlgorithmBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -231,7 +270,13 @@ pub fn select_autonomous_algorithm(request: &mut Request, captain: &Captain, wri
     if let Some(name) = &body.name {
         let known = captain
             .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
-            .is_some_and(|topic| topic.read().available.iter().any(|algorithm| &algorithm.name == name));
+            .is_some_and(|topic| {
+                topic
+                    .read()
+                    .available
+                    .iter()
+                    .any(|algorithm| &algorithm.name == name)
+            });
         if !known {
             return bad_request(&format!("unknown autonomous algorithm: {name:?}"));
         }

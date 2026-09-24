@@ -61,8 +61,9 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
                 std::process::exit(0);
             }
             "--topic_size" => {
-                config.topic_size = next_value(&mut args, |s| s.parse::<usize>().ok().filter(|&v| v > 0))
-                    .unwrap_or_else(|| fail(invalid_message(&flag)))
+                config.topic_size =
+                    next_value(&mut args, |s| s.parse::<usize>().ok().filter(|&v| v > 0))
+                        .unwrap_or_else(|| fail(invalid_message(&flag)))
             }
             "--readers_num" => {
                 config.readers_num = next_value(&mut args, |s| s.parse::<usize>().ok())

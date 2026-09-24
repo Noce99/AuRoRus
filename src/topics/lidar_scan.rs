@@ -66,7 +66,13 @@ mod tests {
 
     #[test]
     fn new_derives_num_lidar_points_from_the_vectors() {
-        let scan = LidarScan::new(vec![1.0, 2.0, 3.0], vec![0.1, 0.2, 0.3], 0.1, 12.0, std::f32::consts::PI);
+        let scan = LidarScan::new(
+            vec![1.0, 2.0, 3.0],
+            vec![0.1, 0.2, 0.3],
+            0.1,
+            12.0,
+            std::f32::consts::PI,
+        );
         assert_eq!(scan.num_lidar_points, 3);
         assert_eq!(scan.points.len(), scan.intensities.len());
     }

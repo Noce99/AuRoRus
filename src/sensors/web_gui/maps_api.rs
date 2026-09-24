@@ -25,8 +25,12 @@ pub fn list(maps_root: &Path) -> ResponseBox {
     if let Ok(entries) = std::fs::read_dir(maps_root) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-            let Ok(info) = environment::read_info(&path) else { continue };
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let Ok(info) = environment::read_info(&path) else {
+                continue;
+            };
             summaries.push(MapSummary {
                 name: name.to_string(),
                 width_px: info.width_px,
@@ -99,7 +103,9 @@ pub fn generate(request: &mut Request, maps_root: &Path) -> ResponseBox {
     let folder_name = match &params.name {
         Some(name) => {
             if safe_map_folder(name, maps_root).is_none() {
-                return bad_request("invalid name: must not be empty or contain '/', '\\', or '..'");
+                return bad_request(
+                    "invalid name: must not be empty or contain '/', '\\', or '..'",
+                );
             }
             Some(name.clone())
         }
@@ -114,7 +120,12 @@ pub fn generate(request: &mut Request, maps_root: &Path) -> ResponseBox {
 
     match environment::generate(&config, folder_name.as_deref(), overwrite) {
         Ok(generated) => {
-            let name = generated.folder.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+            let name = generated
+                .folder
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
             json_response(
                 &GeneratedMapSummary {
                     name,
@@ -202,7 +213,9 @@ impl GenerateParams {
                 .smoothing_samples_per_segment
                 .unwrap_or(d.smoothing_samples_per_segment),
             max_speed_mps: self.max_speed_mps.unwrap_or(d.max_speed_mps),
-            max_lateral_accel_mps2: self.max_lateral_accel_mps2.unwrap_or(d.max_lateral_accel_mps2),
+            max_lateral_accel_mps2: self
+                .max_lateral_accel_mps2
+                .unwrap_or(d.max_lateral_accel_mps2),
             output_root,
         }
     }
@@ -226,4 +239,3 @@ pub(super) fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
     }
     Some(maps_root.join(name))
 }
-

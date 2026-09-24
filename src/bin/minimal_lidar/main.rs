@@ -14,9 +14,18 @@ fn main() {
     runner.activate_verbose();
 
     let lidar = lidar::Lidar::new(WRITER_HZ, String::from("Lidar"));
-    let reader_1 = reader::Reader::new(READER_RATES_HZ[0], format!("Reader {}Hz", READER_RATES_HZ[0]));
-    let reader_2 = reader::Reader::new(READER_RATES_HZ[1], format!("Reader {}Hz", READER_RATES_HZ[1]));
-    let reader_3 = reader::Reader::new(READER_RATES_HZ[2], format!("Reader {}Hz", READER_RATES_HZ[2]));
+    let reader_1 = reader::Reader::new(
+        READER_RATES_HZ[0],
+        format!("Reader {}Hz", READER_RATES_HZ[0]),
+    );
+    let reader_2 = reader::Reader::new(
+        READER_RATES_HZ[1],
+        format!("Reader {}Hz", READER_RATES_HZ[1]),
+    );
+    let reader_3 = reader::Reader::new(
+        READER_RATES_HZ[2],
+        format!("Reader {}Hz", READER_RATES_HZ[2]),
+    );
 
     let lidar_id = runner.add_executor(lidar.boxed());
     let reader_1_id = runner.add_executor(reader_1.boxed());
@@ -28,8 +37,10 @@ fn main() {
 
     // Swap reader_1 out for a fresh Reader instance under the same id, without
     // disturbing the lidar or the other two readers.
-    let new_reader_1 =
-        reader::Reader::new(READER_RATES_HZ[0], format!("New Reader {}Hz", READER_RATES_HZ[0]));
+    let new_reader_1 = reader::Reader::new(
+        READER_RATES_HZ[0],
+        format!("New Reader {}Hz", READER_RATES_HZ[0]),
+    );
     runner
         .switch_executor(reader_1_id, new_reader_1.boxed())
         .expect("reader_1 should still be running");

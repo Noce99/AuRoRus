@@ -15,10 +15,10 @@
 mod cli;
 #[path = "../bench_common/progress.rs"]
 mod progress;
-#[path = "../bench_common/verifier.rs"]
-mod verifier;
 mod reader_writer;
 mod report;
+#[path = "../bench_common/verifier.rs"]
+mod verifier;
 
 use aurorus::{Executor, Runner};
 use reader_writer::{Payload, ReaderExecutor, TOPIC_NAME, WriterExecutor};

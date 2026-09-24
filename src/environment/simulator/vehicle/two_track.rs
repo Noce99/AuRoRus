@@ -161,7 +161,10 @@ fn axle_loads(params: TwoTrackParams, acceleration_mps2: f64) -> (f64, f64) {
     let static_fz_f = params.mass_kg * GRAVITY_MPS2 * params.lr_m / wheelbase_m;
     let static_fz_r = params.mass_kg * GRAVITY_MPS2 * params.lf_m / wheelbase_m;
     let transfer_n = params.mass_kg * acceleration_mps2 * params.cg_height_m / wheelbase_m;
-    ((static_fz_f - transfer_n).max(0.0), (static_fz_r + transfer_n).max(0.0))
+    (
+        (static_fz_f - transfer_n).max(0.0),
+        (static_fz_r + transfer_n).max(0.0),
+    )
 }
 
 /// The four wheels' individual normal loads (`fl`, `fr`, `rl`, `rr` - in
@@ -175,10 +178,15 @@ fn axle_loads(params: TwoTrackParams, acceleration_mps2: f64) -> (f64, f64) {
 /// `ay_mps2` shifts load from the `+track_width_m/2` ("left") wheels to the
 /// `-track_width_m/2` ("right") wheels; results are clamped to never go
 /// negative.
-fn wheel_normal_loads(params: TwoTrackParams, acceleration_mps2: f64, ay_mps2: f64) -> (f64, f64, f64, f64) {
+fn wheel_normal_loads(
+    params: TwoTrackParams,
+    acceleration_mps2: f64,
+    ay_mps2: f64,
+) -> (f64, f64, f64, f64) {
     let (fz_f_total, fz_r_total) = axle_loads(params, acceleration_mps2);
     let front_share = fz_f_total / (fz_f_total + fz_r_total);
-    let total_lateral_transfer = params.mass_kg * ay_mps2 * params.cg_height_m / params.track_width_m;
+    let total_lateral_transfer =
+        params.mass_kg * ay_mps2 * params.cg_height_m / params.track_width_m;
 
     let front_lateral = total_lateral_transfer * front_share;
     let rear_lateral = total_lateral_transfer * (1.0 - front_share);
@@ -196,7 +204,11 @@ fn wheel_normal_loads(params: TwoTrackParams, acceleration_mps2: f64, ay_mps2: f
 /// control input): the two front wheels trace circles of different radii
 /// around the same turn center, so they need slightly different angles.
 /// `0.0` steering input always produces `(0.0, 0.0)`.
-fn ackermann_wheel_angles(steering_angle_rad: f64, wheelbase_m: f64, track_width_m: f64) -> (f64, f64) {
+fn ackermann_wheel_angles(
+    steering_angle_rad: f64,
+    wheelbase_m: f64,
+    track_width_m: f64,
+) -> (f64, f64) {
     let kappa = steering_angle_rad.tan() / wheelbase_m;
     let half_track_m = track_width_m / 2.0;
     let delta_left = (wheelbase_m * kappa / (1.0 - half_track_m * kappa)).atan();
@@ -222,12 +234,19 @@ fn pacejka_lateral_force(b: f64, c: f64, d: f64, e: f64, alpha: f64) -> f64 {
 /// version, applied per wheel here instead. A wheel with zero normal load
 /// (`d_n <= 0.0`) can deliver no force in any direction, so both results
 /// are `0.0`.
-fn wheel_combined_slip(combined_slip_b: f64, combined_slip_c: f64, d_n: f64, demanded_fx_n: f64) -> (f64, f64) {
+fn wheel_combined_slip(
+    combined_slip_b: f64,
+    combined_slip_c: f64,
+    d_n: f64,
+    demanded_fx_n: f64,
+) -> (f64, f64) {
     if d_n <= 0.0 {
         return (0.0, 0.0);
     }
     let fx_n = demanded_fx_n.clamp(-d_n, d_n);
-    let weighting = (combined_slip_c * (combined_slip_b * (fx_n / d_n)).atan()).cos().max(0.0);
+    let weighting = (combined_slip_c * (combined_slip_b * (fx_n / d_n)).atan())
+        .cos()
+        .max(0.0);
     (fx_n, weighting)
 }
 
@@ -307,8 +326,10 @@ fn wheel_body_forces(
     let alpha = (vy_wheel / regularized_vx(vx_wheel)).atan() - wheel.delta_rad;
 
     let d_n = wheel.d_mu * wheel.fz_n;
-    let fy_raw = pacejka_lateral_force(wheel.b, wheel.c, d_n, wheel.e, alpha) * low_speed_force_scale(vx_wheel, vy_wheel);
-    let (fx_wheel, weighting) = wheel_combined_slip(combined_slip_b, combined_slip_c, d_n, wheel.fx_demand_n);
+    let fy_raw = pacejka_lateral_force(wheel.b, wheel.c, d_n, wheel.e, alpha)
+        * low_speed_force_scale(vx_wheel, vy_wheel);
+    let (fx_wheel, weighting) =
+        wheel_combined_slip(combined_slip_b, combined_slip_c, d_n, wheel.fx_demand_n);
     let fy_wheel = fy_raw * weighting;
 
     let (sin_d, cos_d) = wheel.delta_rad.sin_cos();
@@ -336,10 +357,19 @@ struct TwoTrackDerivative {
 /// [`ackermann_wheel_angles`], [`wheel_body_forces`]), then sums them as a
 /// rigid body - the genuinely new part relative to every other model in
 /// this module, none of which has a left-right force asymmetry to sum.
-fn derivative(state: TwoTrackState, params: TwoTrackParams, steering_angle_rad: f64, acceleration_mps2: f64) -> TwoTrackDerivative {
+fn derivative(
+    state: TwoTrackState,
+    params: TwoTrackParams,
+    steering_angle_rad: f64,
+    acceleration_mps2: f64,
+) -> TwoTrackDerivative {
     let ay_mps2 = state.vx_mps * state.yaw_rate_rad_s;
     let (fz_fl, fz_fr, fz_rl, fz_rr) = wheel_normal_loads(params, acceleration_mps2, ay_mps2);
-    let (delta_fl, delta_fr) = ackermann_wheel_angles(steering_angle_rad, params.lf_m + params.lr_m, params.track_width_m);
+    let (delta_fl, delta_fr) = ackermann_wheel_angles(
+        steering_angle_rad,
+        params.lf_m + params.lr_m,
+        params.track_width_m,
+    );
 
     let fx_total_n = params.mass_kg * acceleration_mps2;
     let fx_front_each = params.front_drive_fraction * fx_total_n / 2.0;
@@ -397,8 +427,14 @@ fn derivative(state: TwoTrackState, params: TwoTrackParams, steering_angle_rad: 
     let mut fy_total = 0.0;
     let mut mz_total = 0.0;
     for wheel in &wheels {
-        let (fx_body, fy_body, yaw_moment) =
-            wheel_body_forces(wheel, state.vx_mps, state.vy_mps, state.yaw_rate_rad_s, params.combined_slip_b, params.combined_slip_c);
+        let (fx_body, fy_body, yaw_moment) = wheel_body_forces(
+            wheel,
+            state.vx_mps,
+            state.vy_mps,
+            state.yaw_rate_rad_s,
+            params.combined_slip_b,
+            params.combined_slip_c,
+        );
         fx_total += fx_body;
         fy_total += fy_body;
         mz_total += yaw_moment;
@@ -466,11 +502,16 @@ pub fn step(
         heading_rad: state.heading_rad
             + (dt_s / 6.0)
                 * (k1.dheading_dt + 2.0 * k2.dheading_dt + 2.0 * k3.dheading_dt + k4.dheading_dt),
-        vx_mps: state.vx_mps + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
-        vy_mps: state.vy_mps + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
+        vx_mps: state.vx_mps
+            + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
+        vy_mps: state.vy_mps
+            + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
         yaw_rate_rad_s: state.yaw_rate_rad_s
             + (dt_s / 6.0)
-                * (k1.dyaw_rate_dt + 2.0 * k2.dyaw_rate_dt + 2.0 * k3.dyaw_rate_dt + k4.dyaw_rate_dt),
+                * (k1.dyaw_rate_dt
+                    + 2.0 * k2.dyaw_rate_dt
+                    + 2.0 * k3.dyaw_rate_dt
+                    + k4.dyaw_rate_dt),
     };
     next.heading_rad = wrap_to_pi(next.heading_rad);
     next
@@ -509,13 +550,19 @@ mod tests {
 
     #[test]
     fn non_positive_track_width_is_rejected() {
-        let params = TwoTrackParams { track_width_m: 0.0, ..test_params() };
+        let params = TwoTrackParams {
+            track_width_m: 0.0,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
     #[test]
     fn front_drive_fraction_out_of_range_is_rejected() {
-        let params = TwoTrackParams { front_drive_fraction: 1.5, ..test_params() };
+        let params = TwoTrackParams {
+            front_drive_fraction: 1.5,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
@@ -530,11 +577,17 @@ mod tests {
     fn ackermann_inner_wheel_gets_the_sharper_angle() {
         let (left, right) = ackermann_wheel_angles(0.2, 0.32, 0.2);
         assert!(left > 0.0 && right > 0.0);
-        assert!(left > right, "expected the inner wheel's angle to exceed the outer's: {left} vs {right}");
+        assert!(
+            left > right,
+            "expected the inner wheel's angle to exceed the outer's: {left} vs {right}"
+        );
 
         let (left, right) = ackermann_wheel_angles(-0.2, 0.32, 0.2);
         assert!(left < 0.0 && right < 0.0);
-        assert!(right < left, "expected the inner wheel's angle to exceed the outer's: {right} vs {left}");
+        assert!(
+            right < left,
+            "expected the inner wheel's angle to exceed the outer's: {right} vs {left}"
+        );
     }
 
     #[test]
@@ -549,8 +602,14 @@ mod tests {
     fn wheel_normal_loads_shifts_to_the_outside_wheels_under_lateral_acceleration() {
         let params = test_params();
         let (fl, fr, rl, rr) = wheel_normal_loads(params, 0.0, 3.0);
-        assert!(fr > fl, "expected the right (outside) front wheel to gain load: {fr} vs {fl}");
-        assert!(rr > rl, "expected the right (outside) rear wheel to gain load: {rr} vs {rl}");
+        assert!(
+            fr > fl,
+            "expected the right (outside) front wheel to gain load: {fr} vs {fl}"
+        );
+        assert!(
+            rr > rl,
+            "expected the right (outside) rear wheel to gain load: {rr} vs {rl}"
+        );
         assert!(fl >= 0.0 && fr >= 0.0 && rl >= 0.0 && rr >= 0.0);
     }
 
@@ -575,8 +634,14 @@ mod tests {
 
     #[test]
     fn straight_line_zero_steering_and_no_slip_matches_simple_kinematics() {
-        let state =
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - 10.0).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -592,15 +657,28 @@ mod tests {
         // can't be generating any lateral force, so steering with zero
         // throttle should leave a standing vehicle exactly where it is.
         let params = test_params();
-        let mut state =
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..100 {
             state = step(state, params, 0.4, 0.0, dt_s);
         }
         assert_eq!(
             state,
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 }
+            TwoTrackState {
+                x_m: 0.0,
+                y_m: 0.0,
+                heading_rad: 0.0,
+                vx_mps: 0.0,
+                vy_mps: 0.0,
+                yaw_rate_rad_s: 0.0
+            }
         );
     }
 
@@ -609,7 +687,14 @@ mod tests {
         // See dynamic_bicycle's test of the same name - a wheel rolling
         // straight backward with no steering has zero actual slip, so it
         // should produce zero lateral force just like straight forward.
-        let state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - (-10.0)).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -623,27 +708,51 @@ mod tests {
     fn steering_still_turns_the_vehicle_while_reversing() {
         // See dynamic_bicycle's test of the same name.
         let params = test_params();
-        let mut state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -3.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -3.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..50 {
             state = step(state, params, 0.35, 0.0, dt_s);
         }
-        assert!(state.yaw_rate_rad_s.abs() > 0.5, "expected steering to meaningfully turn the vehicle in reverse: {state:?}");
+        assert!(
+            state.yaw_rate_rad_s.abs() > 0.5,
+            "expected steering to meaningfully turn the vehicle in reverse: {state:?}"
+        );
     }
 
     #[test]
     fn steering_while_accelerating_into_reverse_does_not_diverge() {
         // See dynamic_bicycle's test of the same name.
         let params = test_params();
-        let mut state = TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         let (target_speed, max_accel, max_decel) = (-3.0_f64, 4.0_f64, 8.0_f64);
         for _ in 0..300 {
             let err = target_speed - state.vx_mps;
-            let accel = if err >= 0.0 { (err / dt_s).min(max_accel) } else { (err / dt_s).max(-max_decel) };
+            let accel = if err >= 0.0 {
+                (err / dt_s).min(max_accel)
+            } else {
+                (err / dt_s).max(-max_decel)
+            };
             state = step(state, params, 0.2, accel, dt_s);
             assert!(state.vy_mps.is_finite() && state.yaw_rate_rad_s.is_finite());
-            assert!(state.yaw_rate_rad_s.abs() < 10.0, "yaw rate diverged while reversing under steering: {state:?}");
+            assert!(
+                state.yaw_rate_rad_s.abs() < 10.0,
+                "yaw rate diverged while reversing under steering: {state:?}"
+            );
         }
     }
 
@@ -653,8 +762,14 @@ mod tests {
         // crate::environment::simulator::vehicle::dynamic_bicycle's test of
         // the same name - see LOW_SPEED_FLOOR_MPS.
         let params = test_params();
-        let mut state =
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..300 {
             state = step(state, params, 0.4, 4.0, dt_s);
@@ -671,8 +786,14 @@ mod tests {
     #[test]
     fn constant_steering_settles_into_a_bounded_steady_turn() {
         let params = test_params();
-        let mut state =
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.001;
         for _ in 0..5000 {
             state = step(state, params, 0.1, 0.0, dt_s);
@@ -686,8 +807,14 @@ mod tests {
     #[test]
     fn heavy_acceleration_reduces_cornering_grip_under_constant_steering() {
         let params = test_params();
-        let initial =
-            TwoTrackState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let initial = TwoTrackState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.001;
         let steps = 500;
 

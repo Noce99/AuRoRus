@@ -17,10 +17,10 @@
 mod cli;
 #[path = "../bench_common/progress.rs"]
 mod progress;
-#[path = "../bench_common/verifier.rs"]
-mod verifier;
 mod reader_writer;
 mod report;
+#[path = "../bench_common/verifier.rs"]
+mod verifier;
 
 use aurorus::{Executor, Runner};
 use reader_writer::{ReaderExecutor, TOPIC_NAME, TimestampedPayload, WriterExecutor};
@@ -135,7 +135,8 @@ fn main() {
     }
     println!("===================================");
 
-    let consistent = verifier::verify_consistency::<TimestampedPayload>(&runner, TOPIC_NAME, |p| &p.data);
+    let consistent =
+        verifier::verify_consistency::<TimestampedPayload>(&runner, TOPIC_NAME, |p| &p.data);
     println!(
         "\nData integrity check: {}",
         if consistent {

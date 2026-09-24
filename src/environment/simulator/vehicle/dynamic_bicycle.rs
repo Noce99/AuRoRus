@@ -188,8 +188,10 @@ fn derivative(
     let rear_lateral_mps = state.vy_mps - params.lr_m * state.yaw_rate_rad_s;
     let alpha_f = (front_lateral_mps / vx_reg).atan() - steering_angle_rad;
     let alpha_r = (rear_lateral_mps / vx_reg).atan();
-    let fyf = -params.cf_n_per_rad * alpha_f * low_speed_force_scale(state.vx_mps, front_lateral_mps);
-    let fyr = -params.cr_n_per_rad * alpha_r * low_speed_force_scale(state.vx_mps, rear_lateral_mps);
+    let fyf =
+        -params.cf_n_per_rad * alpha_f * low_speed_force_scale(state.vx_mps, front_lateral_mps);
+    let fyr =
+        -params.cr_n_per_rad * alpha_r * low_speed_force_scale(state.vx_mps, rear_lateral_mps);
     let cos_delta = steering_angle_rad.cos();
 
     let (sin_h, cos_h) = state.heading_rad.sin_cos();
@@ -255,11 +257,16 @@ pub fn step(
         heading_rad: state.heading_rad
             + (dt_s / 6.0)
                 * (k1.dheading_dt + 2.0 * k2.dheading_dt + 2.0 * k3.dheading_dt + k4.dheading_dt),
-        vx_mps: state.vx_mps + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
-        vy_mps: state.vy_mps + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
+        vx_mps: state.vx_mps
+            + (dt_s / 6.0) * (k1.dvx_dt + 2.0 * k2.dvx_dt + 2.0 * k3.dvx_dt + k4.dvx_dt),
+        vy_mps: state.vy_mps
+            + (dt_s / 6.0) * (k1.dvy_dt + 2.0 * k2.dvy_dt + 2.0 * k3.dvy_dt + k4.dvy_dt),
         yaw_rate_rad_s: state.yaw_rate_rad_s
             + (dt_s / 6.0)
-                * (k1.dyaw_rate_dt + 2.0 * k2.dyaw_rate_dt + 2.0 * k3.dyaw_rate_dt + k4.dyaw_rate_dt),
+                * (k1.dyaw_rate_dt
+                    + 2.0 * k2.dyaw_rate_dt
+                    + 2.0 * k3.dyaw_rate_dt
+                    + k4.dyaw_rate_dt),
     };
     next.heading_rad = wrap_to_pi(next.heading_rad);
     next
@@ -280,7 +287,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn default_geometry_validates() {
         assert!(test_params().validate().is_ok());
@@ -288,7 +294,10 @@ mod tests {
 
     #[test]
     fn non_positive_mass_is_rejected() {
-        let params = DynamicParams { mass_kg: 0.0, ..test_params() };
+        let params = DynamicParams {
+            mass_kg: 0.0,
+            ..test_params()
+        };
         assert!(params.validate().is_err());
     }
 
@@ -317,7 +326,14 @@ mod tests {
         // angles are zero, so both tire forces are zero and the state stays
         // exactly on a straight line - RK4 is exact (zero truncation error)
         // for a constant derivative.
-        let state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - 10.0).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -334,12 +350,29 @@ mod tests {
         // standing vehicle exactly where it is, not spin/drift it in place
         // (see low_speed_force_scale).
         let params = test_params();
-        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..100 {
             state = step(state, params, 0.4, 0.0, dt_s);
         }
-        assert_eq!(state, DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 });
+        assert_eq!(
+            state,
+            DynamicState {
+                x_m: 0.0,
+                y_m: 0.0,
+                heading_rad: 0.0,
+                vx_mps: 0.0,
+                vy_mps: 0.0,
+                yaw_rate_rad_s: 0.0
+            }
+        );
     }
 
     #[test]
@@ -350,7 +383,14 @@ mod tests {
         // but with vx_mps negative. Regression for atan2 computing a slip
         // angle near +-pi (not 0) whenever vx_mps < 0, which used to make
         // reversing spuriously drift/rotate even with the wheels straight.
-        let state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let next = step(state, test_params(), 0.0, 0.0, 2.0);
         assert!((next.x_m - (-10.0)).abs() < 1e-9);
         assert!(next.y_m.abs() < 1e-9);
@@ -367,12 +407,22 @@ mod tests {
         // for any nonzero steering once vx_mps went negative, instead of
         // responding proportionally like it does going forward.
         let params = test_params();
-        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: -3.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: -3.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..50 {
             state = step(state, params, 0.35, 0.0, dt_s);
         }
-        assert!(state.yaw_rate_rad_s.abs() > 0.5, "expected steering to meaningfully turn the vehicle in reverse: {state:?}");
+        assert!(
+            state.yaw_rate_rad_s.abs() > 0.5,
+            "expected steering to meaningfully turn the vehicle in reverse: {state:?}"
+        );
     }
 
     #[test]
@@ -383,15 +433,29 @@ mod tests {
         // reversed model), which under steering grew yaw_rate_rad_s
         // exponentially every tick instead of settling into a bounded turn.
         let params = test_params();
-        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         let (target_speed, max_accel, max_decel) = (-3.0_f64, 4.0_f64, 8.0_f64);
         for _ in 0..300 {
             let err = target_speed - state.vx_mps;
-            let accel = if err >= 0.0 { (err / dt_s).min(max_accel) } else { (err / dt_s).max(-max_decel) };
+            let accel = if err >= 0.0 {
+                (err / dt_s).min(max_accel)
+            } else {
+                (err / dt_s).max(-max_decel)
+            };
             state = step(state, params, 0.2, accel, dt_s);
             assert!(state.vy_mps.is_finite() && state.yaw_rate_rad_s.is_finite());
-            assert!(state.yaw_rate_rad_s.abs() < 10.0, "yaw rate diverged while reversing under steering: {state:?}");
+            assert!(
+                state.yaw_rate_rad_s.abs() < 10.0,
+                "yaw rate diverged while reversing under steering: {state:?}"
+            );
         }
     }
 
@@ -403,7 +467,14 @@ mod tests {
         // forces run away, sending the vehicle's speed far past anything
         // ActuatorLimits should allow before collapsing back down.
         let params = test_params();
-        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 0.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 0.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.01;
         for _ in 0..300 {
             state = step(state, params, 0.4, 4.0, dt_s);
@@ -427,7 +498,14 @@ mod tests {
         // simple closed form - only that constant steering input produces a
         // finite, bounded response rather than diverging.
         let params = test_params();
-        let mut state = DynamicState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, vx_mps: 5.0, vy_mps: 0.0, yaw_rate_rad_s: 0.0 };
+        let mut state = DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 5.0,
+            vy_mps: 0.0,
+            yaw_rate_rad_s: 0.0,
+        };
         let dt_s = 0.001;
         for _ in 0..5000 {
             state = step(state, params, 0.1, 0.0, dt_s);

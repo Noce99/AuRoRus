@@ -16,7 +16,9 @@ pub struct Config {
 /// `-h`/`--help`, an unknown argument, a flag missing its value, or a missing
 /// required `--file`.
 pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
-    let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
+    let program = args
+        .next()
+        .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
     let usage = format!(
         "Usage: {program} --file PATH [OPTIONS]\n\n\
          Options:\n  \

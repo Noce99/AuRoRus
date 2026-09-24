@@ -53,7 +53,10 @@ impl VescCommand {
     /// Builds a command. When it was written is tracked by the topic itself -
     /// see [`crate::WriteMeta`].
     pub fn new(servo_position_rad: f64, speed_mps: f64) -> Self {
-        Self { servo_position_rad, speed_mps }
+        Self {
+            servo_position_rad,
+            speed_mps,
+        }
     }
 }
 

@@ -3,8 +3,12 @@
 //! `race_lines/centerline.csv`, and `info.json` into a new folder under
 //! [`GenerationConfig::output_root`].
 
-use crate::environment::info::{self, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint};
-use crate::environment::map::{CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, RACE_LINES_DIR_NAME};
+use crate::environment::info::{
+    self, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint,
+};
+use crate::environment::map::{
+    CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, RACE_LINES_DIR_NAME,
+};
 use crate::environment::race_line::{self, SpeedPoint};
 use crate::environment::simulator::config::GenerationConfig;
 use crate::environment::simulator::dynamics;
@@ -86,7 +90,9 @@ pub fn generate(
     folder_name: Option<&str>,
     overwrite: bool,
 ) -> Result<GeneratedMap, MapGenerationError> {
-    config.validate().map_err(MapGenerationError::InvalidConfig)?;
+    config
+        .validate()
+        .map_err(MapGenerationError::InvalidConfig)?;
 
     let mut rng = StdRng::seed_from_u64(config.seed);
 
@@ -111,8 +117,11 @@ pub fn generate(
     let mut closed_points = smoothing::resample_even_spacing(&dense, config.point_spacing_m);
     start_finish::rotate_to_straightest(&mut closed_points, config.track_width_m);
 
-    let speeds: Vec<SpeedPoint> =
-        dynamics::assign_speeds(&closed_points, config.max_speed_mps, config.max_lateral_accel_mps2);
+    let speeds: Vec<SpeedPoint> = dynamics::assign_speeds(
+        &closed_points,
+        config.max_speed_mps,
+        config.max_lateral_accel_mps2,
+    );
     let start_finish_segment = start_finish::compute(&closed_points, config.track_width_m);
 
     let width_px = (config.area_width_m / config.resolution_m_per_px).ceil() as u32;
@@ -137,16 +146,27 @@ pub fn generate(
     std::fs::create_dir_all(&race_lines_dir)?;
 
     tiff::write(&map_raster, &folder.join(MAP_TIFF_FILE_NAME)).map_err(MapGenerationError::Tiff)?;
-    race_line::write(&speeds, &race_lines_dir.join(CENTERLINE_FILE_NAME)).map_err(MapGenerationError::RaceLine)?;
+    race_line::write(&speeds, &race_lines_dir.join(CENTERLINE_FILE_NAME))
+        .map_err(MapGenerationError::RaceLine)?;
 
     let map_info = MapInfo {
         resolution_m_per_px: config.resolution_m_per_px,
         width_px,
         height_px,
-        origin: ImageOrigin { x: transform.origin_x_m, y: transform.origin_y_m, theta_rad: 0.0 },
+        origin: ImageOrigin {
+            x: transform.origin_x_m,
+            y: transform.origin_y_m,
+            theta_rad: 0.0,
+        },
         start_finish_line: StartFinishLine {
-            a: WorldPoint { x: start_finish_segment.a.x, y: start_finish_segment.a.y },
-            b: WorldPoint { x: start_finish_segment.b.x, y: start_finish_segment.b.y },
+            a: WorldPoint {
+                x: start_finish_segment.a.x,
+                y: start_finish_segment.a.y,
+            },
+            b: WorldPoint {
+                x: start_finish_segment.b.x,
+                y: start_finish_segment.b.y,
+            },
         },
         generated_at: info::now_rfc3339(),
         source: MapSource::Random,
@@ -156,7 +176,12 @@ pub fn generate(
     };
     info::write(&map_info, &folder.join(INFO_FILE_NAME)).map_err(MapGenerationError::Info)?;
 
-    Ok(GeneratedMap { folder, num_race_line_points: speeds.len(), width_px, height_px })
+    Ok(GeneratedMap {
+        folder,
+        num_race_line_points: speeds.len(),
+        width_px,
+        height_px,
+    })
 }
 
 /// Whether `folder` already holds a generated map, i.e. has the `info.json`
@@ -210,8 +235,10 @@ mod tests {
     use super::*;
 
     fn scratch_config(suffix: &str) -> GenerationConfig {
-        let output_root =
-            std::env::temp_dir().join(format!("aurorus_generator_test_{suffix}_{}", std::process::id()));
+        let output_root = std::env::temp_dir().join(format!(
+            "aurorus_generator_test_{suffix}_{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&output_root);
         GenerationConfig {
             area_width_m: 20.0,
@@ -230,10 +257,17 @@ mod tests {
     #[test]
     fn generate_writes_all_three_outputs() {
         let config = scratch_config("outputs");
-        let result = generate(&config, Some("run"), false).expect("generation should succeed with these params");
+        let result = generate(&config, Some("run"), false)
+            .expect("generation should succeed with these params");
 
         assert!(result.folder.join(MAP_TIFF_FILE_NAME).exists());
-        assert!(result.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME).exists());
+        assert!(
+            result
+                .folder
+                .join(RACE_LINES_DIR_NAME)
+                .join(CENTERLINE_FILE_NAME)
+                .exists()
+        );
         assert!(result.folder.join(INFO_FILE_NAME).exists());
         assert!(result.num_race_line_points > 0);
 
@@ -246,8 +280,20 @@ mod tests {
         let first = generate(&config, Some("a"), false).expect("first generation should succeed");
         let second = generate(&config, Some("b"), false).expect("second generation should succeed");
 
-        let csv_a = std::fs::read(first.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME)).unwrap();
-        let csv_b = std::fs::read(second.folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME)).unwrap();
+        let csv_a = std::fs::read(
+            first
+                .folder
+                .join(RACE_LINES_DIR_NAME)
+                .join(CENTERLINE_FILE_NAME),
+        )
+        .unwrap();
+        let csv_b = std::fs::read(
+            second
+                .folder
+                .join(RACE_LINES_DIR_NAME)
+                .join(CENTERLINE_FILE_NAME),
+        )
+        .unwrap();
         assert_eq!(csv_a, csv_b);
 
         let tiff_a = std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap();
@@ -263,16 +309,25 @@ mod tests {
         let first = generate(&config, Some("run"), false).expect("first generation should succeed");
         let original = std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap();
 
-        let different = GenerationConfig { seed: config.seed + 1, ..config.clone() };
+        let different = GenerationConfig {
+            seed: config.seed + 1,
+            ..config.clone()
+        };
         let err = generate(&different, Some("run"), false)
             .expect_err("generating over an existing map must be refused");
         assert!(matches!(err, MapGenerationError::FolderExists(_)));
         // ...and the original map is still exactly as it was.
-        assert_eq!(std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(), original);
+        assert_eq!(
+            std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(),
+            original
+        );
 
         // With overwrite it goes through, and really does replace the map.
         generate(&different, Some("run"), true).expect("overwrite: true should succeed");
-        assert_ne!(std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(), original);
+        assert_ne!(
+            std::fs::read(first.folder.join(MAP_TIFF_FILE_NAME)).unwrap(),
+            original
+        );
 
         std::fs::remove_dir_all(&config.output_root).ok();
     }
@@ -284,19 +339,29 @@ mod tests {
         // folder name, so the second silently overwrote the first.
         let seeds: Vec<u64> = (0..100).map(|_| random_seed()).collect();
         let unique: std::collections::HashSet<u64> = seeds.iter().copied().collect();
-        assert_eq!(unique.len(), seeds.len(), "every freshly rolled seed must be distinct");
+        assert_eq!(
+            unique.len(),
+            seeds.len(),
+            "every freshly rolled seed must be distinct"
+        );
 
         let names: std::collections::HashSet<String> =
             seeds.iter().map(|&s| default_folder_name(s)).collect();
-        assert_eq!(names.len(), seeds.len(), "distinct seeds must give distinct folder names");
+        assert_eq!(
+            names.len(),
+            seeds.len(),
+            "distinct seeds must give distinct folder names"
+        );
     }
 
     #[test]
     fn generated_map_loads_back_correctly() {
         let config = scratch_config("load");
-        let generated = generate(&config, Some("run"), false).expect("generation should succeed with these params");
+        let generated = generate(&config, Some("run"), false)
+            .expect("generation should succeed with these params");
 
-        let map = crate::environment::Map::load(&generated.folder).expect("loading a freshly generated map should succeed");
+        let map = crate::environment::Map::load(&generated.folder)
+            .expect("loading a freshly generated map should succeed");
 
         assert_eq!(map.info.width_px, generated.width_px);
         assert_eq!(map.info.height_px, generated.height_px);

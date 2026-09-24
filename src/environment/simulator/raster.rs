@@ -59,11 +59,21 @@ impl PointGrid {
             buckets[by * cols + bx].push(idx);
         }
 
-        Self { cell_size, min_x, min_y, cols, rows, buckets }
+        Self {
+            cell_size,
+            min_x,
+            min_y,
+            cols,
+            rows,
+            buckets,
+        }
     }
 
     fn bucket_of(x: f64, y: f64, min_x: f64, min_y: f64, cell_size: f64) -> (usize, usize) {
-        (((x - min_x) / cell_size) as usize, ((y - min_y) / cell_size) as usize)
+        (
+            ((x - min_x) / cell_size) as usize,
+            ((y - min_y) / cell_size) as usize,
+        )
     }
 
     /// Distance to the nearest point within the 3x3 bucket neighborhood
@@ -106,7 +116,9 @@ pub fn rasterize(centerline: &[Point2], track_width_m: f64, transform: &ImageTra
     for row in 0..transform.height_px {
         for col in 0..transform.width_px {
             let world = transform.pixel_center_world(col, row);
-            let is_white = grid.nearest_distance(world, centerline).is_some_and(|d| d <= radius);
+            let is_white = grid
+                .nearest_distance(world, centerline)
+                .is_some_and(|d| d <= radius);
             white[row as usize * width + col as usize] = is_white;
         }
     }
@@ -118,7 +130,11 @@ pub fn rasterize(centerline: &[Point2], track_width_m: f64, transform: &ImageTra
 mod tests {
     use super::*;
 
-    fn brute_force_rasterize(centerline: &[Point2], track_width_m: f64, transform: &ImageTransform) -> Vec<bool> {
+    fn brute_force_rasterize(
+        centerline: &[Point2],
+        track_width_m: f64,
+        transform: &ImageTransform,
+    ) -> Vec<bool> {
         let radius = track_width_m / 2.0;
         let mut white = vec![false; (transform.width_px * transform.height_px) as usize];
         for row in 0..transform.height_px {

@@ -14,9 +14,9 @@ mod vehicle_status;
 mod vesc_command;
 
 pub use autonomous_control::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX,
-    AUTONOMOUS_CONTROL_TOPIC_PREFIX, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
-    AvailableAlgorithm,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
+    AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX, AutonomousAlgorithmInfo,
+    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AvailableAlgorithm,
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, Shape};
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
@@ -25,8 +25,11 @@ pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
 pub use start_state::{START_STATE_TOPIC_NAME, StartState};
 pub use vehicle_limits::{ActuatorLimits, VEHICLE_LIMITS_TOPIC_NAME};
 pub use vehicle_model::{
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection,
-    VehicleModelStatus,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus,
 };
 pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
-pub use vesc_command::{AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VescCommand};
+pub use vesc_command::{
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
+    VescCommand,
+};

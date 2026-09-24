@@ -151,8 +151,16 @@ mod tests {
         let loop_points = square();
         let dense = densify(&loop_points, 20);
         for p in &dense {
-            assert!(p.x >= -0.5 && p.x <= 4.5, "x out of expected range: {}", p.x);
-            assert!(p.y >= -0.5 && p.y <= 4.5, "y out of expected range: {}", p.y);
+            assert!(
+                p.x >= -0.5 && p.x <= 4.5,
+                "x out of expected range: {}",
+                p.x
+            );
+            assert!(
+                p.y >= -0.5 && p.y <= 4.5,
+                "y out of expected range: {}",
+                p.y
+            );
         }
     }
 
@@ -167,7 +175,10 @@ mod tests {
         assert!(n > 10);
         for i in 0..n {
             let gap = resampled[i].distance(&resampled[(i + 1) % n]);
-            assert!((gap - spacing).abs() < spacing * 0.1, "gap {gap} too far from {spacing}");
+            assert!(
+                (gap - spacing).abs() < spacing * 0.1,
+                "gap {gap} too far from {spacing}"
+            );
         }
     }
 }

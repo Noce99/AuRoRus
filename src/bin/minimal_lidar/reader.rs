@@ -11,7 +11,11 @@ pub struct Reader {
 
 impl Reader {
     pub fn new(rate_hz: f64, name: String) -> Self {
-        Self { id: 0, rate_hz, name}
+        Self {
+            id: 0,
+            rate_hz,
+            name,
+        }
     }
 }
 

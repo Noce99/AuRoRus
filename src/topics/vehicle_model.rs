@@ -109,7 +109,10 @@ impl VehicleModelKind {
     /// Parses an API string back into a kind, or `None` if it names no
     /// known model.
     pub fn from_api_str(s: &str) -> Option<Self> {
-        Self::ALL.iter().find(|(_, api, ..)| *api == s).map(|(kind, ..)| *kind)
+        Self::ALL
+            .iter()
+            .find(|(_, api, ..)| *api == s)
+            .map(|(kind, ..)| *kind)
     }
 }
 
@@ -169,7 +172,10 @@ mod tests {
         ];
         assert_eq!(VehicleModelKind::ALL.len(), kinds.len());
         for kind in kinds {
-            assert!(VehicleModelKind::ALL.iter().any(|(k, ..)| *k == kind), "{kind:?} missing from ALL");
+            assert!(
+                VehicleModelKind::ALL.iter().any(|(k, ..)| *k == kind),
+                "{kind:?} missing from ALL"
+            );
         }
     }
 }

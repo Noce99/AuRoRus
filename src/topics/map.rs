@@ -97,7 +97,8 @@ mod tests {
             info: None,
         };
 
-        let encoded = bincode::serde::encode_to_vec(&selected, bincode::config::standard()).unwrap();
+        let encoded =
+            bincode::serde::encode_to_vec(&selected, bincode::config::standard()).unwrap();
         let (decoded, _): (SelectedMap, _) =
             bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
 

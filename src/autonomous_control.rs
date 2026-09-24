@@ -37,9 +37,10 @@
 //! See `always_left.rs` for the smallest possible example.
 
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX,
-    AUTONOMOUS_CONTROL_TOPIC_PREFIX, AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AutonomousAlgorithmInfo,
-    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
+    AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection,
+    AutonomousAlgorithmStatus, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
@@ -65,7 +66,10 @@ pub struct AutonomousControlsHandler {
 
 impl AutonomousControlsHandler {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { id: 0, name: name.into() }
+        Self {
+            id: 0,
+            name: name.into(),
+        }
     }
 }
 
@@ -75,11 +79,20 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
         .debug_topics_snapshot()
         .into_iter()
         .filter_map(|(topic_name, _)| {
-            let name = topic_name.strip_prefix(AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX)?.to_string();
+            let name = topic_name
+                .strip_prefix(AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX)?
+                .to_string();
             // An info-prefixed topic of another type is someone's mistake -
             // skip it rather than take the whole process down over it.
-            let info = captain.try_topic::<AutonomousAlgorithmInfo>(&topic_name)?.read().into_value();
-            Some(AvailableAlgorithm { name, label: info.label, description: info.description })
+            let info = captain
+                .try_topic::<AutonomousAlgorithmInfo>(&topic_name)?
+                .read()
+                .into_value();
+            Some(AvailableAlgorithm {
+                name,
+                label: info.label,
+                description: info.description,
+            })
         })
         .collect();
     available.sort_by(|a, b| a.name.cmp(&b.name));
@@ -93,7 +106,9 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
 /// centered command.
 fn resolve_command(command: Option<Stamped<VescCommand>>) -> (VescCommand, bool) {
     match command {
-        Some(command) if command.age().is_some_and(|age| age <= VESC_COMMAND_TIMEOUT) => (command.value, true),
+        Some(command) if command.age().is_some_and(|age| age <= VESC_COMMAND_TIMEOUT) => {
+            (command.value, true)
+        }
         _ => (VescCommand::default(), false),
     }
 }
@@ -104,7 +119,11 @@ impl Executor for AutonomousControlsHandler {
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
-        captain.claim_writer::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, self.id, VescCommand::default);
+        captain.claim_writer::<VescCommand>(
+            AUTONOMOUS_VESC_COMMAND_TOPIC_NAME,
+            self.id,
+            VescCommand::default,
+        );
         captain.claim_writer::<AutonomousAlgorithmStatus>(
             AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
             self.id,
@@ -114,7 +133,8 @@ impl Executor for AutonomousControlsHandler {
 
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
-        let status_topic = captain.topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME);
+        let status_topic =
+            captain.topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME);
         let mut last_status = None;
         let mut ticker = Ticker::new(HANDLER_RATE_HZ);
 
@@ -123,9 +143,12 @@ impl Executor for AutonomousControlsHandler {
             // Nothing may publish a selection at all (e.g. a binary without
             // `web_gui`) - then nothing is ever selected.
             let selected = captain
-                .try_topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
+                .try_topic::<AutonomousAlgorithmSelection>(
+                    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,
+                )
                 .and_then(|topic| topic.read().into_value().name);
-            let active = selected.filter(|name| available.iter().any(|algorithm| &algorithm.name == name));
+            let active =
+                selected.filter(|name| available.iter().any(|algorithm| &algorithm.name == name));
             let command = active.as_ref().and_then(|name| {
                 captain
                     .try_topic::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"))
@@ -137,7 +160,11 @@ impl Executor for AutonomousControlsHandler {
                 .write(self.id, command)
                 .expect("lost writer authorization for the autonomous_vesc_command topic");
 
-            let status = AutonomousAlgorithmStatus { active, available, command_fresh };
+            let status = AutonomousAlgorithmStatus {
+                active,
+                available,
+                command_fresh,
+            };
             if last_status.as_ref() != Some(&status) {
                 status_topic
                     .write(self.id, status.clone())
@@ -171,24 +198,37 @@ mod tests {
     fn written_at(at: Instant) -> Stamped<VescCommand> {
         Stamped {
             value: VescCommand::new(-0.4, 4.0),
-            meta: WriteMeta { write_count: 1, written_at: Some(at), written_at_unix_us: 1 },
+            meta: WriteMeta {
+                write_count: 1,
+                written_at: Some(at),
+                written_at_unix_us: 1,
+            },
         }
     }
 
     #[test]
     fn a_fresh_command_is_forwarded() {
-        assert_eq!(resolve_command(Some(written_at(Instant::now()))), (VescCommand::new(-0.4, 4.0), true));
+        assert_eq!(
+            resolve_command(Some(written_at(Instant::now()))),
+            (VescCommand::new(-0.4, 4.0), true)
+        );
     }
 
     #[test]
     fn a_stale_command_stops_the_vehicle() {
         let stale = written_at(Instant::now() - VESC_COMMAND_TIMEOUT - Duration::from_millis(10));
-        assert_eq!(resolve_command(Some(stale)), (VescCommand::default(), false));
+        assert_eq!(
+            resolve_command(Some(stale)),
+            (VescCommand::default(), false)
+        );
     }
 
     #[test]
     fn an_unwritten_seed_or_no_selection_stops_the_vehicle() {
-        let seed = Stamped { value: VescCommand::new(-0.4, 4.0), meta: WriteMeta::default() };
+        let seed = Stamped {
+            value: VescCommand::new(-0.4, 4.0),
+            meta: WriteMeta::default(),
+        };
         assert_eq!(resolve_command(Some(seed)), (VescCommand::default(), false));
         assert_eq!(resolve_command(None), (VescCommand::default(), false));
     }

@@ -35,7 +35,10 @@ pub struct AutonomousAlgorithmInfo {
 
 impl AutonomousAlgorithmInfo {
     pub fn new(label: impl Into<String>, description: impl Into<String>) -> Self {
-        Self { label: label.into(), description: description.into() }
+        Self {
+            label: label.into(),
+            description: description.into(),
+        }
     }
 }
 

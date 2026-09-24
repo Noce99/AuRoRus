@@ -64,7 +64,13 @@ impl Executor for RandomLidar {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let config = self.config;
         captain.claim_writer::<LidarScan>(LIDAR_SCAN_TOPIC_NAME, self.id, move || {
-            LidarScan::new(Vec::new(), Vec::new(), config.min_distance_m, config.max_distance_m, config.fov_rad)
+            LidarScan::new(
+                Vec::new(),
+                Vec::new(),
+                config.min_distance_m,
+                config.max_distance_m,
+                config.fov_rad,
+            )
         });
     }
 
@@ -85,7 +91,13 @@ impl Executor for RandomLidar {
             topic
                 .write(
                     self.id,
-                    LidarScan::new(points, intensities, self.config.min_distance_m, self.config.max_distance_m, self.config.fov_rad),
+                    LidarScan::new(
+                        points,
+                        intensities,
+                        self.config.min_distance_m,
+                        self.config.max_distance_m,
+                        self.config.fov_rad,
+                    ),
                 )
                 .expect("lost writer authorization for the lidar_scan topic");
 

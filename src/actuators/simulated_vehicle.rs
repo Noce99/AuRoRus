@@ -10,16 +10,17 @@
 //! drawing topic (see [`crate::topics::Drawing`]).
 
 use crate::environment::simulator::vehicle::{
-    BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState, NonlinearTireParams,
-    PacejkaBicycleState, PacejkaTireParams, TwoTrackParams, TwoTrackState, dynamic_step, nonlinear_step,
-    pacejka_step, step as bicycle_step, two_track_step,
+    BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState,
+    NonlinearTireParams, PacejkaBicycleState, PacejkaTireParams, TwoTrackParams, TwoTrackState,
+    dynamic_step, nonlinear_step, pacejka_step, step as bicycle_step, two_track_step,
 };
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME, Shape, PLACE_AT_START_TOPIC_NAME,
-    PlaceAtStart, START_STATE_TOPIC_NAME, StartState, VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
-    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME,
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, Shape, StartState,
+    VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelSelection,
+    VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
@@ -210,25 +211,38 @@ impl Default for SimulatedVehicleConfig {
     /// web-selectable model needs *some* starting parameters for a kind the
     /// caller only names, not configures.
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/actuators/simulated_vehicle.toml"))
-            .expect("config/actuators/simulated_vehicle.toml must deserialize into SimulatedVehicleConfig")
+        toml::from_str(include_str!(
+            "../../config/actuators/simulated_vehicle.toml"
+        ))
+        .expect(
+            "config/actuators/simulated_vehicle.toml must deserialize into SimulatedVehicleConfig",
+        )
     }
 }
 
 /// The default [`VehicleModel`] for `kind`, built from `config`.
 pub fn default_model(kind: VehicleModelKind, config: &SimulatedVehicleConfig) -> VehicleModel {
     match kind {
-        VehicleModelKind::Bicycle => VehicleModel::Bicycle { params: config.bicycle, limits: config.limits },
-        VehicleModelKind::DynamicBicycle => {
-            VehicleModel::DynamicBicycle { params: config.dynamic_bicycle, limits: config.limits }
-        }
-        VehicleModelKind::NonlinearBicycle => {
-            VehicleModel::NonlinearBicycle { params: config.nonlinear_bicycle, limits: config.limits }
-        }
-        VehicleModelKind::PacejkaBicycle => {
-            VehicleModel::PacejkaBicycle { params: config.pacejka_bicycle, limits: config.limits }
-        }
-        VehicleModelKind::TwoTrack => VehicleModel::TwoTrack { params: config.two_track, limits: config.limits },
+        VehicleModelKind::Bicycle => VehicleModel::Bicycle {
+            params: config.bicycle,
+            limits: config.limits,
+        },
+        VehicleModelKind::DynamicBicycle => VehicleModel::DynamicBicycle {
+            params: config.dynamic_bicycle,
+            limits: config.limits,
+        },
+        VehicleModelKind::NonlinearBicycle => VehicleModel::NonlinearBicycle {
+            params: config.nonlinear_bicycle,
+            limits: config.limits,
+        },
+        VehicleModelKind::PacejkaBicycle => VehicleModel::PacejkaBicycle {
+            params: config.pacejka_bicycle,
+            limits: config.limits,
+        },
+        VehicleModelKind::TwoTrack => VehicleModel::TwoTrack {
+            params: config.two_track,
+            limits: config.limits,
+        },
     }
 }
 
@@ -255,9 +269,15 @@ fn state_from_start(start: StartState, kind: VehicleModelKind) -> VehicleState {
 /// runtime, so the vehicle doesn't visibly jump when the model underneath it
 /// changes mid-drive.
 fn carry_over_state(old: VehicleState, new_kind: VehicleModelKind) -> VehicleState {
-    let (x_m, y_m, heading_rad, speed_mps) = (old.x_m(), old.y_m(), old.heading_rad(), old.speed_mps());
+    let (x_m, y_m, heading_rad, speed_mps) =
+        (old.x_m(), old.y_m(), old.heading_rad(), old.speed_mps());
     match new_kind {
-        VehicleModelKind::Bicycle => VehicleState::Bicycle(BicycleState { x_m, y_m, heading_rad, speed_mps }),
+        VehicleModelKind::Bicycle => VehicleState::Bicycle(BicycleState {
+            x_m,
+            y_m,
+            heading_rad,
+            speed_mps,
+        }),
         VehicleModelKind::DynamicBicycle => VehicleState::DynamicBicycle(DynamicState {
             x_m,
             y_m,
@@ -266,14 +286,16 @@ fn carry_over_state(old: VehicleState, new_kind: VehicleModelKind) -> VehicleSta
             vy_mps: 0.0,
             yaw_rate_rad_s: 0.0,
         }),
-        VehicleModelKind::NonlinearBicycle => VehicleState::NonlinearBicycle(NonlinearBicycleState {
-            x_m,
-            y_m,
-            heading_rad,
-            vx_mps: speed_mps,
-            vy_mps: 0.0,
-            yaw_rate_rad_s: 0.0,
-        }),
+        VehicleModelKind::NonlinearBicycle => {
+            VehicleState::NonlinearBicycle(NonlinearBicycleState {
+                x_m,
+                y_m,
+                heading_rad,
+                vx_mps: speed_mps,
+                vy_mps: 0.0,
+                yaw_rate_rad_s: 0.0,
+            })
+        }
         VehicleModelKind::PacejkaBicycle => VehicleState::PacejkaBicycle(PacejkaBicycleState {
             x_m,
             y_m,
@@ -311,10 +333,18 @@ fn advance(
 ) -> (VehicleState, f64) {
     let limits = limits_of(model);
 
-    let target_steering_rad = target_steering_rad.clamp(-limits.max_steering_angle_rad, limits.max_steering_angle_rad);
+    let target_steering_rad = target_steering_rad.clamp(
+        -limits.max_steering_angle_rad,
+        limits.max_steering_angle_rad,
+    );
     let max_steering_delta = limits.max_steering_rate_rad_s * dt_s;
-    let next_steering_rad = (steering_angle_rad + (target_steering_rad - steering_angle_rad).clamp(-max_steering_delta, max_steering_delta))
-        .clamp(-limits.max_steering_angle_rad, limits.max_steering_angle_rad);
+    let next_steering_rad = (steering_angle_rad
+        + (target_steering_rad - steering_angle_rad)
+            .clamp(-max_steering_delta, max_steering_delta))
+    .clamp(
+        -limits.max_steering_angle_rad,
+        limits.max_steering_angle_rad,
+    );
 
     let target_speed_mps = target_speed_mps.clamp(-limits.max_speed_mps, limits.max_speed_mps);
     let speed_error_mps = target_speed_mps - state.longitudinal_speed_mps();
@@ -325,20 +355,44 @@ fn advance(
     };
 
     let next_state = match (model, state) {
-        (VehicleModel::Bicycle { params, .. }, VehicleState::Bicycle(s)) => {
-            VehicleState::Bicycle(bicycle_step(s, *params, next_steering_rad, accel_mps2, dt_s))
-        }
+        (VehicleModel::Bicycle { params, .. }, VehicleState::Bicycle(s)) => VehicleState::Bicycle(
+            bicycle_step(s, *params, next_steering_rad, accel_mps2, dt_s),
+        ),
         (VehicleModel::DynamicBicycle { params, .. }, VehicleState::DynamicBicycle(s)) => {
-            VehicleState::DynamicBicycle(dynamic_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+            VehicleState::DynamicBicycle(dynamic_step(
+                s,
+                *params,
+                next_steering_rad,
+                accel_mps2,
+                dt_s,
+            ))
         }
         (VehicleModel::NonlinearBicycle { params, .. }, VehicleState::NonlinearBicycle(s)) => {
-            VehicleState::NonlinearBicycle(nonlinear_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+            VehicleState::NonlinearBicycle(nonlinear_step(
+                s,
+                *params,
+                next_steering_rad,
+                accel_mps2,
+                dt_s,
+            ))
         }
         (VehicleModel::PacejkaBicycle { params, .. }, VehicleState::PacejkaBicycle(s)) => {
-            VehicleState::PacejkaBicycle(pacejka_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+            VehicleState::PacejkaBicycle(pacejka_step(
+                s,
+                *params,
+                next_steering_rad,
+                accel_mps2,
+                dt_s,
+            ))
         }
         (VehicleModel::TwoTrack { params, .. }, VehicleState::TwoTrack(s)) => {
-            VehicleState::TwoTrack(two_track_step(s, *params, next_steering_rad, accel_mps2, dt_s))
+            VehicleState::TwoTrack(two_track_step(
+                s,
+                *params,
+                next_steering_rad,
+                accel_mps2,
+                dt_s,
+            ))
         }
         _ => unreachable!("SimulatedVehicle::run always keeps model/state kinds in sync"),
     };
@@ -429,8 +483,17 @@ pub struct SimulatedVehicle {
 impl SimulatedVehicle {
     /// Creates a `SimulatedVehicle` that will run `model` once started,
     /// ticking and switching models per `config`.
-    pub fn new(name: impl Into<String>, model: VehicleModel, config: SimulatedVehicleConfig) -> Self {
-        Self { id: 0, name: name.into(), model, config }
+    pub fn new(
+        name: impl Into<String>,
+        model: VehicleModel,
+        config: SimulatedVehicleConfig,
+    ) -> Self {
+        Self {
+            id: 0,
+            name: name.into(),
+            model,
+            config,
+        }
     }
 }
 
@@ -440,8 +503,16 @@ impl Executor for SimulatedVehicle {
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
-        captain.claim_writer::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME, self.id, VehicleStatus::default);
-        captain.claim_writer::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME, self.id, VehicleModelStatus::default);
+        captain.claim_writer::<VehicleStatus>(
+            VEHICLE_STATUS_TOPIC_NAME,
+            self.id,
+            VehicleStatus::default,
+        );
+        captain.claim_writer::<VehicleModelStatus>(
+            VEHICLE_MODEL_STATUS_TOPIC_NAME,
+            self.id,
+            VehicleModelStatus::default,
+        );
         // Every model kind shares `config.limits`, so this never changes
         // after being seeded - nothing needs to write it again.
         let limits = self.config.limits;
@@ -453,8 +524,10 @@ impl Executor for SimulatedVehicle {
         let status_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
         let autonomous_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
         let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
-        let model_selection_topic = captain.topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME);
-        let model_status_topic = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
+        let model_selection_topic =
+            captain.topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME);
+        let model_status_topic =
+            captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
@@ -498,8 +571,14 @@ impl Executor for SimulatedVehicle {
 
             let command = select_command(autonomous_topic.read(), human_topic.read());
 
-            let (next_state, next_steering_rad) =
-                advance(&self.model, state, steering_angle_rad, command.servo_position_rad, command.speed_mps, dt_s);
+            let (next_state, next_steering_rad) = advance(
+                &self.model,
+                state,
+                steering_angle_rad,
+                command.servo_position_rad,
+                command.speed_mps,
+                dt_s,
+            );
             state = next_state;
             steering_angle_rad = next_steering_rad;
 
@@ -536,7 +615,11 @@ impl Executor for SimulatedVehicle {
         // ...) even if the model kind was switched mid-run via
         // `VEHICLE_MODEL_SELECTION_TOPIC_NAME` - only the *kind* carries over.
         let kind = kind_of(&self.model);
-        Box::new(SimulatedVehicle::new(self.name.clone(), default_model(kind, &self.config), self.config.clone()))
+        Box::new(SimulatedVehicle::new(
+            self.name.clone(),
+            default_model(kind, &self.config),
+            self.config.clone(),
+        ))
     }
 }
 
@@ -547,7 +630,10 @@ mod tests {
 
     fn test_model() -> VehicleModel {
         VehicleModel::Bicycle {
-            params: BicycleParams { lf_m: 0.16, lr_m: 0.16 },
+            params: BicycleParams {
+                lf_m: 0.16,
+                lr_m: 0.16,
+            },
             limits: ActuatorLimits {
                 max_steering_angle_rad: 0.4,
                 max_steering_rate_rad_s: 4.0,
@@ -664,7 +750,9 @@ mod tests {
 
     #[test]
     fn default_limits_validate() {
-        assert!(matches!(test_model(), VehicleModel::Bicycle { limits, .. } if limits.validate().is_ok()));
+        assert!(
+            matches!(test_model(), VehicleModel::Bicycle { limits, .. } if limits.validate().is_ok())
+        );
     }
 
     #[test]
@@ -705,15 +793,29 @@ mod tests {
     #[test]
     fn kind_of_matches_the_variant() {
         assert_eq!(kind_of(&test_model()), VehicleModelKind::Bicycle);
-        assert_eq!(kind_of(&test_dynamic_model()), VehicleModelKind::DynamicBicycle);
-        assert_eq!(kind_of(&test_nonlinear_model()), VehicleModelKind::NonlinearBicycle);
-        assert_eq!(kind_of(&test_pacejka_model()), VehicleModelKind::PacejkaBicycle);
+        assert_eq!(
+            kind_of(&test_dynamic_model()),
+            VehicleModelKind::DynamicBicycle
+        );
+        assert_eq!(
+            kind_of(&test_nonlinear_model()),
+            VehicleModelKind::NonlinearBicycle
+        );
+        assert_eq!(
+            kind_of(&test_pacejka_model()),
+            VehicleModelKind::PacejkaBicycle
+        );
         assert_eq!(kind_of(&test_two_track_model()), VehicleModelKind::TwoTrack);
     }
 
     #[test]
     fn carry_over_state_maps_speed_into_the_new_models_shared_fields() {
-        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let old = VehicleState::Bicycle(BicycleState {
+            x_m: 1.0,
+            y_m: 2.0,
+            heading_rad: 0.3,
+            speed_mps: 4.0,
+        });
         let next = carry_over_state(old, VehicleModelKind::DynamicBicycle);
         match next {
             VehicleState::DynamicBicycle(s) => {
@@ -747,7 +849,12 @@ mod tests {
 
     #[test]
     fn state_from_start_carries_the_start_state_into_every_model_kind() {
-        let start = StartState { x_m: 3.0, y_m: -2.0, heading_rad: 0.5, speed_mps: 0.0 };
+        let start = StartState {
+            x_m: 3.0,
+            y_m: -2.0,
+            heading_rad: 0.5,
+            speed_mps: 0.0,
+        };
         match state_from_start(start, VehicleModelKind::DynamicBicycle) {
             VehicleState::DynamicBicycle(s) => {
                 assert_eq!(s.x_m, 3.0);
@@ -761,10 +868,18 @@ mod tests {
         }
     }
 
-    fn written(servo_position_rad: f64, speed_mps: f64, written_at: std::time::Instant) -> Stamped<VescCommand> {
+    fn written(
+        servo_position_rad: f64,
+        speed_mps: f64,
+        written_at: std::time::Instant,
+    ) -> Stamped<VescCommand> {
         Stamped {
             value: VescCommand::new(servo_position_rad, speed_mps),
-            meta: WriteMeta { write_count: 1, written_at: Some(written_at), written_at_unix_us: 1 },
+            meta: WriteMeta {
+                write_count: 1,
+                written_at: Some(written_at),
+                written_at_unix_us: 1,
+            },
         }
     }
 
@@ -773,7 +888,10 @@ mod tests {
         let now = std::time::Instant::now();
         let human = written(0.0, 1.0, now);
         let autonomous = written(-0.4, 4.0, now + std::time::Duration::from_millis(1));
-        assert_eq!(select_command(autonomous, human), VescCommand::new(0.0, 1.0));
+        assert_eq!(
+            select_command(autonomous, human),
+            VescCommand::new(0.0, 1.0)
+        );
     }
 
     #[test]
@@ -781,21 +899,36 @@ mod tests {
         let now = std::time::Instant::now();
         let human = written(0.0, 0.0, now + std::time::Duration::from_millis(1));
         let autonomous = written(-0.4, 4.0, now);
-        assert_eq!(select_command(autonomous, human), VescCommand::new(-0.4, 4.0));
+        assert_eq!(
+            select_command(autonomous, human),
+            VescCommand::new(-0.4, 4.0)
+        );
     }
 
     #[test]
     fn select_command_stops_on_stale_or_unwritten_commands() {
-        let stale_at = std::time::Instant::now() - VESC_COMMAND_TIMEOUT - std::time::Duration::from_millis(10);
-        let seed = Stamped { value: VescCommand::new(0.3, 5.0), meta: WriteMeta::default() };
-        assert_eq!(select_command(written(-0.4, 4.0, stale_at), written(0.1, 1.0, stale_at)), VescCommand::default());
+        let stale_at =
+            std::time::Instant::now() - VESC_COMMAND_TIMEOUT - std::time::Duration::from_millis(10);
+        let seed = Stamped {
+            value: VescCommand::new(0.3, 5.0),
+            meta: WriteMeta::default(),
+        };
+        assert_eq!(
+            select_command(written(-0.4, 4.0, stale_at), written(0.1, 1.0, stale_at)),
+            VescCommand::default()
+        );
         assert_eq!(select_command(seed.clone(), seed), VescCommand::default());
     }
 
     #[test]
     fn advance_never_exceeds_the_steering_rate_limit_in_one_tick() {
         let model = test_model();
-        let state = VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 });
+        let state = VehicleState::Bicycle(BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 0.0,
+        });
         let dt_s = 0.01;
         let (_, next_steering) = advance(&model, state, 0.0, 10.0, 0.0, dt_s);
         assert!(next_steering <= 4.0 * dt_s + 1e-12);
@@ -804,7 +937,12 @@ mod tests {
     #[test]
     fn advance_never_exceeds_the_max_steering_angle() {
         let model = test_model();
-        let state = VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 });
+        let state = VehicleState::Bicycle(BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 0.0,
+        });
         let mut steering = 0.0;
         for _ in 0..1000 {
             let (_, next_steering) = advance(&model, state, steering, 10.0, 0.0, 0.01);
@@ -816,7 +954,12 @@ mod tests {
     #[test]
     fn advance_never_exceeds_the_accel_limit_in_one_tick() {
         let model = test_model();
-        let state = VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 });
+        let state = VehicleState::Bicycle(BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 0.0,
+        });
         let dt_s = 0.01;
         let (next_state, _) = advance(&model, state, 0.0, 0.0, 100.0, dt_s);
         assert!(next_state.speed_mps() <= 4.0 * dt_s + 1e-12);
@@ -825,7 +968,12 @@ mod tests {
     #[test]
     fn advance_never_exceeds_max_speed_even_at_a_large_dt() {
         let model = test_model();
-        let state = VehicleState::Bicycle(BicycleState { x_m: 0.0, y_m: 0.0, heading_rad: 0.0, speed_mps: 0.0 });
+        let state = VehicleState::Bicycle(BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 0.0,
+        });
         let (next_state, _) = advance(&model, state, 0.0, 0.0, 100.0, 10.0);
         assert!(next_state.speed_mps() <= 8.0 + 1e-9);
     }
@@ -868,7 +1016,12 @@ mod tests {
 
     #[test]
     fn carry_over_state_maps_speed_into_the_nonlinear_models_shared_fields() {
-        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let old = VehicleState::Bicycle(BicycleState {
+            x_m: 1.0,
+            y_m: 2.0,
+            heading_rad: 0.3,
+            speed_mps: 4.0,
+        });
         let next = carry_over_state(old, VehicleModelKind::NonlinearBicycle);
         match next {
             VehicleState::NonlinearBicycle(s) => {
@@ -903,7 +1056,12 @@ mod tests {
 
     #[test]
     fn carry_over_state_maps_speed_into_the_pacejka_models_shared_fields() {
-        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let old = VehicleState::Bicycle(BicycleState {
+            x_m: 1.0,
+            y_m: 2.0,
+            heading_rad: 0.3,
+            speed_mps: 4.0,
+        });
         let next = carry_over_state(old, VehicleModelKind::PacejkaBicycle);
         match next {
             VehicleState::PacejkaBicycle(s) => {
@@ -938,7 +1096,12 @@ mod tests {
 
     #[test]
     fn carry_over_state_maps_speed_into_the_two_track_models_shared_fields() {
-        let old = VehicleState::Bicycle(BicycleState { x_m: 1.0, y_m: 2.0, heading_rad: 0.3, speed_mps: 4.0 });
+        let old = VehicleState::Bicycle(BicycleState {
+            x_m: 1.0,
+            y_m: 2.0,
+            heading_rad: 0.3,
+            speed_mps: 4.0,
+        });
         let next = carry_over_state(old, VehicleModelKind::TwoTrack);
         match next {
             VehicleState::TwoTrack(s) => {

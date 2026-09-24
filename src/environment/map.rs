@@ -73,8 +73,14 @@ impl Map {
     pub fn load(folder: &Path) -> Result<Map, MapLoadError> {
         let info = info::read(&folder.join(INFO_FILE_NAME))?;
         let raster = tiff::read(&folder.join(MAP_TIFF_FILE_NAME))?;
-        let race_line = race_line::read(&folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME))?;
-        Ok(Map { folder: folder.to_path_buf(), info, raster, race_line })
+        let race_line =
+            race_line::read(&folder.join(RACE_LINES_DIR_NAME).join(CENTERLINE_FILE_NAME))?;
+        Ok(Map {
+            folder: folder.to_path_buf(),
+            info,
+            raster,
+            race_line,
+        })
     }
 }
 

@@ -57,9 +57,11 @@ impl Executor for WriterExecutor {
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let topic_size = self.topic_size;
-        captain.claim_writer::<TimestampedPayload>(TOPIC_NAME, self.id, move || TimestampedPayload {
-            timestamp: SystemTime::now(),
-            data: vec![0.0f32; topic_size],
+        captain.claim_writer::<TimestampedPayload>(TOPIC_NAME, self.id, move || {
+            TimestampedPayload {
+                timestamp: SystemTime::now(),
+                data: vec![0.0f32; topic_size],
+            }
         });
     }
 
@@ -152,7 +154,9 @@ impl Executor for ReaderExecutor {
 
         while captain.is_running(self.id) {
             let payload = topic.read();
-            let age = SystemTime::now().duration_since(payload.timestamp).unwrap_or_default();
+            let age = SystemTime::now()
+                .duration_since(payload.timestamp)
+                .unwrap_or_default();
 
             // Touch the payload, standing in for real consumer work.
             let sum: f32 = payload.data.iter().sum();

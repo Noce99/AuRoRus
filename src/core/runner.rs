@@ -137,7 +137,9 @@ impl Runner {
     /// `initial` is a factory rather than a bare value so
     /// [`run_until_stopped`](Self::run_until_stopped) can replay this
     /// registration against the fresh [`Captain`] a restart builds.
-    pub fn register_topic<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static>(
+    pub fn register_topic<
+        T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    >(
         &mut self,
         name: impl Into<String>,
         initial: impl Fn() -> T + Send + Sync + 'static,
@@ -145,17 +147,26 @@ impl Runner {
         let name = name.into();
         self.log(
             LogColor::Pink,
-            format!("Runner registered topic {name:?} [{}]", log::short_type_name::<T>()),
+            format!(
+                "Runner registered topic {name:?} [{}]",
+                log::short_type_name::<T>()
+            ),
         );
         self.captain.register_topic(name.clone(), initial());
-        self.registered_topics.push(Box::new(move |captain: &Captain| {
-            captain.register_topic(name.clone(), initial());
-        }));
+        self.registered_topics
+            .push(Box::new(move |captain: &Captain| {
+                captain.register_topic(name.clone(), initial());
+            }));
     }
 
     /// Looks up a previously registered topic, e.g. to read it after every
     /// executor has stopped. See [`Captain::topic`] for panic conditions.
-    pub fn topic<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static>(&self, name: &str) -> Arc<RwLockTopic<T>> {
+    pub fn topic<
+        T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    >(
+        &self,
+        name: &str,
+    ) -> Arc<RwLockTopic<T>> {
         self.captain.topic(name)
     }
 
@@ -195,10 +206,16 @@ impl Runner {
         let prepared: Vec<_> = self
             .pending
             .drain(..)
-            .map(|(id, executor)| (id, Self::prepare(&self.captain, id, executor, self.debug_frequency_hz)))
+            .map(|(id, executor)| {
+                (
+                    id,
+                    Self::prepare(&self.captain, id, executor, self.debug_frequency_hz),
+                )
+            })
             .collect();
         for (id, executor) in prepared {
-            self.running.insert(id, Self::start(&self.captain, executor));
+            self.running
+                .insert(id, Self::start(&self.captain, executor));
         }
         self.log(LogColor::Green, "all executors started");
     }
@@ -241,7 +258,10 @@ impl Runner {
     /// Waits for every currently running executor to finish, returning each one.
     /// Typically called after [`stop`](Self::stop) has signaled them all to exit.
     pub fn join_all(&mut self) -> Vec<Box<dyn Executor>> {
-        self.join_all_with_ids().into_iter().map(|(_, executor)| executor).collect()
+        self.join_all_with_ids()
+            .into_iter()
+            .map(|(_, executor)| executor)
+            .collect()
     }
 
     /// Runs every registered executor until a final [`stop`](Self::stop) -
@@ -259,7 +279,10 @@ impl Runner {
             if !self.captain.take_restart_requested() {
                 return finished.into_iter().map(|(_, executor)| executor).collect();
             }
-            self.log(LogColor::Green, "restart requested - rebuilding all executors");
+            self.log(
+                LogColor::Green,
+                "restart requested - rebuilding all executors",
+            );
 
             self.captain = Arc::new(Captain::new());
             self.captain.set_verbose(self.verbose);
@@ -313,7 +336,10 @@ impl Runner {
     }
 
     /// Starts a [`prepare`](Self::prepare)d executor running on its own thread.
-    fn start(captain: &Arc<Captain>, mut executor: Box<dyn Executor>) -> thread::JoinHandle<Box<dyn Executor>> {
+    fn start(
+        captain: &Arc<Captain>,
+        mut executor: Box<dyn Executor>,
+    ) -> thread::JoinHandle<Box<dyn Executor>> {
         let name = executor.name();
         let captain = captain.clone();
         thread::Builder::new()
@@ -559,7 +585,12 @@ mod tests {
 
         let trigger = finished
             .iter()
-            .map(|executor| executor.as_any().downcast_ref::<CountingExecutor>().unwrap())
+            .map(|executor| {
+                executor
+                    .as_any()
+                    .downcast_ref::<CountingExecutor>()
+                    .unwrap()
+            })
             .find(|executor| executor.id == trigger_id)
             .expect("trigger executor should be among the finished ones");
 
@@ -569,7 +600,12 @@ mod tests {
         assert!(trigger.finished.load(Ordering::Relaxed));
 
         assert!(finished.iter().any(|executor| {
-            executor.as_any().downcast_ref::<CountingExecutor>().unwrap().id == other_id
+            executor
+                .as_any()
+                .downcast_ref::<CountingExecutor>()
+                .unwrap()
+                .id
+                == other_id
         }));
     }
 }

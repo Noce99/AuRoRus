@@ -8,7 +8,8 @@
 use crate::Captain;
 use crate::topics::{DRAW_TOPIC_PREFIX, Drawing};
 use crate::web::draw::{
-    DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster, without_raster_pixels,
+    DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster,
+    without_raster_pixels,
 };
 use crate::web::{json_response, not_found, read_json};
 use tiny_http::{Request, ResponseBox};
@@ -33,7 +34,11 @@ pub fn layers(request: &mut Request, captain: &Captain) -> ResponseBox {
         .into_iter()
         // A `draw/` topic of another type is someone's mistake - skip it
         // rather than take the whole process down over it.
-        .filter_map(|name| captain.try_topic::<Drawing>(&name).map(|topic| (name, topic)))
+        .filter_map(|name| {
+            captain
+                .try_topic::<Drawing>(&name)
+                .map(|topic| (name, topic))
+        })
         .map(|(name, topic)| {
             let meta = topic.meta();
             let (meta, drawing) = if body.holds(epoch, &name, meta.write_count) {
@@ -48,7 +53,9 @@ pub fn layers(request: &mut Request, captain: &Captain) -> ResponseBox {
                 writer: topic.writer().map(|id| captain.name_of(id)),
                 topic: name,
                 write_count: meta.write_count,
-                age_ms: meta.written_at.map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
+                age_ms: meta
+                    .written_at
+                    .map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
                 drawing,
             }
         })

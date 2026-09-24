@@ -39,9 +39,10 @@ enum DebugCliArg {
 fn resolve_debug_output(arg: DebugCliArg) -> Option<PathBuf> {
     match arg {
         DebugCliArg::Disabled => None,
-        DebugCliArg::Generated => {
-            Some(Path::new(DEFAULT_DEBUGS_ROOT).join(aurorus::debug_format::DebugFileReader::generated_filename()))
-        }
+        DebugCliArg::Generated => Some(
+            Path::new(DEFAULT_DEBUGS_ROOT)
+                .join(aurorus::debug_format::DebugFileReader::generated_filename()),
+        ),
         DebugCliArg::Explicit(path) if path.is_dir() => {
             Some(path.join(aurorus::debug_format::DebugFileReader::generated_filename()))
         }
@@ -53,7 +54,9 @@ fn resolve_debug_output(arg: DebugCliArg) -> Option<PathBuf> {
 /// `-h`/`--help`, an unknown argument, or a flag missing its value.
 pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     let mut args = args.peekable();
-    let program = args.next().unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
+    let program = args
+        .next()
+        .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
     let usage = format!(
         "Usage: {program} [OPTIONS]\n\n\
          Options:\n  \
@@ -97,21 +100,30 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
             }
             "--debug" => {
                 debug_arg = match args.peek() {
-                    Some(next) if !next.starts_with('-') => DebugCliArg::Explicit(PathBuf::from(args.next().unwrap())),
+                    Some(next) if !next.starts_with('-') => {
+                        DebugCliArg::Explicit(PathBuf::from(args.next().unwrap()))
+                    }
                     _ => DebugCliArg::Generated,
                 };
             }
             "--debug_frequency" => {
-                let value = args.next().unwrap_or_else(|| fail(format!("Missing value for {flag}")));
-                debug_frequency_hz = value
-                    .parse()
-                    .unwrap_or_else(|_| fail(format!("Invalid numeric value for {flag}: {value:?}")));
+                let value = args
+                    .next()
+                    .unwrap_or_else(|| fail(format!("Missing value for {flag}")));
+                debug_frequency_hz = value.parse().unwrap_or_else(|_| {
+                    fail(format!("Invalid numeric value for {flag}: {value:?}"))
+                });
             }
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
 
-    Config { maps_root, config_dir, debug_output: resolve_debug_output(debug_arg), debug_frequency_hz }
+    Config {
+        maps_root,
+        config_dir,
+        debug_output: resolve_debug_output(debug_arg),
+        debug_frequency_hz,
+    }
 }
 
 #[cfg(test)]
@@ -134,7 +146,9 @@ mod tests {
     #[test]
     fn debug_with_no_path_resolves_under_the_default_debugs_root() {
         let config = args(&["--debug"]);
-        let path = config.debug_output.expect("--debug with no path should still enable recording");
+        let path = config
+            .debug_output
+            .expect("--debug with no path should still enable recording");
         assert_eq!(path.parent(), Some(Path::new(DEFAULT_DEBUGS_ROOT)));
         assert!(path.extension().is_some_and(|ext| ext == "debug"));
     }
@@ -142,17 +156,22 @@ mod tests {
     #[test]
     fn debug_followed_by_another_flag_is_treated_as_no_path() {
         let config = args(&["--debug", "--debug_frequency", "30"]);
-        let path = config.debug_output.expect("--debug should still enable recording");
+        let path = config
+            .debug_output
+            .expect("--debug should still enable recording");
         assert_eq!(path.parent(), Some(Path::new(DEFAULT_DEBUGS_ROOT)));
         assert_eq!(config.debug_frequency_hz, 30.0);
     }
 
     #[test]
     fn debug_with_an_existing_directory_gets_a_generated_name_inside_it() {
-        let dir = std::env::temp_dir().join(format!("aurorus_cli_tests_dir_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("aurorus_cli_tests_dir_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let config = args(&["--debug", dir.to_str().unwrap()]);
-        let path = config.debug_output.expect("--debug with a directory path should still enable recording");
+        let path = config
+            .debug_output
+            .expect("--debug with a directory path should still enable recording");
         assert_eq!(path.parent(), Some(dir.as_path()));
         assert!(path.extension().is_some_and(|ext| ext == "debug"));
     }

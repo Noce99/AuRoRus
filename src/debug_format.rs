@@ -92,7 +92,13 @@ fn write_f64(w: &mut impl Write, v: f64) -> io::Result<()> {
 }
 fn write_str16(w: &mut impl Write, s: &str) -> io::Result<()> {
     let bytes = s.as_bytes();
-    write_u16(w, bytes.len().try_into().map_err(|_| io_err("string longer than 65535 bytes"))?)?;
+    write_u16(
+        w,
+        bytes
+            .len()
+            .try_into()
+            .map_err(|_| io_err("string longer than 65535 bytes"))?,
+    )?;
     w.write_all(bytes)
 }
 
@@ -174,31 +180,33 @@ fn scan(path: &Path) -> io::Result<Scanned> {
             Ok(_) => {}
         }
 
-        let record: io::Result<u64> = (|| {
-            match tag_buf[0] {
-                TAG_TOPIC_DEF => {
-                    let topic_id = read_u16(&mut reader)?;
-                    let name = read_str16(&mut reader)?;
-                    let writer_name = read_str16(&mut reader)?;
-                    if topic_id as usize != topics.len() {
-                        return Err(io_err("topic ids are not sequential in this debug file"));
-                    }
-                    let len = 1 + 2 + 2 + name.len() + 2 + writer_name.len();
-                    topics.push(TopicMeta { name, writer_name });
-                    Ok(len as u64)
+        let record: io::Result<u64> = (|| match tag_buf[0] {
+            TAG_TOPIC_DEF => {
+                let topic_id = read_u16(&mut reader)?;
+                let name = read_str16(&mut reader)?;
+                let writer_name = read_str16(&mut reader)?;
+                if topic_id as usize != topics.len() {
+                    return Err(io_err("topic ids are not sequential in this debug file"));
                 }
-                TAG_SAMPLE => {
-                    let topic_id = read_u16(&mut reader)?;
-                    let timestamp_us = read_u64(&mut reader)?;
-                    let payload_len = read_u32(&mut reader)?;
-                    let mut payload = vec![0u8; payload_len as usize];
-                    reader.read_exact(&mut payload)?;
-                    let len = 1 + 2 + 8 + 4 + payload.len();
-                    samples.push(Sample { topic_id, timestamp_us, payload });
-                    Ok(len as u64)
-                }
-                other => Err(io_err(format!("unknown record tag {other:#04x}"))),
+                let len = 1 + 2 + 2 + name.len() + 2 + writer_name.len();
+                topics.push(TopicMeta { name, writer_name });
+                Ok(len as u64)
             }
+            TAG_SAMPLE => {
+                let topic_id = read_u16(&mut reader)?;
+                let timestamp_us = read_u64(&mut reader)?;
+                let payload_len = read_u32(&mut reader)?;
+                let mut payload = vec![0u8; payload_len as usize];
+                reader.read_exact(&mut payload)?;
+                let len = 1 + 2 + 8 + 4 + payload.len();
+                samples.push(Sample {
+                    topic_id,
+                    timestamp_us,
+                    payload,
+                });
+                Ok(len as u64)
+            }
+            other => Err(io_err(format!("unknown record tag {other:#04x}"))),
         })();
 
         match record {
@@ -207,7 +215,13 @@ fn scan(path: &Path) -> io::Result<Scanned> {
         }
     }
 
-    Ok(Scanned { frequency_hz, session_start_unix_micros, topics, samples, valid_len })
+    Ok(Scanned {
+        frequency_hz,
+        session_start_unix_micros,
+        topics,
+        samples,
+        valid_len,
+    })
 }
 
 /// Writes a fresh `.debug` session: the header immediately, then `TopicDef`/`Sample`
@@ -231,8 +245,10 @@ impl DebugFileWriter {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let session_start_unix_micros =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros();
+        let session_start_unix_micros = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros();
         let mut file = BufWriter::new(File::create(path)?);
         file.write_all(&MAGIC)?;
         write_u8(&mut file, FORMAT_VERSION)?;
@@ -292,8 +308,10 @@ impl DebugFileWriter {
             return Ok(id);
         }
         let id = self.next_topic_id;
-        self.next_topic_id =
-            self.next_topic_id.checked_add(1).ok_or_else(|| io_err("exceeded u16::MAX topics"))?;
+        self.next_topic_id = self
+            .next_topic_id
+            .checked_add(1)
+            .ok_or_else(|| io_err("exceeded u16::MAX topics"))?;
 
         write_u8(&mut self.file, TAG_TOPIC_DEF)?;
         write_u16(&mut self.file, id)?;
@@ -305,11 +323,22 @@ impl DebugFileWriter {
         Ok(id)
     }
 
-    pub fn write_sample(&mut self, topic_id: u16, timestamp_us: u64, payload: &[u8]) -> io::Result<()> {
+    pub fn write_sample(
+        &mut self,
+        topic_id: u16,
+        timestamp_us: u64,
+        payload: &[u8],
+    ) -> io::Result<()> {
         write_u8(&mut self.file, TAG_SAMPLE)?;
         write_u16(&mut self.file, topic_id)?;
         write_u64(&mut self.file, timestamp_us)?;
-        write_u32(&mut self.file, payload.len().try_into().map_err(|_| io_err("payload larger than 4 GiB"))?)?;
+        write_u32(
+            &mut self.file,
+            payload
+                .len()
+                .try_into()
+                .map_err(|_| io_err("payload larger than 4 GiB"))?,
+        )?;
         self.file.write_all(payload)?;
         self.records_since_flush += 1;
         Ok(())
@@ -319,7 +348,9 @@ impl DebugFileWriter {
     /// since the last flush, whichever comes first - cheap to call once per tick;
     /// a no-op most ticks. Bounds how much a hard kill (no clean Ctrl+C) can lose.
     pub fn maybe_flush(&mut self) -> io::Result<()> {
-        if self.records_since_flush >= FLUSH_EVERY_RECORDS || self.last_flush.elapsed() >= FLUSH_EVERY {
+        if self.records_since_flush >= FLUSH_EVERY_RECORDS
+            || self.last_flush.elapsed() >= FLUSH_EVERY
+        {
             self.flush()?;
         }
         Ok(())
@@ -382,7 +413,8 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("aurorus_debug_format_tests_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("aurorus_debug_format_tests_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
     }
@@ -391,9 +423,16 @@ mod tests {
     fn round_trips_topics_and_samples() {
         let path = temp_path("round_trip.debug");
         let mut writer = DebugFileWriter::create(&path, 100.0).unwrap();
-        let id_a = writer.topic_id("vehicle_status", "SimulatedVehicle").unwrap();
+        let id_a = writer
+            .topic_id("vehicle_status", "SimulatedVehicle")
+            .unwrap();
         let id_b = writer.topic_id("map", "MapServer").unwrap();
-        assert_eq!(writer.topic_id("vehicle_status", "SimulatedVehicle").unwrap(), id_a);
+        assert_eq!(
+            writer
+                .topic_id("vehicle_status", "SimulatedVehicle")
+                .unwrap(),
+            id_a
+        );
         writer.write_sample(id_a, 0, &[1, 2, 3]).unwrap();
         writer.write_sample(id_b, 10_000, &[4, 5]).unwrap();
         writer.write_sample(id_a, 20_000, &[9]).unwrap();

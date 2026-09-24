@@ -35,7 +35,10 @@ impl std::fmt::Display for LoopConstructionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::VoronoiBuildFailed => {
-                write!(f, "failed to build a Voronoi diagram from the sampled sites")
+                write!(
+                    f,
+                    "failed to build a Voronoi diagram from the sampled sites"
+                )
             }
             Self::InsufficientArea { covered_fraction } => write!(
                 f,
@@ -131,7 +134,9 @@ fn select_region(
     }
 
     if cell_area.is_empty() {
-        return Err(LoopConstructionError::InsufficientArea { covered_fraction: 0.0 });
+        return Err(LoopConstructionError::InsufficientArea {
+            covered_fraction: 0.0,
+        });
     }
 
     let start_site = voronoi
@@ -247,7 +252,11 @@ fn order_loop(boundary: &HashSet<(usize, usize)>) -> Result<Vec<usize>, LoopCons
     loop {
         order.push(current);
         let neighbors = &adjacency[&current];
-        let next = if neighbors[0] != prev { neighbors[0] } else { neighbors[1] };
+        let next = if neighbors[0] != prev {
+            neighbors[0]
+        } else {
+            neighbors[1]
+        };
         if next == start {
             break;
         }
@@ -310,15 +319,22 @@ mod tests {
     fn build_loop_produces_a_simple_polygon_across_several_seeds() {
         for seed in 0u64..10 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let sites = crate::environment::simulator::points::sample(&mut rng, 40, 40.0, 40.0, 2.5);
+            let sites =
+                crate::environment::simulator::points::sample(&mut rng, 40, 40.0, 40.0, 2.5);
             let Ok(sites) = sites else { continue };
 
             match build_loop(sites, 40.0, 40.0, 0.35) {
                 Ok(loop_points) => {
                     assert!(loop_points.len() >= 3, "seed {seed}: loop too short");
-                    assert!(is_simple_polygon(&loop_points), "seed {seed}: loop self-intersects");
+                    assert!(
+                        is_simple_polygon(&loop_points),
+                        "seed {seed}: loop self-intersects"
+                    );
                     for p in &loop_points {
-                        assert!(p.x.abs() < 20.0 && p.y.abs() < 20.0, "seed {seed}: point outside area");
+                        assert!(
+                            p.x.abs() < 20.0 && p.y.abs() < 20.0,
+                            "seed {seed}: point outside area"
+                        );
                     }
                 }
                 Err(_) => continue, // expected to fail occasionally; retried by caller with a new seed

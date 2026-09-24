@@ -12,7 +12,11 @@ use serde::de::DeserializeOwned;
 /// Generic over the payload type, with `values` pulling the `f32`s out of it, so
 /// both benchmarks can share this despite publishing different payload shapes
 /// (a bare `Vec<f32>` vs. one carrying a timestamp alongside it).
-pub fn verify_consistency<T>(runner: &Runner, topic_name: &str, values: impl Fn(&T) -> &[f32]) -> bool
+pub fn verify_consistency<T>(
+    runner: &Runner,
+    topic_name: &str,
+    values: impl Fn(&T) -> &[f32],
+) -> bool
 where
     T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static,
 {
