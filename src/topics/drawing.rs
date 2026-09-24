@@ -77,6 +77,7 @@ impl Color {
     pub const BLUE: Self = Self::rgb(0x3b, 0x8e, 0xff);
     pub const WHITE: Self = Self::rgb(0xff, 0xff, 0xff);
     pub const BLACK: Self = Self::rgb(0x10, 0x14, 0x18);
+    pub const PURPLE: Self = Self::rgb(0x80, 0x00, 0xff);
 
     /// A fully opaque color.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
@@ -126,6 +127,14 @@ pub enum Shape {
     Polyline { points: Vec<[f32; 2]>, closed: bool, width_px: f32, color: Color },
     /// A circle, filled or outlined.
     Circle { x_m: f64, y_m: f64, radius_m: f64, filled: bool, color: Color },
+    /// An arc of the circle centered on (`x_m`, `y_m`), outlined from
+    /// direction `start_rad` counterclockwise (increasing angle) to
+    /// `end_rad`. A span of `2 * pi` or more draws the full circle.
+    CircularArc { x_m: f64, y_m: f64, radius_m: f64, start_rad: f64, end_rad: f64, width_px: f32, color: Color },
+    /// A circular sector ("pie slice"): the region bounded by the two radii
+    /// at `start_rad` and `end_rad` and the [`Shape::CircularArc`] between
+    /// them, with the same conventions - filled or outlined.
+    CircularSector { x_m: f64, y_m: f64, radius_m: f64, start_rad: f64, end_rad: f64, filled: bool, color: Color },
     /// A rectangle centered on (`x_m`, `y_m`), `length_m` along
     /// `heading_rad` and `width_m` across it, filled or outlined. A square
     /// is one with equal sides.
@@ -177,6 +186,24 @@ mod tests {
             Shape::Points { points: vec![[1.0, 2.0]], radius_px: 2.5, color: Color::RED },
             Shape::Polyline { points: vec![[0.0, 0.0], [1.0, 1.0]], closed: true, width_px: 2.0, color: Color::BLUE },
             Shape::Circle { x_m: 0.0, y_m: 0.0, radius_m: 1.0, filled: false, color: Color::GREEN },
+            Shape::CircularArc {
+                x_m: 0.0,
+                y_m: 0.0,
+                radius_m: 1.0,
+                start_rad: -0.5,
+                end_rad: 0.5,
+                width_px: 2.0,
+                color: Color::GREEN,
+            },
+            Shape::CircularSector {
+                x_m: 0.0,
+                y_m: 0.0,
+                radius_m: 1.0,
+                start_rad: -0.5,
+                end_rad: 0.5,
+                filled: true,
+                color: Color::GREEN.with_alpha(64),
+            },
             Shape::Rect { x_m: 0.0, y_m: 0.0, length_m: 1.0, width_m: 1.0, heading_rad: 0.0, filled: true, color: Color::WHITE },
             Shape::Text { x_m: 0.0, y_m: 0.0, text: "hi".into(), size_px: 12.0, color: Color::BLACK.with_alpha(128) },
             Shape::Raster {

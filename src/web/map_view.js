@@ -231,6 +231,31 @@ window.MapView = (() => {
       }
     },
 
+    circular_arc(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      ctx.strokeStyle = cssColor(s.color);
+      ctx.lineWidth = s.width_px * dpr();
+      ctx.beginPath();
+      ctx.arc(x, y, s.radius_m * scalePxPerMeter(), s.start_rad, s.end_rad);
+      ctx.stroke();
+    },
+
+    circular_sector(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, s.radius_m * scalePxPerMeter(), s.start_rad, s.end_rad);
+      ctx.closePath();
+      if (s.filled) {
+        ctx.fillStyle = cssColor(s.color);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = cssColor(s.color);
+        ctx.lineWidth = 1.5 * dpr();
+        ctx.stroke();
+      }
+    },
+
     rect(s) {
       const { x, y } = worldToScreen(s.x_m, s.y_m);
       const scale = scalePxPerMeter();
