@@ -27,7 +27,9 @@
   color: #9aa4b2;
 }
 
-#vehicle-model-description {
+#vehicle-model-description,
+#algorithm-description,
+#algorithm-status {
   margin: 0;
   font-size: 13px;
   color: #9aa4b2;
@@ -89,6 +91,10 @@
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+#algorithm-status.stale {
+  color: #f59e0b;
 }
 
 .placeholder-text {

@@ -1,10 +1,11 @@
 //! [`WebGui`]: an [`Executor`] that serves a local web UI for browsing and
 //! generating maps, for driving the vehicle - WASD control and a live map -
-//! and for picking which vehicle physics model is running, on
-//! [`WebGuiConfig::bind_addr`]. Claims the writer slot for
-//! `human_vesc_command`, `map_selection`, `vehicle_model_selection`, and
-//! `place_at_start` (see [`live_api`]); reads `map` and
-//! `vehicle_model_status` to reflect the current selections.
+//! and for picking which vehicle physics model and autonomous algorithm are
+//! running, on [`WebGuiConfig::bind_addr`]. Claims the writer slot for
+//! `human_vesc_command`, `map_selection`, `vehicle_model_selection`,
+//! `autonomous_algorithm_selection`, and `place_at_start` (see
+//! [`live_api`]); reads `map`, `vehicle_model_status`, and
+//! `autonomous_algorithm_status` to reflect the current selections.
 //!
 //! Everything on the map canvas comes from drawing topics (see
 //! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
@@ -21,7 +22,7 @@ mod maps_api;
 mod topics_api;
 
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AutonomousAlgorithmSelection, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
@@ -88,6 +89,11 @@ impl Executor for WebGui {
         captain.claim_writer::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME, self.id, VescCommand::default);
         captain.claim_writer::<MapSelection>(MAP_SELECTION_TOPIC_NAME, self.id, MapSelection::default);
         captain.claim_writer::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME, self.id, VehicleModelSelection::default);
+        captain.claim_writer::<AutonomousAlgorithmSelection>(
+            AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,
+            self.id,
+            AutonomousAlgorithmSelection::default,
+        );
         captain.claim_writer::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME, self.id, PlaceAtStart::default);
     }
 

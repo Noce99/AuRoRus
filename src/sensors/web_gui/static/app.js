@@ -189,6 +189,93 @@ async function pollVehicleModel() {
 }
 
 // ---------------------------------------------------------------------
+// Autonomous algorithm selection - the list of algorithms comes entirely
+// from the `autonomous_algorithm_status` topic, so a new algorithm shows up
+// here without this page knowing anything about it.
+// ---------------------------------------------------------------------
+
+const algorithmSelectEl = document.getElementById("algorithm-select");
+const algorithmDescriptionEl = document.getElementById("algorithm-description");
+const algorithmStatusEl = document.getElementById("algorithm-status");
+
+/** `<select>` value standing for "no algorithm" (`name: null` server-side). */
+const NO_ALGORITHM = "";
+
+/** Algorithm the `autonomous_algorithm_status` topic last reported active
+ *  (`NO_ALGORITHM` for none), or null before the first poll - tracked
+ *  separately from the `<select>`'s own value for the same reason as
+ *  `liveVehicleModelKind`. */
+let liveAlgorithm = null;
+
+/** `{name, label, description}` of every algorithm last reported available. */
+let algorithmOptions = [];
+
+async function selectAlgorithm(value) {
+  await fetchJSON("/api/autonomous_algorithm_selection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: value === NO_ALGORITHM ? null : value }),
+  });
+}
+
+function updateAlgorithmDescription(value) {
+  const option = algorithmOptions.find((o) => o.name === value);
+  algorithmDescriptionEl.textContent = option ? option.description : "Human driving only (WASD).";
+}
+
+/** Rebuilds the `<option>`s, but only when the available algorithms actually
+ *  changed - rebuilding on every poll would close the dropdown while open. */
+function syncAlgorithmOptions(available) {
+  if (JSON.stringify(available) === JSON.stringify(algorithmOptions)) return;
+  algorithmOptions = available;
+  algorithmSelectEl.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = NO_ALGORITHM;
+  none.textContent = "None (manual)";
+  algorithmSelectEl.appendChild(none);
+  for (const option of available) {
+    const el = document.createElement("option");
+    el.value = option.name;
+    el.textContent = option.label;
+    algorithmSelectEl.appendChild(el);
+  }
+  // Force the next check in `pollAlgorithms` to re-apply the live value.
+  liveAlgorithm = null;
+}
+
+algorithmSelectEl.addEventListener("change", () => {
+  liveAlgorithm = algorithmSelectEl.value; // optimistic; pollAlgorithms confirms it
+  updateAlgorithmDescription(algorithmSelectEl.value);
+  selectAlgorithm(algorithmSelectEl.value).catch((err) => console.error(err));
+});
+
+// Polls the `autonomous_algorithm_status` topic (via
+// `/api/autonomous_algorithms`): the available algorithms, the one in
+// control (this tab's pick, or another client's), and whether its command
+// is fresh.
+async function pollAlgorithms() {
+  const status = (await fetchJSON("/api/autonomous_algorithms")).value;
+  syncAlgorithmOptions(status.available);
+
+  const active = status.active ?? NO_ALGORITHM;
+  if (active !== liveAlgorithm || algorithmSelectEl.value !== active) {
+    liveAlgorithm = active;
+    algorithmSelectEl.value = active;
+    updateAlgorithmDescription(active);
+  }
+
+  const stale = active !== NO_ALGORITHM && !status.command_fresh;
+  algorithmStatusEl.classList.toggle("stale", stale);
+  if (active === NO_ALGORITHM) {
+    algorithmStatusEl.textContent = "No algorithm in control.";
+  } else if (stale) {
+    algorithmStatusEl.textContent = "No recent command from this algorithm - vehicle held stopped.";
+  } else {
+    algorithmStatusEl.textContent = "In control. Any WASD key overrides it.";
+  }
+}
+
+// ---------------------------------------------------------------------
 // Topics panel - inspects any registered topic, generically: the list
 // comes from `/api/topics`, the picked topic's value from `/api/topic`.
 // ---------------------------------------------------------------------
@@ -542,7 +629,8 @@ fetchJSON("/api/config")
   })
   .catch((err) => console.error(err));
 
-/** How often the current map and vehicle model selections are re-read, to
+/** How often the current map, vehicle model, and autonomous algorithm
+ *  selections are re-read, to
  *  reflect changes made from another tab. */
 const SELECTION_POLL_MS = 500;
 
@@ -550,6 +638,7 @@ const drawPoller = startPolling(drawLayers.poll, 1000 / drawRateHz);
 const topicPoller = startPolling(pollSelectedTopic, 1000 / DEFAULT_TOPIC_RATE_HZ);
 startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollVehicleModel, SELECTION_POLL_MS);
+startPolling(pollAlgorithms, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

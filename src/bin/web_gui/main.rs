@@ -1,6 +1,7 @@
 use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
+use aurorus::autonomous_control::{self, AutonomousControlsHandler};
 use aurorus::sensors::{MapServer, MapServerConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig};
-use aurorus::topics::{VESC_COMMAND_TOPIC_NAME, VehicleModelKind, VescCommand};
+use aurorus::topics::VehicleModelKind;
 use aurorus::{Executor, Runner};
 
 mod cli;
@@ -20,10 +21,6 @@ fn main() {
     let mut runner = Runner::new();
     runner.activate_verbose();
 
-    // No autonomous controller publishes vesc_command yet - pre-seed it so
-    // SimulatedVehicle can read it without a writer ever having claimed it.
-    runner.register_topic(VESC_COMMAND_TOPIC_NAME, VescCommand::default);
-
     runner.add_executor(WebGui::new("WebGui", config.maps_root, web_gui_config).boxed());
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
     runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
@@ -35,6 +32,11 @@ fn main() {
         )
         .boxed(),
     );
+    runner.add_executor(AutonomousControlsHandler::new("AutonomousControlsHandler").boxed());
+    // Every file in src/autonomous_control/ - see `autonomous_control`'s docs.
+    for algorithm in autonomous_control::all() {
+        runner.add_executor(algorithm);
+    }
 
     let mut runner = match &config.debug_output {
         Some(path) => {

@@ -1,19 +1,30 @@
 //! The [`VescCommand`] topic: a desired steering/speed setpoint for the
 //! vehicle's actuators, published on two separate topics -
-//! [`VESC_COMMAND_TOPIC_NAME`] (an autonomous controller, not implemented
-//! yet) and [`HUMAN_VESC_COMMAND_TOPIC_NAME`] (a human driver, e.g.
-//! `web_gui`'s WASD control) - both sharing this same shape so any consumer
-//! reads them identically.
+//! [`AUTONOMOUS_VESC_COMMAND_TOPIC_NAME`] (whichever autonomous algorithm is
+//! currently selected, forwarded by
+//! [`crate::autonomous_control::AutonomousControlsHandler`]) and
+//! [`HUMAN_VESC_COMMAND_TOPIC_NAME`] (a human driver, e.g. `web_gui`'s WASD
+//! control) - both sharing this same shape so any consumer reads them
+//! identically. Every autonomous algorithm's own output (see
+//! [`crate::topics::AUTONOMOUS_CONTROL_TOPIC_PREFIX`]) has this shape too.
 
-/// Name of the topic an autonomous controller publishes its desired
-/// steering/speed setpoint on. Nothing writes this yet - see
-/// [`crate::actuators::SimulatedVehicle`], which reads it alongside
-/// [`HUMAN_VESC_COMMAND_TOPIC_NAME`] and acts on whichever was written more
-/// recently (by each topic's [`crate::WriteMeta::written_at`]).
-pub const VESC_COMMAND_TOPIC_NAME: &str = "vesc_command";
+use std::time::Duration;
+
+/// Name of the topic [`crate::autonomous_control::AutonomousControlsHandler`]
+/// publishes the selected autonomous algorithm's setpoint on - the only
+/// autonomous command [`crate::actuators::SimulatedVehicle`] ever acts on. It
+/// reads it alongside [`HUMAN_VESC_COMMAND_TOPIC_NAME`], and the human one
+/// always overrides it while any control is held.
+pub const AUTONOMOUS_VESC_COMMAND_TOPIC_NAME: &str = "autonomous_vesc_command";
 /// Name of the topic a human driver's desired steering/speed setpoint is
 /// published on, e.g. by `web_gui`'s WASD control.
 pub const HUMAN_VESC_COMMAND_TOPIC_NAME: &str = "human_vesc_command";
+
+/// How old a [`VescCommand`] may get before its consumer stops trusting it
+/// and falls back to a stationary, centered command - so a writer that
+/// crashed, stalled, or simply stopped publishing never leaves its last
+/// setpoint (e.g. full throttle) latched.
+pub const VESC_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// A desired steering/speed setpoint for the vehicle's actuators: how far
 /// over the front wheel should point, and how fast the vehicle should be
@@ -48,7 +59,7 @@ impl VescCommand {
 
 impl Default for VescCommand {
     /// A stationary, centered command - used to pre-seed a
-    /// `vesc_command`/`human_vesc_command` topic before its writer (if any)
+    /// `autonomous_vesc_command`/`human_vesc_command` topic before its writer (if any)
     /// has published its first real value.
     fn default() -> Self {
         Self::new(0.0, 0.0)

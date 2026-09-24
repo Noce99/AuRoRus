@@ -1,8 +1,10 @@
-//! The live, topic-backed control API: which map and vehicle model are
-//! currently selected (the `map` and `vehicle_model_status` topics), and the
-//! write endpoints a driver uses to steer the vehicle, pick its map and
-//! model, and place it at the start line (`map_selection`,
-//! `human_vesc_command`, `vehicle_model_selection`, `place_at_start`) - as
+//! The live, topic-backed control API: which map, vehicle model, and
+//! autonomous algorithm are currently selected (the `map`,
+//! `vehicle_model_status`, and `autonomous_algorithm_status` topics), and the
+//! write endpoints a driver uses to steer the vehicle, pick its map, model,
+//! and autonomous algorithm, and place it at the start line
+//! (`map_selection`, `human_vesc_command`, `vehicle_model_selection`,
+//! `autonomous_algorithm_selection`, `place_at_start`) - as
 //! opposed to [`super::maps_api`], which lists/generates map folders on
 //! disk, and [`super::draw_api`], which serves what's drawn on the map.
 
@@ -10,7 +12,8 @@ use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
 use crate::web::{bad_request, json_response, read_json};
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AutonomousAlgorithmSelection,
+    AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
     PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
     VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
@@ -192,6 +195,52 @@ pub fn select_vehicle_model(request: &mut Request, captain: &Captain, writer_id:
         .topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME)
         .write(writer_id, VehicleModelSelection { kind })
         .expect("lost writer authorization for the vehicle_model_selection topic");
+    json_response(&(), 200)
+}
+
+/// `GET /api/autonomous_algorithms` - every autonomous algorithm found, the
+/// one in control, and whether its command is fresh, read from the
+/// `autonomous_algorithm_status` topic, as a [`StampedBody`]. Empty if
+/// nothing publishes that topic.
+pub fn autonomous_algorithms(captain: &Captain) -> ResponseBox {
+    match captain.try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME) {
+        Some(topic) => {
+            let status = topic.read();
+            stamped_json(&status.value, status.meta)
+        }
+        None => stamped_json(&AutonomousAlgorithmStatus::default(), WriteMeta::default()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SelectAutonomousAlgorithmBody {
+    name: Option<String>,
+}
+
+/// `POST /api/autonomous_algorithm_selection` - body `{"name": "..."}`, or
+/// `{"name": null}` for none - writes the wanted algorithm to
+/// `autonomous_algorithm_selection`, for
+/// [`crate::autonomous_control::AutonomousControlsHandler`] to pick up.
+/// Rejects a name the handler hasn't listed as available.
+pub fn select_autonomous_algorithm(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+    let body: SelectAutonomousAlgorithmBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+
+    if let Some(name) = &body.name {
+        let known = captain
+            .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
+            .is_some_and(|topic| topic.read().available.iter().any(|algorithm| &algorithm.name == name));
+        if !known {
+            return bad_request(&format!("unknown autonomous algorithm: {name:?}"));
+        }
+    }
+
+    captain
+        .topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
+        .write(writer_id, AutonomousAlgorithmSelection { name: body.name })
+        .expect("lost writer authorization for the autonomous_algorithm_selection topic");
     json_response(&(), 200)
 }
 

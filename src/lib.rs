@@ -26,6 +26,7 @@ pub use core::{Captain, Executor, Runner, RwLockTopic, Stamped, StopHandle, Swit
 
 pub mod actuators;
 pub mod algorithms;
+pub mod autonomous_control;
 pub mod config;
 pub mod debug_format;
 pub mod environment;

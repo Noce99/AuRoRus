@@ -3,7 +3,10 @@
 
 use crate::core::log::LogColor;
 use crate::core::topic::{RwLockTopic, WriteMeta};
-use crate::topics::{DRAW_TOPIC_PREFIX, Drawing};
+use crate::topics::{
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
+    AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, DRAW_TOPIC_PREFIX, Drawing, VescCommand,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
@@ -295,6 +298,43 @@ impl Captain {
     /// [`topic`](Self::topic), if it wasn't.
     pub fn drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
         self.topic::<Drawing>(&self.drawing_topic_name(executor_id))
+    }
+
+    /// Claims `executor_id`'s own autonomous command topic -
+    /// [`AUTONOMOUS_CONTROL_TOPIC_PREFIX`] followed by the executor's name, e.g.
+    /// `autonomous_control/always_left` - seeded with a stationary, centered command, plus its
+    /// [`AutonomousAlgorithmInfo`] topic ([`AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX`] followed by the
+    /// same name), written with `info` right away since it never changes. What makes an executor an
+    /// autonomous algorithm that [`crate::autonomous_control::AutonomousControlsHandler`] can pick -
+    /// see [`crate::autonomous_control`]. Call it from [`crate::Executor::claim_writing_topics`],
+    /// then get the command topic back in [`crate::Executor::run`] via
+    /// [`autonomous_control`](Self::autonomous_control).
+    pub fn claim_autonomous_control(&self, executor_id: u8, info: AutonomousAlgorithmInfo) -> Arc<RwLockTopic<VescCommand>> {
+        let name = self.name_of(executor_id);
+        let info_topic = self.claim_writer::<AutonomousAlgorithmInfo>(
+            &format!("{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{name}"),
+            executor_id,
+            AutonomousAlgorithmInfo::default,
+        );
+        info_topic
+            .write(executor_id, info)
+            .expect("claim_writer just made this executor the info topic's writer");
+        self.claim_writer::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"), executor_id, VescCommand::default)
+    }
+
+    /// `executor_id`'s own autonomous command topic, previously claimed via
+    /// [`claim_autonomous_control`](Self::claim_autonomous_control). Terminates the program, like
+    /// [`topic`](Self::topic), if it wasn't.
+    pub fn autonomous_control(&self, executor_id: u8) -> Arc<RwLockTopic<VescCommand>> {
+        self.topic::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{}", self.name_of(executor_id)))
+    }
+
+    /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
+    /// selected to drive - for a computationally heavy algorithm to idle while it isn't. `false` if
+    /// nothing publishes a selection at all.
+    pub fn is_selected_algorithm(&self, name: &str) -> bool {
+        self.try_topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
+            .is_some_and(|topic| topic.read().name.as_deref() == Some(name))
     }
 
     /// Looks up `name`, or registers it - seeded by calling `initial` - the first

@@ -1,7 +1,9 @@
 //! [`SimulatedVehicle`]: runs a vehicle model forward in time under
-//! whichever of [`VESC_COMMAND_TOPIC_NAME`]/[`HUMAN_VESC_COMMAND_TOPIC_NAME`]
-//! was published most recently, publishing the result on
-//! [`VEHICLE_STATUS_TOPIC_NAME`]. Also watches
+//! [`AUTONOMOUS_VESC_COMMAND_TOPIC_NAME`], overridden by
+//! [`HUMAN_VESC_COMMAND_TOPIC_NAME`] whenever a human is driving (see
+//! [`select_command`]), publishing the result on
+//! [`VEHICLE_STATUS_TOPIC_NAME`] and its actuator limits on
+//! [`VEHICLE_LIMITS_TOPIC_NAME`]. Also watches
 //! [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a live model switch (e.g. from
 //! `web_gui`), publishing the currently running model on
 //! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`], and draws the vehicle on its own
@@ -12,57 +14,15 @@ use crate::environment::simulator::vehicle::{
     PacejkaBicycleState, PacejkaTireParams, TwoTrackParams, TwoTrackState, dynamic_step, nonlinear_step,
     pacejka_step, step as bicycle_step, two_track_step,
 };
+pub use crate::topics::ActuatorLimits;
 use crate::topics::{
-    Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME, Shape, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, StartState,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME, Shape, PLACE_AT_START_TOPIC_NAME,
+    PlaceAtStart, START_STATE_TOPIC_NAME, StartState, VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
-
-/// The physical limits a [`VehicleModel`]'s simulated actuators can't
-/// exceed, no matter how far the current state is from the desired
-/// setpoint - [`SimulatedVehicle`] approaches the setpoint as fast as these
-/// allow, every tick.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
-pub struct ActuatorLimits {
-    /// Largest front-wheel steering angle the servo can hold, in either
-    /// direction, in radians.
-    pub max_steering_angle_rad: f64,
-    /// Fastest the steering angle can change, in radians/second.
-    pub max_steering_rate_rad_s: f64,
-    /// Largest speed the vehicle can be commanded to, in either direction
-    /// (i.e. this also bounds reverse), in meters/second.
-    pub max_speed_mps: f64,
-    /// Largest forward acceleration the motor can produce, in
-    /// meters/second^2.
-    pub max_accel_mps2: f64,
-    /// Largest deceleration (braking) the motor can produce, in
-    /// meters/second^2.
-    pub max_decel_mps2: f64,
-}
-
-impl ActuatorLimits {
-    /// Basic sanity checks on the limit values.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.max_steering_angle_rad <= 0.0 {
-            return Err("max_steering_angle_rad must be positive".to_string());
-        }
-        if self.max_steering_rate_rad_s <= 0.0 {
-            return Err("max_steering_rate_rad_s must be positive".to_string());
-        }
-        if self.max_speed_mps <= 0.0 {
-            return Err("max_speed_mps must be positive".to_string());
-        }
-        if self.max_accel_mps2 <= 0.0 {
-            return Err("max_accel_mps2 must be positive".to_string());
-        }
-        if self.max_decel_mps2 <= 0.0 {
-            return Err("max_decel_mps2 must be positive".to_string());
-        }
-        Ok(())
-    }
-}
 
 /// Which vehicle model [`SimulatedVehicle`] should run, and the geometry and
 /// actuator limits it needs to do so. A plain `enum` (rather than a trait)
@@ -385,12 +345,6 @@ fn advance(
     (next_state, next_steering_rad)
 }
 
-/// Picks whichever of an autonomous and a human command was written more
-/// recently, by each topic's [`crate::WriteMeta::written_at`] - a topic still
-/// holding its seed (never written) always loses to one that was, and `human`
-/// wins ties. With no autonomous controller implemented yet,
-/// [`VESC_COMMAND_TOPIC_NAME`] is never written, so this always resolves to
-/// `human` in practice today.
 /// Body size [`SimulatedVehicle`] draws the vehicle at - roughly a 1/10-scale
 /// RC car, matching the models' default geometry.
 const DRAWN_BODY_LENGTH_M: f64 = 0.45;
@@ -430,13 +384,32 @@ fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) 
     .z_index(10)
 }
 
-fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>) -> VescCommand {
-    if human.meta.written_at >= autonomous.meta.written_at { human.value } else { autonomous.value }
+/// Whether `command` was written, and recently enough to act on - see
+/// [`VESC_COMMAND_TIMEOUT`].
+fn is_fresh(command: &Stamped<VescCommand>) -> bool {
+    command.age().is_some_and(|age| age <= VESC_COMMAND_TIMEOUT)
 }
 
-/// Runs `model` forward in time at [`SimulatedVehicleConfig::tick_rate_hz`], reading the freshest of
-/// [`VESC_COMMAND_TOPIC_NAME`]/[`HUMAN_VESC_COMMAND_TOPIC_NAME`] each tick
-/// and publishing the resulting [`VehicleStatus`]. Starts at whatever
+/// Picks the command to act on this tick. The human one always overrides:
+/// it wins whenever it's fresh and asks for anything at all - `web_gui`
+/// re-sends a stationary, centered command every few hundred milliseconds
+/// while no control is held, so "fresh" alone can't mean "the human is
+/// driving". Otherwise the autonomous one is used if fresh, and a stationary,
+/// centered command if neither is - so a writer that stopped publishing
+/// never leaves its last setpoint latched.
+fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>) -> VescCommand {
+    if is_fresh(&human) && human.value != VescCommand::default() {
+        human.value
+    } else if is_fresh(&autonomous) {
+        autonomous.value
+    } else {
+        VescCommand::default()
+    }
+}
+
+/// Runs `model` forward in time at [`SimulatedVehicleConfig::tick_rate_hz`], reading
+/// [`AUTONOMOUS_VESC_COMMAND_TOPIC_NAME`]/[`HUMAN_VESC_COMMAND_TOPIC_NAME`] each tick
+/// (see [`select_command`]) and publishing the resulting [`VehicleStatus`]. Starts at whatever
 /// [`START_STATE_TOPIC_NAME`] holds at that moment (the world origin,
 /// stationary, if [`crate::sensors::MapServer`] hasn't published one yet),
 /// with the steering centered, and places the vehicle there again - steering
@@ -469,12 +442,16 @@ impl Executor for SimulatedVehicle {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME, self.id, VehicleStatus::default);
         captain.claim_writer::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME, self.id, VehicleModelStatus::default);
+        // Every model kind shares `config.limits`, so this never changes
+        // after being seeded - nothing needs to write it again.
+        let limits = self.config.limits;
+        captain.claim_writer::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME, self.id, move || limits);
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
         let status_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
-        let vesc_topic = captain.topic::<VescCommand>(VESC_COMMAND_TOPIC_NAME);
+        let autonomous_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
         let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
         let model_selection_topic = captain.topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME);
         let model_status_topic = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
@@ -519,7 +496,7 @@ impl Executor for SimulatedVehicle {
                 applied_place_request = wanted_place_request;
             }
 
-            let command = select_command(vesc_topic.read(), human_topic.read());
+            let command = select_command(autonomous_topic.read(), human_topic.read());
 
             let (next_state, next_steering_rad) =
                 advance(&self.model, state, steering_angle_rad, command.servo_position_rad, command.speed_mps, dt_s);
@@ -784,28 +761,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn select_command_prefers_the_fresher_write() {
-        let now = std::time::Instant::now();
-        let stamped = |speed_mps, written_at| Stamped {
-            value: VescCommand { servo_position_rad: 0.0, speed_mps },
+    fn written(servo_position_rad: f64, speed_mps: f64, written_at: std::time::Instant) -> Stamped<VescCommand> {
+        Stamped {
+            value: VescCommand::new(servo_position_rad, speed_mps),
             meta: WriteMeta { write_count: 1, written_at: Some(written_at), written_at_unix_us: 1 },
-        };
-        let older = stamped(1.0, now);
-        let newer = stamped(2.0, now + std::time::Duration::from_millis(1));
-        assert_eq!(select_command(older.clone(), newer.clone()).speed_mps, 2.0);
-        assert_eq!(select_command(newer, older).speed_mps, 2.0);
+        }
     }
 
     #[test]
-    fn select_command_never_prefers_an_unwritten_seed() {
-        let seed = Stamped { value: VescCommand::new(0.0, 5.0), meta: WriteMeta::default() };
-        let written = Stamped {
-            value: VescCommand::new(0.0, 1.0),
-            meta: WriteMeta { write_count: 1, written_at: Some(std::time::Instant::now()), written_at_unix_us: 1 },
-        };
-        assert_eq!(select_command(seed.clone(), written.clone()).speed_mps, 1.0);
-        assert_eq!(select_command(written, seed).speed_mps, 1.0);
+    fn select_command_lets_an_active_human_override_the_autonomous_command() {
+        let now = std::time::Instant::now();
+        let human = written(0.0, 1.0, now);
+        let autonomous = written(-0.4, 4.0, now + std::time::Duration::from_millis(1));
+        assert_eq!(select_command(autonomous, human), VescCommand::new(0.0, 1.0));
+    }
+
+    #[test]
+    fn select_command_ignores_an_idle_human_heartbeat() {
+        let now = std::time::Instant::now();
+        let human = written(0.0, 0.0, now + std::time::Duration::from_millis(1));
+        let autonomous = written(-0.4, 4.0, now);
+        assert_eq!(select_command(autonomous, human), VescCommand::new(-0.4, 4.0));
+    }
+
+    #[test]
+    fn select_command_stops_on_stale_or_unwritten_commands() {
+        let stale_at = std::time::Instant::now() - VESC_COMMAND_TIMEOUT - std::time::Duration::from_millis(10);
+        let seed = Stamped { value: VescCommand::new(0.3, 5.0), meta: WriteMeta::default() };
+        assert_eq!(select_command(written(-0.4, 4.0, stale_at), written(0.1, 1.0, stale_at)), VescCommand::default());
+        assert_eq!(select_command(seed.clone(), seed), VescCommand::default());
     }
 
     #[test]
