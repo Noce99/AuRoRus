@@ -40,23 +40,44 @@ pub enum VehicleModelKind {
 
 impl VehicleModelKind {
     /// Every kind, in the order a picker should offer them, each paired
-    /// with the stable string the web APIs use for it and a human-readable
-    /// label.
+    /// with the stable string the web APIs use for it, a human-readable
+    /// label, and a brief description.
     ///
-    /// The single source of truth for all three: `web_gui` serves it from
+    /// The single source of truth for all four: `web_gui` serves it from
     /// `GET /api/vehicle_models`, `debug_web_interface` resolves a recorded
-    /// kind through it, and both frontends render the labels they're given
-    /// rather than keeping their own copies.
-    pub const ALL: &'static [(Self, &'static str, &'static str)] = &[
-        (Self::Bicycle, "bicycle", "Kinematic bicycle"),
-        (Self::DynamicBicycle, "dynamic_bicycle", "Dynamic bicycle (tire forces)"),
+    /// kind through it, and both frontends render the labels/descriptions
+    /// they're given rather than keeping their own copies.
+    pub const ALL: &'static [(Self, &'static str, &'static str, &'static str)] = &[
+        (
+            Self::Bicycle,
+            "bicycle",
+            "Kinematic bicycle",
+            "A CG-referenced kinematic bicycle model.",
+        ),
+        (
+            Self::DynamicBicycle,
+            "dynamic_bicycle",
+            "Dynamic bicycle (tire forces)",
+            "A dynamic bicycle model with lateral tire forces.",
+        ),
         (
             Self::NonlinearBicycle,
             "nonlinear_bicycle",
             "Nonlinear bicycle (tire saturation + load transfer)",
+            "A dynamic bicycle model with tire saturation, load transfer, and combined slip.",
         ),
-        (Self::PacejkaBicycle, "pacejka_bicycle", "Pacejka bicycle (full Magic Formula)"),
-        (Self::TwoTrack, "two_track", "Two-track (four-wheel, lateral load transfer)"),
+        (
+            Self::PacejkaBicycle,
+            "pacejka_bicycle",
+            "Pacejka bicycle (full Magic Formula)",
+            "A dynamic bicycle model using the full Pacejka Magic Formula for lateral tire force.",
+        ),
+        (
+            Self::TwoTrack,
+            "two_track",
+            "Two-track (four-wheel, lateral load transfer)",
+            "A two-track (four-wheel) model with lateral load transfer and per-wheel asymmetry.",
+        ),
     ];
 
     /// This kind's stable API string - the inverse of [`from_api_str`](Self::from_api_str).
@@ -64,7 +85,7 @@ impl VehicleModelKind {
         Self::ALL
             .iter()
             .find(|(kind, ..)| *kind == self)
-            .map(|(_, s, _)| *s)
+            .map(|(_, s, ..)| *s)
             .expect("ALL lists every VehicleModelKind")
     }
 
@@ -73,14 +94,23 @@ impl VehicleModelKind {
         Self::ALL
             .iter()
             .find(|(kind, ..)| *kind == self)
-            .map(|(.., label)| *label)
+            .map(|(_, _, label, _)| *label)
+            .expect("ALL lists every VehicleModelKind")
+    }
+
+    /// This kind's brief description, for a picker to show alongside its label.
+    pub fn description(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(kind, ..)| *kind == self)
+            .map(|(.., description)| *description)
             .expect("ALL lists every VehicleModelKind")
     }
 
     /// Parses an API string back into a kind, or `None` if it names no
     /// known model.
     pub fn from_api_str(s: &str) -> Option<Self> {
-        Self::ALL.iter().find(|(_, api, _)| *api == s).map(|(kind, ..)| *kind)
+        Self::ALL.iter().find(|(_, api, ..)| *api == s).map(|(kind, ..)| *kind)
     }
 }
 
@@ -112,11 +142,13 @@ mod tests {
     /// there's one, and this checks it's complete.
     #[test]
     fn every_kind_round_trips_through_its_api_string() {
-        for (kind, api, label) in VehicleModelKind::ALL {
+        for (kind, api, label, description) in VehicleModelKind::ALL {
             assert_eq!(kind.api_str(), *api);
             assert_eq!(kind.label(), *label);
+            assert_eq!(kind.description(), *description);
             assert_eq!(VehicleModelKind::from_api_str(api), Some(*kind));
             assert!(!label.is_empty());
+            assert!(!description.is_empty());
         }
     }
 

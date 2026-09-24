@@ -145,6 +145,7 @@ pub fn human_vesc_command(request: &mut Request, captain: &Captain, writer_id: u
 struct VehicleModelOption {
     kind: &'static str,
     label: &'static str,
+    description: &'static str,
 }
 
 /// `GET /api/vehicle_models` - every selectable vehicle model kind, for a
@@ -152,7 +153,7 @@ struct VehicleModelOption {
 pub fn vehicle_models() -> ResponseBox {
     let options: Vec<VehicleModelOption> = VehicleModelKind::ALL
         .iter()
-        .map(|(_, kind, label)| VehicleModelOption { kind, label })
+        .map(|(_, kind, label, description)| VehicleModelOption { kind, label, description })
         .collect();
     json_response(&options, 200)
 }

@@ -340,6 +340,14 @@ window.MapView = (() => {
       sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
     }
 
+    // Only present in web_gui - debug_web_interface has no right panel, so
+    // these lookups just come back null and this is a no-op there.
+    const rightPanel = document.getElementById("right-panel");
+    const rightPanelToggle = document.getElementById("right-panel-toggle-btn");
+    if (rightPanel && rightPanelToggle) {
+      rightPanelToggle.addEventListener("click", () => rightPanel.classList.toggle("collapsed"));
+    }
+
     // The ResizeObserver already fires for every size change of the
     // canvas's container, including the ones a window resize causes - a
     // `resize` listener on top of it would only buy a second redraw for the

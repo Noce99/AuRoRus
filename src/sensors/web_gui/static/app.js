@@ -42,6 +42,17 @@ let lidarScan = null;
  *  when the live selection has actually changed (e.g. from another tab). */
 let liveVehicleModelKind = null;
 
+/** `{kind, label, description}` options fetched once from
+ *  `/api/vehicle_models`, kept around so the description paragraph can be
+ *  updated without re-fetching every time the selection changes. */
+let vehicleModelOptions = [];
+
+/** Raw latest payload from each topic this page polls, keyed the same as
+ *  `#topic-select`'s option values - feeds the Topics panel's live view
+ *  (see `renderTopicContent` below). Updated by the same poll functions
+ *  that already drive the map/vehicle/lidar state above. */
+const topicSnapshots = { map: null, vehicle_status: null, lidar_scan: null, vehicle_model: null };
+
 // ---------------------------------------------------------------------
 // Vehicle pose
 // ---------------------------------------------------------------------
@@ -157,6 +168,7 @@ async function refreshMapList() {
 // `selectMap` above (sidebar clicks, or a freshly generated map).
 async function pollLiveMap() {
   const live = await fetchJSON("/api/map");
+  topicSnapshots.map = live;
   if (live.name === liveMapName) return;
 
   liveMapName = live.name;
@@ -174,6 +186,7 @@ const LIDAR_SCAN_POLL_MS = 33;
 
 async function pollVehicleStatus() {
   const status = await fetchJSON("/api/vehicle_status");
+  topicSnapshots.vehicle_status = status;
   // A still vehicle produces an identical sample every poll; repainting for
   // those is pure waste, and MapView already keeps painting by itself while
   // `isAnimating()` holds.
@@ -190,6 +203,7 @@ async function pollVehicleStatus() {
 
 async function pollLidarScan() {
   lidarScan = await fetchJSON("/api/lidar_scan");
+  topicSnapshots.lidar_scan = lidarScan;
   MapView.requestRedraw();
 }
 
@@ -198,6 +212,7 @@ async function pollLidarScan() {
 // ---------------------------------------------------------------------
 
 const vehicleModelSelectEl = document.getElementById("vehicle-model-select");
+const vehicleModelDescriptionEl = document.getElementById("vehicle-model-description");
 
 // Writes the wanted model kind to `vehicle_model_selection` - `SimulatedVehicle`
 // picks it up on its own poll cycle, `pollVehicleModel` then reflects it here.
@@ -209,19 +224,26 @@ async function selectVehicleModel(kind) {
   });
 }
 
+function updateVehicleModelDescription(kind) {
+  const option = vehicleModelOptions.find((o) => o.kind === kind);
+  vehicleModelDescriptionEl.textContent = option ? option.description : "";
+}
+
 async function populateVehicleModelOptions() {
-  const options = await fetchJSON("/api/vehicle_models");
+  vehicleModelOptions = await fetchJSON("/api/vehicle_models");
   vehicleModelSelectEl.innerHTML = "";
-  for (const option of options) {
+  for (const option of vehicleModelOptions) {
     const el = document.createElement("option");
     el.value = option.kind;
     el.textContent = option.label;
     vehicleModelSelectEl.appendChild(el);
   }
+  updateVehicleModelDescription(vehicleModelSelectEl.value);
 }
 
 vehicleModelSelectEl.addEventListener("change", () => {
   liveVehicleModelKind = vehicleModelSelectEl.value; // optimistic; pollVehicleModel confirms it
+  updateVehicleModelDescription(vehicleModelSelectEl.value);
   selectVehicleModel(vehicleModelSelectEl.value).catch((err) => console.error(err));
 });
 
@@ -231,6 +253,7 @@ vehicleModelSelectEl.addEventListener("change", () => {
 // above (this tab's dropdown, or another client's).
 async function pollVehicleModel() {
   const live = await fetchJSON("/api/vehicle_model");
+  topicSnapshots.vehicle_model = live;
   // The dropdown's own value has to be checked too, not just the last kind
   // we saw: this poll starts before `populateVehicleModelOptions` has added
   // any `<option>`s, and assigning `.value` on an empty `<select>` silently
@@ -240,7 +263,52 @@ async function pollVehicleModel() {
   if (live.kind === liveVehicleModelKind && vehicleModelSelectEl.value === live.kind) return;
   liveVehicleModelKind = live.kind;
   vehicleModelSelectEl.value = live.kind;
+  updateVehicleModelDescription(live.kind);
 }
+
+// ---------------------------------------------------------------------
+// Left nav rail -> right panel switching
+// ---------------------------------------------------------------------
+
+const panelNavButtons = document.querySelectorAll(".panel-nav-btn");
+
+function selectPanel(name) {
+  for (const btn of panelNavButtons) {
+    btn.classList.toggle("selected", btn.dataset.panel === name);
+  }
+  for (const section of document.querySelectorAll(".panel-section")) {
+    section.hidden = section.id !== `panel-${name}`;
+  }
+}
+
+for (const btn of panelNavButtons) {
+  btn.addEventListener("click", () => selectPanel(btn.dataset.panel));
+}
+
+// ---------------------------------------------------------------------
+// Topics panel - lets the user watch any topic this page already polls
+// (see `topicSnapshots` above) update live, without any extra requests.
+// ---------------------------------------------------------------------
+
+const topicSelectEl = document.getElementById("topic-select");
+const topicContentEl = document.getElementById("topic-content");
+
+const TOPIC_CONTENT_REFRESH_MS = 200;
+
+function renderTopicContent() {
+  const topic = topicSelectEl.value;
+  topicContentEl.textContent = topic ? JSON.stringify(topicSnapshots[topic], null, 2) : "";
+}
+
+topicSelectEl.addEventListener("change", renderTopicContent);
+
+setInterval(() => {
+  // Only worth the work while the Topics panel is actually visible with a
+  // topic picked - the underlying `topicSnapshots` values are kept fresh
+  // regardless by the polls above.
+  const topicsPanel = document.getElementById("panel-topics");
+  if (!topicsPanel.hidden && topicSelectEl.value) renderTopicContent();
+}, TOPIC_CONTENT_REFRESH_MS);
 
 // ---------------------------------------------------------------------
 // Generate Map modal
