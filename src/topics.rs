@@ -2,6 +2,7 @@
 //! [`crate::RwLockTopic`]s, so multiple binaries can agree on the same shape
 //! without redefining it.
 
+mod drawing;
 mod lidar_scan;
 mod map;
 mod place_at_start;
@@ -10,6 +11,7 @@ mod vehicle_model;
 mod vehicle_status;
 mod vesc_command;
 
+pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, Shape};
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
 pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};

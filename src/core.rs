@@ -11,6 +11,7 @@ mod runner;
 mod topic;
 
 pub use captain::Captain;
+pub(crate) use captain::DebugTopic;
 pub use executor::Executor;
 pub use rate::Ticker;
 pub use runner::{Runner, StopHandle, SwitchExecutorError};

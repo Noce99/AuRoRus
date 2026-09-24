@@ -1,21 +1,22 @@
-//! The live, topic-backed API: the currently selected map's identity and
-//! pixels (from the `map` topic), the vehicle's live status and model, and
-//! the write endpoints a driver uses to steer it, pick its model, and place
-//! it at the start line (`map_selection`, `human_vesc_command`,
-//! `vehicle_model_selection`, `place_at_start`) - as opposed to
-//! [`super::maps_api`], which lists/generates map folders on disk.
+//! The live, topic-backed control API: which map and vehicle model are
+//! currently selected (the `map` and `vehicle_model_status` topics), and the
+//! write endpoints a driver uses to steer the vehicle, pick its map and
+//! model, and place it at the start line (`map_selection`,
+//! `human_vesc_command`, `vehicle_model_selection`, `place_at_start`) - as
+//! opposed to [`super::maps_api`], which lists/generates map folders on
+//! disk, and [`super::draw_api`], which serves what's drawn on the map.
 
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
-use crate::web::{bad_request, header, json_response};
+use crate::web::{bad_request, json_response, read_json};
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
 use crate::{Captain, WriteMeta};
 use std::path::Path;
-use tiny_http::{Request, Response, ResponseBox};
+use tiny_http::{Request, ResponseBox};
 
 /// The subset of [`WebGuiConfig`] the frontend needs, as served by
 /// [`config`].
@@ -66,7 +67,8 @@ fn stamped_json<T: serde::Serialize>(value: &T, meta: WriteMeta) -> ResponseBox 
 }
 
 /// `GET /api/map` - the currently selected map's name and dimensions (not
-/// its pixels - see [`raster`]), read from the `map` topic. `name` is
+/// its pixels - those are drawn from `MapServer`'s drawing topic), read
+/// from the `map` topic. `name` is
 /// derived from the topic's folder path, or `null` if no map is selected.
 /// Served as a [`StampedBody`].
 #[derive(serde::Serialize)]
@@ -85,22 +87,6 @@ pub fn map(captain: &Captain) -> ResponseBox {
         .and_then(|n| n.to_str())
         .map(str::to_string);
     stamped_json(&LiveMap { name, width_px: selected.width_px, height_px: selected.height_px }, selected.meta)
-}
-
-/// `GET /api/map/raster` - the currently selected map's pixels, read from
-/// the `map` topic rather than disk, in the same one-byte-per-pixel format
-/// as [`super::maps_api::raster`].
-pub fn raster(captain: &Captain) -> ResponseBox {
-    let selected = captain.topic::<SelectedMap>(MAP_TOPIC_NAME).read().into_value();
-    let len = selected.pixels.len();
-    Response::new(
-        tiny_http::StatusCode(200),
-        vec![header("Content-Type", "application/octet-stream")],
-        std::io::Cursor::new(selected.pixels),
-        Some(len),
-        None,
-    )
-    .boxed()
 }
 
 #[derive(serde::Deserialize)]
@@ -130,23 +116,6 @@ pub fn select_map(request: &mut Request, captain: &Captain, writer_id: u8, maps_
         .write(writer_id, MapSelection { path })
         .expect("lost writer authorization for the map_selection topic");
     json_response(&(), 200)
-}
-
-/// `GET /api/vehicle_status` - the vehicle's live position, heading, and
-/// speed, read from the `vehicle_status` topic, as a [`StampedBody`].
-pub fn vehicle_status(captain: &Captain) -> ResponseBox {
-    let status = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME).read();
-    stamped_json(&status.value, status.meta)
-}
-
-/// `GET /api/lidar_scan` - the most recent LIDAR scan, read from the
-/// `lidar_scan` topic - distances/intensities per ray, plus the sensor's
-/// `fov`/`min_distance`/`max_distance`, which the frontend needs to turn
-/// each ray back into a world-frame point relative to the vehicle's current
-/// pose - as a [`StampedBody`].
-pub fn lidar_scan(captain: &Captain) -> ResponseBox {
-    let scan = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME).read();
-    stamped_json(&scan.value, scan.meta)
 }
 
 #[derive(serde::Deserialize)]
@@ -249,12 +218,4 @@ pub fn place_at_start(captain: &Captain, writer_id: u8) -> ResponseBox {
         .write(writer_id, PlaceAtStart { requested })
         .expect("lost writer authorization for the place_at_start topic");
     json_response(&(), 200)
-}
-
-fn read_json<T: serde::de::DeserializeOwned>(request: &mut Request) -> Result<T, ResponseBox> {
-    let mut body = String::new();
-    if let Err(err) = request.as_reader().read_to_string(&mut body) {
-        return Err(bad_request(&format!("failed to read request body: {err}")));
-    }
-    serde_json::from_str(&body).map_err(|err| bad_request(&format!("invalid JSON body: {err}")))
 }

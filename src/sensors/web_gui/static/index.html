@@ -16,6 +16,7 @@
   <aside id="sidebar">
     <nav id="panel-nav">
       <button class="panel-nav-btn selected" data-panel="maps">Maps</button>
+      <button class="panel-nav-btn" data-panel="layers">Layers</button>
       <button class="panel-nav-btn" data-panel="vehicle-model">Vehicle Model</button>
       <button class="panel-nav-btn" data-panel="topics">Topics</button>
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
@@ -49,6 +50,16 @@
       <button id="generate-btn">Generate Map</button>
     </section>
 
+    <section id="panel-layers" class="panel-section" hidden>
+      <h1>Layers</h1>
+      <ul id="layer-list"></ul>
+      <div class="rate-row">
+        <label for="draw-rate">Read rate</label>
+        <input type="range" id="draw-rate" step="1" />
+        <span id="draw-rate-value"></span>
+      </div>
+    </section>
+
     <section id="panel-vehicle-model" class="panel-section" hidden>
       <h1>Vehicle model</h1>
       <select id="vehicle-model-select"></select>
@@ -59,12 +70,8 @@
       <h1>Topics</h1>
       <select id="topic-select">
         <option value="">Select a topic&hellip;</option>
-        <option value="map">map</option>
-        <option value="vehicle_status">vehicle_status</option>
-        <option value="lidar_scan">lidar_scan</option>
-        <option value="vehicle_model">vehicle_model_status</option>
       </select>
-      <div id="poll-rate-row" hidden>
+      <div id="poll-rate-row" class="rate-row" hidden>
         <label for="poll-rate">Read rate</label>
         <input type="range" id="poll-rate" step="1" />
         <span id="poll-rate-value"></span>

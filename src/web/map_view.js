@@ -8,11 +8,12 @@
 // start/finish line, and a vehicle on top, pannable and zoomable. All of
 // that lives here, once.
 //
-// What they don't share is where the vehicle pose comes from - a live topic
-// poll in one, a pre-fetched timeline in the other - so that is the hook a
-// host supplies to `MapView.init`. Everything else (canvas sizing, world
-// <-> screen transforms, wheel/drag/slider zoom and pan, the sidebar
-// toggle, the redraw loop) is identical and handled here.
+// What they don't share is where the content comes from - drawing topics
+// polled live in one, a pre-fetched timeline in the other - so that is what
+// a host supplies to `MapView.init` as hooks. Everything else (canvas
+// sizing, world <-> screen transforms, drawing every shape kind of a
+// `Drawing` topic, wheel/drag/slider zoom and pan, the sidebar toggle, the
+// redraw loop) is identical and handled here.
 //
 // Served at /map_view.js by both binaries, and loaded before their own
 // app.js, which then talks to the `MapView` global.
@@ -38,6 +39,11 @@ window.MapView = (() => {
   // Host hooks, filled in by init().
   let vehiclePoseAt = () => null;
   let lidarPointsAt = () => [];
+  let layersAt = () => [];
+  let worldBounds = () => null;
+  let homeTarget = () => null;
+  let mapName = () => null;
+  let speedMps = () => null;
   let isAnimating = () => false;
   let onFrame = () => {};
 
@@ -62,8 +68,10 @@ window.MapView = (() => {
   }
 
   function maxVerticalSizeM() {
-    if (!currentMap || !currentMap.info) return 100;
-    return currentMap.info.height_px * currentMap.info.resolution_m_per_px;
+    if (currentMap && currentMap.info) return currentMap.info.height_px * currentMap.info.resolution_m_per_px;
+    const bounds = worldBounds();
+    if (bounds && bounds.maxY > bounds.minY) return bounds.maxY - bounds.minY;
+    return 100;
   }
 
   // -------------------------------------------------------------------
@@ -167,10 +175,174 @@ window.MapView = (() => {
     }
   }
 
+  // -------------------------------------------------------------------
+  // Drawing topics - one painter per `Shape` kind (see
+  // `src/topics/drawing.rs`). Each shape arrives as `{kind: {...fields}}`.
+  // -------------------------------------------------------------------
+
+  function cssColor(color) {
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+  }
+
+  function dpr() {
+    return window.devicePixelRatio || 1;
+  }
+
+  /** `[x, y, width, height]` of a `lengthPx` x `widthPx` rectangle centered
+   *  on the current origin, for `fillRect`/`strokeRect`. */
+  function centeredRect(lengthPx, widthPx) {
+    return [-lengthPx / 2, -widthPx / 2, lengthPx, widthPx];
+  }
+
+  const painters = {
+    raster(s) {
+      // The host decodes the pixels once, into `s.offscreen`, when the
+      // drawing arrives - never per frame.
+      if (!s.offscreen) return;
+      const scale = scalePxPerMeter();
+      const pixelScale = scale * s.resolution_m_per_px;
+      const e = (s.origin_x_m - view.centerX) * scale + canvas.width / 2;
+      const f = (s.origin_y_m - view.centerY) * scale + canvas.height / 2;
+      ctx.imageSmoothingEnabled = false;
+      ctx.setTransform(pixelScale, 0, 0, pixelScale, e, f);
+      ctx.drawImage(s.offscreen, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    },
+
+    vehicle(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      const scale = scalePxPerMeter();
+      const lengthPx = s.length_m * scale;
+      const widthPx = s.width_m * scale;
+      const wheelLengthPx = lengthPx * 0.22;
+      const wheelWidthPx = lengthPx * 0.1;
+
+      ctx.translate(x, y);
+      ctx.rotate(s.heading_rad);
+      ctx.lineWidth = 1.5 * dpr();
+      ctx.strokeStyle = "#101418";
+
+      // Wheels first, so the body overlaps their inner halves.
+      ctx.fillStyle = "#101418";
+      for (const side of [-1, 1]) {
+        const wheelY = (side * widthPx) / 2;
+        ctx.fillRect(-s.rear_axle_m * scale - wheelLengthPx / 2, wheelY - wheelWidthPx / 2, wheelLengthPx, wheelWidthPx);
+        ctx.save();
+        ctx.translate(s.front_axle_m * scale, wheelY);
+        ctx.rotate(s.steering_rad);
+        ctx.fillRect(...centeredRect(wheelLengthPx, wheelWidthPx));
+        ctx.restore();
+      }
+
+      ctx.fillStyle = cssColor(s.color);
+      ctx.fillRect(...centeredRect(lengthPx, widthPx));
+      ctx.strokeRect(...centeredRect(lengthPx, widthPx));
+
+      // Small triangle marking the front, so heading is visible at a glance.
+      ctx.beginPath();
+      ctx.moveTo(lengthPx / 2, 0);
+      ctx.lineTo(lengthPx / 2 - widthPx * 0.4, -widthPx * 0.35);
+      ctx.lineTo(lengthPx / 2 - widthPx * 0.4, widthPx * 0.35);
+      ctx.closePath();
+      ctx.fillStyle = "#101418";
+      ctx.fill();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    },
+
+    points(s) {
+      // One path for every dot, filled once - thousands of separate
+      // `fill()`s per frame would dominate the frame time.
+      const radius = s.radius_px * dpr();
+      ctx.fillStyle = cssColor(s.color);
+      ctx.beginPath();
+      for (const [px, py] of s.points) {
+        const { x, y } = worldToScreen(px, py);
+        ctx.moveTo(x + radius, y);
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      }
+      ctx.fill();
+    },
+
+    polyline(s) {
+      if (s.points.length < 2) return;
+      ctx.strokeStyle = cssColor(s.color);
+      ctx.lineWidth = s.width_px * dpr();
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      s.points.forEach(([px, py], i) => {
+        const { x, y } = worldToScreen(px, py);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      if (s.closed) ctx.closePath();
+      ctx.stroke();
+    },
+
+    circle(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      ctx.beginPath();
+      ctx.arc(x, y, s.radius_m * scalePxPerMeter(), 0, 2 * Math.PI);
+      if (s.filled) {
+        ctx.fillStyle = cssColor(s.color);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = cssColor(s.color);
+        ctx.lineWidth = 1.5 * dpr();
+        ctx.stroke();
+      }
+    },
+
+    rect(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      const scale = scalePxPerMeter();
+      ctx.translate(x, y);
+      ctx.rotate(s.heading_rad);
+      const rect = centeredRect(s.length_m * scale, s.width_m * scale);
+      if (s.filled) {
+        ctx.fillStyle = cssColor(s.color);
+        ctx.fillRect(...rect);
+      } else {
+        ctx.strokeStyle = cssColor(s.color);
+        ctx.lineWidth = 1.5 * dpr();
+        ctx.strokeRect(...rect);
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    },
+
+    text(s) {
+      const { x, y } = worldToScreen(s.x_m, s.y_m);
+      ctx.fillStyle = cssColor(s.color);
+      ctx.font = `${s.size_px * dpr()}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(s.text, x, y);
+    },
+  };
+
+  /** Paints every layer `layersAt(nowMs)` returns, in the order given -
+   *  each `{opacity, shapes}`, shapes as they arrived from a drawing topic.
+   *  An unknown shape kind (a newer server than this page) is skipped. */
+  function drawLayers(nowMs) {
+    for (const layer of layersAt(nowMs)) {
+      ctx.globalAlpha = layer.opacity;
+      for (const shape of layer.shapes) {
+        const [kind, fields] = Object.entries(shape)[0];
+        const paint = painters[kind];
+        if (!paint) continue;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        paint(fields);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
   function draw(nowMs) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#008080";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawLayers(nowMs);
 
     if (!currentMap || !currentMap.info) return;
 
@@ -200,9 +372,11 @@ window.MapView = (() => {
 
   function updateStatusBar(nowMs) {
     const pose = vehiclePoseAt(nowMs);
-    setText(statusName, currentMap && currentMap.name ? currentMap.name : "No map loaded");
+    const name = currentMap && currentMap.name ? currentMap.name : mapName();
+    const speed = pose ? pose.speed_mps : speedMps(nowMs);
+    setText(statusName, name || "No map loaded");
     setText(statusVerticalSize, `Vertical size: ${view.verticalSizeM.toFixed(2)} m`);
-    setText(statusSpeed, pose ? `Speed: ${pose.speed_mps.toFixed(2)} m/s` : "");
+    setText(statusSpeed, speed === null || speed === undefined ? "" : `Speed: ${speed.toFixed(2)} m/s`);
   }
 
   // -------------------------------------------------------------------
@@ -277,12 +451,20 @@ window.MapView = (() => {
     requestRedraw();
   }
 
-  /** Centers the view on the start/finish line at the default zoom. */
-  function homeToStartFinish() {
-    if (!currentMap || !currentMap.info) return;
-    const line = currentMap.info.start_finish_line;
-    view.centerX = (line.a.x + line.b.x) / 2;
-    view.centerY = (line.a.y + line.b.y) / 2;
+  /** Centers the view at the default zoom on the start/finish line of the
+   *  map given to `setMap`, or else on whatever the host's `homeTarget()`
+   *  returns. */
+  function home() {
+    let target = null;
+    if (currentMap && currentMap.info) {
+      const line = currentMap.info.start_finish_line;
+      target = { x: (line.a.x + line.b.x) / 2, y: (line.a.y + line.b.y) / 2 };
+    } else {
+      target = homeTarget();
+    }
+    if (!target) return;
+    view.centerX = target.x;
+    view.centerY = target.y;
     setVerticalSize(DEFAULT_VERTICAL_SIZE_M);
     requestRedraw();
   }
@@ -332,7 +514,7 @@ window.MapView = (() => {
     }
 
     const homeBtn = document.getElementById("home-btn");
-    if (homeBtn) homeBtn.addEventListener("click", homeToStartFinish);
+    if (homeBtn) homeBtn.addEventListener("click", home);
 
     const sidebar = document.getElementById("sidebar");
     const sidebarToggle = document.getElementById("sidebar-toggle-btn");
@@ -359,19 +541,31 @@ window.MapView = (() => {
   // Raster -> ImageData
   // -------------------------------------------------------------------
 
-  /** Turns the one-byte-per-pixel occupancy raster both APIs serve into an
-   *  `ImageData`. Written through a `Uint32Array` view, which fills a whole
-   *  pixel per iteration instead of four separate byte stores - about 40%
-   *  faster on a 1200x1200 map. */
+  /** Pixel value -> packed color, blending from the wall color at `0` to
+   *  the drivable color at `255` - so an occupancy map (only ever `0` or
+   *  `255`) keeps its two colors, and any other grayscale raster gets the
+   *  shades in between. Little-endian byte order in memory is R,G,B,A, so
+   *  these read as 0xAABBGGRR, always fully opaque. */
+  const GRAY_TO_PIXEL = (() => {
+    const wall = [0x1e, 0x1e, 0x28];
+    const drivable = [0xeb, 0xeb, 0xeb];
+    const lut = new Uint32Array(256);
+    for (let v = 0; v < 256; v++) {
+      const [r, g, b] = wall.map((w, i) => Math.round(w + ((drivable[i] - w) * v) / 255));
+      lut[v] = (0xff << 24) | (b << 16) | (g << 8) | r;
+    }
+    return lut;
+  })();
+
+  /** Turns a one-byte-per-pixel grayscale raster (e.g. an occupancy map)
+   *  into an `ImageData`. Written through a `Uint32Array` view, which fills
+   *  a whole pixel per iteration instead of four separate byte stores -
+   *  about 40% faster on a 1200x1200 map. */
   function buildImageData(bytes, width, height) {
     const rgba = new Uint8ClampedArray(width * height * 4);
     const pixels = new Uint32Array(rgba.buffer);
-    // Little-endian byte order in memory is R,G,B,A, so these read as
-    // 0xAABBGGRR: #ebebeb drivable, #281e22-ish wall, both fully opaque.
-    const DRIVABLE = 0xffebebeb;
-    const WALL = 0xff281e1e;
     for (let i = 0; i < pixels.length; i++) {
-      pixels[i] = bytes[i] === 255 ? DRIVABLE : WALL;
+      pixels[i] = GRAY_TO_PIXEL[bytes[i]];
     }
     return new ImageData(rgba, width, height);
   }
@@ -394,13 +588,32 @@ window.MapView = (() => {
     view,
 
     /** Wires the shared map view to the page and starts its render loop.
-     *  `vehiclePoseAt(nowMs)` returns `{x_m, y_m, heading_rad, speed_mps}`
-     *  or null; `lidarPointsAt(nowMs)` returns an array of world-frame
-     *  `{x_m, y_m}` LIDAR hits to draw, or an empty array; `isAnimating()`
-     *  says whether to repaint every frame even with no input; `onFrame(nowMs)`
-     *  lets the host update its own status-bar extras from inside the same
-     *  frame. */
-    init({ vehiclePoseAt: poseFn, lidarPointsAt: lidarFn, isAnimating: animFn, onFrame: frameFn } = {}) {
+     *  Every hook is optional:
+     *  - `layersAt(nowMs)` returns the drawing layers to paint, bottom
+     *    first, each `{opacity, shapes}` - see `drawLayers`;
+     *  - `worldBounds()` returns `{minX, minY, maxX, maxY}` of the drawn
+     *    world (bounding the zoom-out), or null;
+     *  - `homeTarget()` returns the world `{x, y}` the home button centers
+     *    on, or null;
+     *  - `mapName()` / `speedMps(nowMs)` feed the status bar;
+     *  - `vehiclePoseAt(nowMs)` (`{x_m, y_m, heading_rad, speed_mps}` or
+     *    null) and `lidarPointsAt(nowMs)` (world-frame `{x_m, y_m}` hits)
+     *    draw a vehicle and LIDAR hits over a map given to `setMap`, for a
+     *    host that has no drawing topics;
+     *  - `isAnimating()` says whether to repaint every frame even with no
+     *    input; `onFrame(nowMs)` lets the host update its own status-bar
+     *    extras from inside the same frame. */
+    init({
+      vehiclePoseAt: poseFn,
+      lidarPointsAt: lidarFn,
+      layersAt: layersFn,
+      worldBounds: boundsFn,
+      homeTarget: homeFn,
+      mapName: mapNameFn,
+      speedMps: speedFn,
+      isAnimating: animFn,
+      onFrame: frameFn,
+    } = {}) {
       canvas = document.getElementById("map-canvas");
       ctx = canvas.getContext("2d");
       statusName = document.getElementById("status-map-name");
@@ -410,6 +623,11 @@ window.MapView = (() => {
 
       if (poseFn) vehiclePoseAt = poseFn;
       if (lidarFn) lidarPointsAt = lidarFn;
+      if (layersFn) layersAt = layersFn;
+      if (boundsFn) worldBounds = boundsFn;
+      if (homeFn) homeTarget = homeFn;
+      if (mapNameFn) mapName = mapNameFn;
+      if (speedFn) speedMps = speedFn;
       if (animFn) isAnimating = animFn;
       if (frameFn) onFrame = frameFn;
 
@@ -421,13 +639,13 @@ window.MapView = (() => {
      *  on its start/finish line. */
     setMap(map) {
       currentMap = map;
-      if (map && map.info) homeToStartFinish();
+      if (map && map.info) home();
       requestRedraw();
     },
 
     currentMap: () => currentMap,
     requestRedraw,
-    homeToStartFinish,
+    home,
     scalePxPerMeter,
     screenToWorld,
     worldToScreen,

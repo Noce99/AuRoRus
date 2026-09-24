@@ -182,10 +182,20 @@ impl Runner {
     /// Spawns one thread per executor added since the last call to `run_all`: each
     /// calls [`Executor::init`] then [`Executor::run`]. Safe to call again later to
     /// start executors added afterward.
+    ///
+    /// Every executor claims its writing topics before *any* of them starts running,
+    /// so an executor that reads another's topic at the top of its `run` always finds
+    /// it registered, whatever order they were added in - which matters after a
+    /// restart, when [`run_until_stopped`](Self::run_until_stopped) re-adds them in
+    /// no particular order.
     pub fn run_all(&mut self) {
-        for (id, executor) in self.pending.drain(..) {
-            let handle = Self::spawn(&self.captain, id, executor, self.debug_frequency_hz);
-            self.running.insert(id, handle);
+        let prepared: Vec<_> = self
+            .pending
+            .drain(..)
+            .map(|(id, executor)| (id, Self::prepare(&self.captain, id, executor, self.debug_frequency_hz)))
+            .collect();
+        for (id, executor) in prepared {
+            self.running.insert(id, Self::start(&self.captain, executor));
         }
         self.log(LogColor::Green, "all executors started");
     }
@@ -275,16 +285,33 @@ impl Runner {
     fn spawn(
         captain: &Arc<Captain>,
         id: u8,
-        mut executor: Box<dyn Executor>,
+        executor: Box<dyn Executor>,
         debug_frequency_hz: Option<f64>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
+        let executor = Self::prepare(captain, id, executor, debug_frequency_hz);
+        Self::start(captain, executor)
+    }
+
+    /// Everything [`spawn`](Self::spawn) does before starting the executor's thread:
+    /// assigns its id and name, and has it claim its writing topics.
+    fn prepare(
+        captain: &Captain,
+        id: u8,
+        mut executor: Box<dyn Executor>,
+        debug_frequency_hz: Option<f64>,
+    ) -> Box<dyn Executor> {
         executor.init(id);
-        let name = executor.name();
-        captain.set_name(id, name.clone());
+        captain.set_name(id, executor.name());
         if let Some(hz) = debug_frequency_hz {
             executor.set_debug_mode(hz);
         }
         executor.claim_writing_topics(captain);
+        executor
+    }
+
+    /// Starts a [`prepare`](Self::prepare)d executor running on its own thread.
+    fn start(captain: &Arc<Captain>, mut executor: Box<dyn Executor>) -> thread::JoinHandle<Box<dyn Executor>> {
+        let name = executor.name();
         let captain = captain.clone();
         thread::Builder::new()
             .name(name)
@@ -357,6 +384,73 @@ mod tests {
                 stop_after: self.stop_after,
             })
         }
+    }
+
+    /// Claims `topic` - taking its time about it, so an executor already running
+    /// by then would get to read it first - and does nothing else.
+    struct Writer {
+        id: u8,
+    }
+
+    impl Executor for Writer {
+        fn init(&mut self, id: u8) {
+            self.id = id;
+        }
+
+        fn claim_writing_topics(&mut self, captain: &Captain) {
+            thread::sleep(Duration::from_millis(50));
+            captain.claim_writer::<u32>("topic", self.id, || 0);
+        }
+
+        fn run(&mut self, _captain: &Captain) {}
+
+        fn name(&self) -> String {
+            "Writer".to_string()
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            Box::new(Writer { id: self.id })
+        }
+    }
+
+    /// Reads `topic` - which it doesn't write - as soon as it starts.
+    struct Reader;
+
+    impl Executor for Reader {
+        fn init(&mut self, _id: u8) {}
+
+        fn run(&mut self, captain: &Captain) {
+            captain.topic::<u32>("topic").read();
+        }
+
+        fn name(&self) -> String {
+            "Reader".to_string()
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            Box::new(Reader)
+        }
+    }
+
+    /// A reader added before the writer of the topic it reads must still find that
+    /// topic registered - reading an unregistered topic terminates the process, which
+    /// would fail this whole test binary.
+    #[test]
+    fn run_all_claims_every_topic_before_starting_any_executor() {
+        let mut runner = Runner::new();
+        runner.add_executor(Box::new(Reader));
+        runner.add_executor(Box::new(Writer { id: 0 }));
+
+        runner.run_all();
+        runner.join_all();
     }
 
     #[test]

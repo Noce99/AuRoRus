@@ -1,17 +1,24 @@
 //! [`WebGui`]: an [`Executor`] that serves a local web UI for browsing and
-//! generating maps, for driving the vehicle - WASD control, live map and
-//! vehicle status - and for picking which vehicle physics model is running,
-//! on [`WebGuiConfig::bind_addr`]. Claims the writer slot for `human_vesc_command`,
-//! `map_selection`, `vehicle_model_selection`, and `place_at_start` (see
-//! [`live_api`]); reads `map`, `vehicle_status`, `vehicle_model_status`, and
-//! `lidar_scan`, which some other executor in the same [`crate::Runner`]
-//! (e.g. [`crate::sensors::MapServer`], [`crate::actuators::SimulatedVehicle`],
-//! [`crate::sensors::SimulatedLidar`]) is expected to be writing.
+//! generating maps, for driving the vehicle - WASD control and a live map -
+//! and for picking which vehicle physics model is running, on
+//! [`WebGuiConfig::bind_addr`]. Claims the writer slot for
+//! `human_vesc_command`, `map_selection`, `vehicle_model_selection`, and
+//! `place_at_start` (see [`live_api`]); reads `map` and
+//! `vehicle_model_status` to reflect the current selections.
+//!
+//! Everything on the map canvas comes from drawing topics (see
+//! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
+//! executor in the same [`crate::Runner`] chooses to draw - the map, the
+//! vehicle, LIDAR hits, ... - without this module knowing about any of them.
+//! The Topics panel likewise inspects any topic generically (see
+//! [`topics_api`]).
 
 mod assets;
+mod draw_api;
 mod handlers;
 mod live_api;
 mod maps_api;
+mod topics_api;
 
 use crate::topics::{
     HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,

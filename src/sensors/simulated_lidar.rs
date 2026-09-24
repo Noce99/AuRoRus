@@ -1,11 +1,14 @@
 //! [`SimulatedLidar`]: a synthetic LIDAR sensor that raycasts against the
 //! currently loaded map from the vehicle's real position, for exercising
 //! algorithms against physically grounded readings without real hardware.
+//! Also draws every hit on its own drawing topic (see
+//! [`crate::topics::Drawing`]).
 
 use crate::environment::MapInfo;
-use crate::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, SelectedMap, VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+use crate::topics::{Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, Shape, MAP_TOPIC_NAME, SelectedMap, VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
+use std::time::Duration;
 
 /// Every tunable parameter [`SimulatedLidar`] needs - loaded from
 /// `config/sensors/simulated_lidar.toml` (see [`Default`]) or from an
@@ -64,18 +67,24 @@ impl Executor for SimulatedLidar {
         captain.claim_writer::<LidarScan>(LIDAR_SCAN_TOPIC_NAME, self.id, move || {
             LidarScan::new(Vec::new(), Vec::new(), config.min_distance_m, config.max_distance_m, config.fov_rad)
         });
+        captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
         let lidar_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
         let vehicle_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
         let map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
+        let drawing_topic = captain.drawing(self.id);
+        // Three missed scans in a row - but never tighter than the default, so
+        // a fast lidar isn't flagged stale by a viewer's own polling jitter.
+        let stale_after = Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz));
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
             let status = vehicle_topic.read();
             let map = map_topic.read();
 
+            let mut hits = Vec::new();
             let (points, intensities) = (0..self.config.num_points)
                 .map(|i| {
                     let angle_rad = status.heading_rad + f64::from(ray_offset_rad(&self.config, i));
@@ -83,7 +92,12 @@ impl Executor for SimulatedLidar {
                         Some(info) => cast_ray(&map, info, status.x_m, status.y_m, angle_rad, self.config.max_distance_m),
                         None => (self.config.max_distance_m, false),
                     };
-                    (distance_m.clamp(self.config.min_distance_m, self.config.max_distance_m), if hit { 1.0 } else { 0.0 })
+                    let distance_m = distance_m.clamp(self.config.min_distance_m, self.config.max_distance_m);
+                    if hit {
+                        let d = f64::from(distance_m);
+                        hits.push([(status.x_m + d * angle_rad.cos()) as f32, (status.y_m + d * angle_rad.sin()) as f32]);
+                    }
+                    (distance_m, if hit { 1.0 } else { 0.0 })
                 })
                 .unzip();
 
@@ -93,6 +107,14 @@ impl Executor for SimulatedLidar {
                     LidarScan::new(points, intensities, self.config.min_distance_m, self.config.max_distance_m, self.config.fov_rad),
                 )
                 .expect("lost writer authorization for the lidar_scan topic");
+            drawing_topic
+                .write(
+                    self.id,
+                    Drawing::new(vec![Shape::Points { points: hits, radius_px: 2.5, color: Color::RED }])
+                        .stale_after(stale_after)
+                        .z_index(5),
+                )
+                .expect("lost writer authorization for the lidar's drawing topic");
 
             ticker.wait();
         }

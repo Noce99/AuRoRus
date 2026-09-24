@@ -4,7 +4,8 @@
 //! [`VEHICLE_STATUS_TOPIC_NAME`]. Also watches
 //! [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a live model switch (e.g. from
 //! `web_gui`), publishing the currently running model on
-//! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`].
+//! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`], and draws the vehicle on its own
+//! drawing topic (see [`crate::topics::Drawing`]).
 
 use crate::environment::simulator::vehicle::{
     BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState, NonlinearTireParams,
@@ -12,7 +13,7 @@ use crate::environment::simulator::vehicle::{
     pacejka_step, step as bicycle_step, two_track_step,
 };
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, StartState,
+    Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME, Shape, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, StartState,
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME,
     VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
@@ -390,6 +391,45 @@ fn advance(
 /// wins ties. With no autonomous controller implemented yet,
 /// [`VESC_COMMAND_TOPIC_NAME`] is never written, so this always resolves to
 /// `human` in practice today.
+/// Body size [`SimulatedVehicle`] draws the vehicle at - roughly a 1/10-scale
+/// RC car, matching the models' default geometry.
+const DRAWN_BODY_LENGTH_M: f64 = 0.45;
+const DRAWN_BODY_WIDTH_M: f64 = 0.25;
+
+/// The distances from the model's reference point to its front and rear
+/// axles - what [`drawing`] turns the front wheels about.
+fn axles_of(model: &VehicleModel) -> (f64, f64) {
+    match model {
+        VehicleModel::Bicycle { params, .. } => (params.lf_m, params.lr_m),
+        VehicleModel::DynamicBicycle { params, .. } => (params.lf_m, params.lr_m),
+        VehicleModel::NonlinearBicycle { params, .. } => (params.lf_m, params.lr_m),
+        VehicleModel::PacejkaBicycle { params, .. } => (params.lf_m, params.lr_m),
+        VehicleModel::TwoTrack { params, .. } => (params.lf_m, params.lr_m),
+    }
+}
+
+/// What [`SimulatedVehicle`] publishes on its drawing topic every tick: the
+/// vehicle at `state`, front wheels turned by `steering_angle_rad`.
+fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) -> Drawing {
+    let (front_axle_m, rear_axle_m) = axles_of(model);
+    Drawing::new(vec![Shape::Vehicle {
+        x_m: state.x_m(),
+        y_m: state.y_m(),
+        heading_rad: state.heading_rad(),
+        // Signed, unlike `VehicleStatus::speed_mps`, so a viewer dead-reckoning
+        // the vehicle between samples moves it backward while reversing.
+        speed_mps: state.longitudinal_speed_mps(),
+        steering_rad: steering_angle_rad,
+        length_m: DRAWN_BODY_LENGTH_M,
+        width_m: DRAWN_BODY_WIDTH_M,
+        front_axle_m,
+        rear_axle_m,
+        color: Color::AMBER,
+    }])
+    .stale_after(Drawing::DEFAULT_STALE_AFTER)
+    .z_index(10)
+}
+
 fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>) -> VescCommand {
     if human.meta.written_at >= autonomous.meta.written_at { human.value } else { autonomous.value }
 }
@@ -429,6 +469,7 @@ impl Executor for SimulatedVehicle {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME, self.id, VehicleStatus::default);
         captain.claim_writer::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME, self.id, VehicleModelStatus::default);
+        captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
@@ -439,6 +480,7 @@ impl Executor for SimulatedVehicle {
         let model_status_topic = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+        let drawing_topic = captain.drawing(self.id);
 
         let mut applied_kind = kind_of(&self.model);
         model_status_topic
@@ -495,6 +537,9 @@ impl Executor for SimulatedVehicle {
                     },
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
+            drawing_topic
+                .write(self.id, drawing(&self.model, &state, steering_angle_rad))
+                .expect("lost writer authorization for the vehicle's drawing topic");
 
             ticker.wait();
         }

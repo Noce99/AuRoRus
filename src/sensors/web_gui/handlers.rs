@@ -3,10 +3,12 @@
 
 use super::WebGuiConfig;
 use super::assets;
+use super::draw_api;
 use super::live_api;
 use super::maps_api;
+use super::topics_api;
 use crate::Captain;
-use crate::web::not_found;
+use crate::web::{not_found, respond_and_close};
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
 
@@ -15,14 +17,15 @@ use tiny_http::{Method, Request, ResponseBox};
 /// writes to `human_vesc_command`/`map_selection`.
 pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_id: u8, config: &WebGuiConfig) {
     let method = request.method().clone();
-    let path = request.url().split('?').next().unwrap_or("/").to_string();
+    let url = request.url().to_string();
+    let path = url.split('?').next().unwrap_or("/").to_string();
 
     // Assets shared with the other web UI (the map canvas script, the base
     // stylesheet) are served by `crate::web`; the rest are this UI's own.
     if method == Method::Get
         && let Some(response) = crate::web::shared_asset(&path)
     {
-        if let Err(err) = request.respond(response) {
+        if let Err(err) = respond_and_close(request, response) {
             eprintln!("web_gui: failed to send response: {err}");
         }
         return;
@@ -38,10 +41,11 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
         (Method::Get, path) if path.starts_with("/api/maps/") => route_map_get(path, maps_root),
         (Method::Get, "/api/map") => live_api::map(captain),
-        (Method::Get, "/api/map/raster") => live_api::raster(captain),
         (Method::Post, "/api/map_selection") => live_api::select_map(&mut request, captain, writer_id, maps_root),
-        (Method::Get, "/api/vehicle_status") => live_api::vehicle_status(captain),
-        (Method::Get, "/api/lidar_scan") => live_api::lidar_scan(captain),
+        (Method::Post, "/api/draw") => draw_api::layers(&mut request, captain),
+        (Method::Get, "/api/draw/raster") => draw_api::raster(&url, captain),
+        (Method::Get, "/api/topics") => topics_api::list(captain),
+        (Method::Get, "/api/topic") => topics_api::value(&url, captain),
         (Method::Post, "/api/human_vesc_command") => live_api::human_vesc_command(&mut request, captain, writer_id),
         (Method::Get, "/api/vehicle_models") => live_api::vehicle_models(),
         (Method::Get, "/api/vehicle_model") => live_api::vehicle_model(captain),
@@ -51,7 +55,10 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         _ => not_found(),
     };
 
-    if let Err(err) = request.respond(response) {
+    // Every response closes its connection, so no client is ever left holding
+    // one to a server that a restart has since torn down - see
+    // `respond_and_close`.
+    if let Err(err) = respond_and_close(request, response) {
         eprintln!("web_gui: failed to send response: {err}");
     }
 }

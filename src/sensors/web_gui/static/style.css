@@ -111,7 +111,7 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
   line-height: 1.4;
 }
 
-#poll-rate-row {
+.rate-row {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: auto 1fr 3.5em;
@@ -121,18 +121,18 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
   color: #9aa4b2;
 }
 
-#poll-rate-row[hidden] {
+.rate-row[hidden] {
   display: none;
 }
 
-#poll-rate {
+.rate-row input[type="range"] {
   width: 100%;
   min-width: 0;
   margin: 0;
   accent-color: #3f6dc9;
 }
 
-#poll-rate-value {
+.rate-row span {
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: #e8e8e8;
@@ -171,6 +171,56 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
 .placeholder-text {
   color: #6b7280;
   font-style: italic;
+}
+
+#layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#layer-list label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #22272e;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#layer-list input {
+  margin: 0;
+  accent-color: #3f6dc9;
+}
+
+.layer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-freshness {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #7fd18b;
+}
+
+.layer-freshness.stale {
+  color: #e0a458;
+}
+
+#layer-list .empty {
+  color: #6b7280;
+  font-style: italic;
+  padding: 8px 10px;
 }
 
 #map-list {

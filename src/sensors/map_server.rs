@@ -1,10 +1,12 @@
 //! [`MapServer`]: watches [`MAP_SELECTION_TOPIC_NAME`] for the wanted map
 //! folder and keeps [`MAP_TOPIC_NAME`] and [`START_STATE_TOPIC_NAME`] in sync
-//! with it, loading from disk only when the selection actually changes.
+//! with it, loading from disk only when the selection actually changes, and
+//! draws the loaded map on its own drawing topic (see
+//! [`crate::topics::Drawing`]).
 
 use crate::environment::Map;
 use crate::topics::{
-    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap, START_STATE_TOPIC_NAME, StartState,
+    Color, Drawing, MAP_SELECTION_TOPIC_NAME, Shape, MAP_TOPIC_NAME, MapSelection, SelectedMap, START_STATE_TOPIC_NAME, StartState,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -50,6 +52,35 @@ fn load(path: &Path) -> Option<(SelectedMap, StartState)> {
     }
 }
 
+/// What [`MapServer`] publishes on its drawing topic for `map`: the raster
+/// itself - sharing `map`'s pixel buffer rather than copying it - and the
+/// start/finish line on top. Empty when no map is loaded. Painted beneath
+/// every other drawing, and never fades: it's only republished when the map
+/// changes.
+fn drawing(map: &SelectedMap) -> Drawing {
+    let Some(info) = &map.info else {
+        return Drawing::default().z_index(-100);
+    };
+    let line = &info.start_finish_line;
+    Drawing::new(vec![
+        Shape::Raster {
+            origin_x_m: info.origin.x,
+            origin_y_m: info.origin.y,
+            resolution_m_per_px: info.resolution_m_per_px,
+            width_px: map.width_px,
+            height_px: map.height_px,
+            pixels: map.pixels.clone(),
+        },
+        Shape::Polyline {
+            points: vec![[line.a.x as f32, line.a.y as f32], [line.b.x as f32, line.b.y as f32]],
+            closed: false,
+            width_px: 2.0,
+            color: Color::RED,
+        },
+    ])
+    .z_index(-100)
+}
+
 /// The vehicle's initial state for `map`: the middle of its start/finish
 /// line, heading along the track's direction of travel there - the tangent
 /// from the race line's first point (the start/finish line is centered on
@@ -92,12 +123,14 @@ impl Executor for MapServer {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<SelectedMap>(MAP_TOPIC_NAME, self.id, SelectedMap::default);
         captain.claim_writer::<StartState>(START_STATE_TOPIC_NAME, self.id, StartState::default);
+        captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
         let map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let selection_topic = captain.topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME);
+        let drawing_topic = captain.drawing(self.id);
         let mut ticker = Ticker::from_interval(Duration::from_millis(self.config.poll_interval_ms));
 
         // Which map is currently published, tracked here rather than read back
@@ -122,6 +155,9 @@ impl Executor for MapServer {
                 // being recorded as published.
                 if let Some((next_map, next_start_state)) = next {
                     published_path = next_map.path.clone();
+                    drawing_topic
+                        .write(self.id, drawing(&next_map))
+                        .expect("lost writer authorization for the map's drawing topic");
                     map_topic
                         .write(self.id, next_map)
                         .expect("lost writer authorization for the map topic");

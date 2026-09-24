@@ -3,13 +3,16 @@
 
 use crate::core::log::LogColor;
 use crate::core::topic::{RwLockTopic, WriteMeta};
+use crate::topics::{DRAW_TOPIC_PREFIX, Drawing};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Type-erased access to one topic's writer/value, for the debug-recording
 /// [`crate::core::debug_executor::DebugExecutor`] - implemented generically below for every
@@ -27,6 +30,32 @@ pub(crate) trait DebugTopic: Send + Sync {
     /// meta of the write that published it - what [`crate::core::debug_executor::DebugExecutor`]
     /// writes to the `.debug` file. Read under one lock, so the two always match.
     fn read_encoded(&self) -> (Vec<u8>, WriteMeta);
+    /// The topic's current value as JSON, together with the meta of the write that published
+    /// it - or `None` for the value if its JSON would exceed `max_bytes` (e.g. a whole map
+    /// raster), so a viewer inspecting it can't make the process serialize megabytes per poll:
+    /// serialization is cut off as soon as it crosses the limit.
+    fn read_json(&self, max_bytes: usize) -> (Option<serde_json::Value>, WriteMeta);
+}
+
+/// An [`io::Write`] sink that fails once more than `limit` bytes are written to it - what lets
+/// [`DebugTopic::read_json`] abandon an oversized value partway through serializing it.
+struct LimitedWriter {
+    buf: Vec<u8>,
+    limit: usize,
+}
+
+impl Write for LimitedWriter {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if self.buf.len() + data.len() > self.limit {
+            return Err(io::Error::other("value exceeds the JSON size limit"));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T> {
@@ -44,6 +73,29 @@ impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T>
             .expect("encoding a topic's current value for the debug recorder should never fail");
         (encoded, stamped.meta)
     }
+
+    fn read_json(&self, max_bytes: usize) -> (Option<serde_json::Value>, WriteMeta) {
+        let stamped = self.read();
+        let mut writer = LimitedWriter { buf: Vec::new(), limit: max_bytes };
+        let json = serde_json::to_writer(&mut writer, &stamped.value)
+            .ok()
+            .and_then(|()| serde_json::from_slice(&writer.buf).ok());
+        (json, stamped.meta)
+    }
+}
+
+/// Source of [`Captain::epoch`]: the last epoch handed out, so two captains built within the
+/// same microsecond still get distinct, increasing epochs.
+static LAST_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// A value never handed out before in this process, and - being microseconds since the Unix
+/// epoch - almost surely never handed out by an earlier run of it either.
+fn next_epoch() -> u64 {
+    let now_us = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+    let previous = LAST_EPOCH
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| Some(now_us.max(last + 1)))
+        .expect("the update closure always returns Some");
+    now_us.max(previous + 1)
 }
 
 /// The object [`crate::Runner`] hands to every executor's [`crate::Executor::run`]:
@@ -72,6 +124,8 @@ pub struct Captain {
     names: Mutex<HashMap<u8, String>>,
     verbose: AtomicBool,
     restart_requested: AtomicBool,
+    /// See [`epoch`](Self::epoch).
+    epoch: u64,
 }
 
 impl Captain {
@@ -85,7 +139,19 @@ impl Captain {
             names: Mutex::new(HashMap::new()),
             verbose: AtomicBool::new(false),
             restart_requested: AtomicBool::new(false),
+            epoch: next_epoch(),
         }
+    }
+
+    /// Identifies this captain - and so this generation of topics - among every captain this
+    /// process (or, practically, any earlier run of it) has built. A restart
+    /// ([`request_restart`](Self::request_restart)) builds a fresh captain whose topics'
+    /// [`WriteMeta::write_count`]s start over from `0`, so a `write_count` on its own can't tell
+    /// "unchanged" apart from "rewritten the same number of times since a restart"; the pair
+    /// `(epoch, write_count)` can, e.g. for a web client asking whether its cached copy of a
+    /// topic is still current.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Turns verbose logging on or off, mirroring [`crate::Runner`]'s own flag, so
@@ -194,6 +260,41 @@ impl Captain {
                 Self::current_executor_name(),
             ));
         })
+    }
+
+    /// Like [`topic`](Self::topic), but returns `None` instead of terminating the program when no
+    /// topic is registered under `name`, or when it was registered with a type other than `T` -
+    /// for a caller discovering topics by name (e.g. every [`DRAW_TOPIC_PREFIX`] topic) that
+    /// can't be sure a topic with a matching name also has the expected type, and would rather
+    /// skip it than take the whole process down.
+    pub fn try_topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
+        &self,
+        name: &str,
+    ) -> Option<Arc<RwLockTopic<T>>> {
+        let erased = self.topics.read().unwrap().get(name).cloned()?;
+        erased.downcast::<RwLockTopic<T>>().ok()
+    }
+
+    /// The name of `executor_id`'s drawing topic: [`DRAW_TOPIC_PREFIX`] followed by the
+    /// executor's name, e.g. `draw/SimulatedVehicle`.
+    fn drawing_topic_name(&self, executor_id: u8) -> String {
+        format!("{DRAW_TOPIC_PREFIX}{}", self.name_of(executor_id))
+    }
+
+    /// Claims `executor_id`'s own [`Drawing`] topic - what it publishes to have anything shown
+    /// on a map view (see [`crate::topics::Drawing`]) - seeded with an empty drawing. Call it
+    /// from [`crate::Executor::claim_writing_topics`] like any other
+    /// [`claim_writer`](Self::claim_writer), then get the handle back in
+    /// [`crate::Executor::run`] via [`drawing`](Self::drawing).
+    pub fn claim_drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
+        self.claim_writer::<Drawing>(&self.drawing_topic_name(executor_id), executor_id, Drawing::default)
+    }
+
+    /// `executor_id`'s own [`Drawing`] topic, previously claimed via
+    /// [`claim_drawing`](Self::claim_drawing). Terminates the program, like
+    /// [`topic`](Self::topic), if it wasn't.
+    pub fn drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
+        self.topic::<Drawing>(&self.drawing_topic_name(executor_id))
     }
 
     /// Looks up `name`, or registers it - seeded by calling `initial` - the first
@@ -314,5 +415,53 @@ impl Captain {
     /// as true again.
     pub(crate) fn resume_executor(&self, id: u8) {
         self.executor_running[id as usize].store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_topic_is_none_for_a_missing_or_differently_typed_topic() {
+        let captain = Captain::new();
+        captain.register_topic("count", 7u32);
+
+        assert!(captain.try_topic::<u32>("missing").is_none());
+        assert!(captain.try_topic::<String>("count").is_none());
+        assert_eq!(captain.try_topic::<u32>("count").unwrap().read().value, 7);
+    }
+
+    #[test]
+    fn claim_drawing_registers_a_topic_named_after_the_executor() {
+        let captain = Captain::new();
+        captain.set_name(3, "SimulatedLidar".to_string());
+
+        captain.claim_drawing(3);
+
+        let topic = captain.try_topic::<Drawing>("draw/SimulatedLidar").expect("drawing topic should be registered");
+        assert_eq!(topic.writer(), Some(3));
+        assert!(Arc::ptr_eq(&topic, &captain.drawing(3)));
+    }
+
+    #[test]
+    fn every_captain_gets_a_later_epoch_than_the_one_before() {
+        let first = Captain::new().epoch();
+        let second = Captain::new().epoch();
+        assert!(second > first);
+    }
+
+    #[test]
+    fn read_json_gives_up_on_values_over_the_size_limit() {
+        let captain = Captain::new();
+        captain.register_topic("small", vec![1u8, 2, 3]);
+        captain.register_topic("large", vec![0u8; 10_000]);
+        let topics: HashMap<String, Arc<dyn DebugTopic>> = captain.debug_topics_snapshot().into_iter().collect();
+
+        let (small, _) = topics["small"].read_json(1024);
+        let (large, _) = topics["large"].read_json(1024);
+
+        assert_eq!(small, Some(serde_json::json!([1, 2, 3])));
+        assert_eq!(large, None);
     }
 }
