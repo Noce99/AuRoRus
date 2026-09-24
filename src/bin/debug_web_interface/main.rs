@@ -20,7 +20,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let server = tiny_http::Server::http(&config.bind_addr).unwrap_or_else(|err| {
+    let server = aurorus::web::bind_http(config.bind_addr.as_str()).unwrap_or_else(|err| {
         eprintln!("debug_web_interface: failed to bind {}: {err}", config.bind_addr);
         std::process::exit(1);
     });

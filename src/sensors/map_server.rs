@@ -107,7 +107,7 @@ impl Executor for MapServer {
         // Seeded once from the topic so a mid-run restart of just this
         // executor (`Runner::switch_executor`) doesn't reload a map that's
         // already published.
-        let mut published_path = map_topic.read().path;
+        let mut published_path = map_topic.read().into_value().path;
 
         while captain.is_running(self.id) {
             let wanted = selection_topic.read();

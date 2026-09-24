@@ -16,7 +16,7 @@ pub fn verify_consistency<T>(runner: &Runner, topic_name: &str, values: impl Fn(
 where
     T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static,
 {
-    let payload: T = runner.topic::<T>(topic_name).read();
+    let payload: T = runner.topic::<T>(topic_name).read().into_value();
     let values = values(&payload);
     !values.is_empty() && values.iter().all(|v| v.is_finite())
 }

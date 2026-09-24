@@ -2,7 +2,7 @@
 //! topic plus the run/stop signals an executor polls to know when to exit.
 
 use crate::core::log::LogColor;
-use crate::core::topic::RwLockTopic;
+use crate::core::topic::{RwLockTopic, WriteMeta};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
@@ -20,9 +20,13 @@ pub(crate) trait DebugTopic: Send + Sync {
     /// See [`RwLockTopic::writer`]. Named identically on purpose - there's no ambiguity in practice,
     /// since this is only ever called through `Arc<dyn DebugTopic>`, never on a concrete `RwLockTopic<T>`.
     fn writer(&self) -> Option<u8>;
-    /// The topic's current value, bincode-encoded - what [`crate::core::debug_executor::DebugExecutor`]
-    /// writes to the `.debug` file (after checking it differs from what it last recorded).
-    fn read_encoded(&self) -> Vec<u8>;
+    /// See [`RwLockTopic::meta`] - lets [`crate::core::debug_executor::DebugExecutor`] tell whether
+    /// anything new was written without encoding the value.
+    fn meta(&self) -> WriteMeta;
+    /// The topic's current value (without its [`WriteMeta`]), bincode-encoded, together with the
+    /// meta of the write that published it - what [`crate::core::debug_executor::DebugExecutor`]
+    /// writes to the `.debug` file. Read under one lock, so the two always match.
+    fn read_encoded(&self) -> (Vec<u8>, WriteMeta);
 }
 
 impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T> {
@@ -30,9 +34,15 @@ impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T>
         RwLockTopic::writer(self)
     }
 
-    fn read_encoded(&self) -> Vec<u8> {
-        bincode::serde::encode_to_vec(self.read(), bincode::config::standard())
-            .expect("encoding a topic's current value for the debug recorder should never fail")
+    fn meta(&self) -> WriteMeta {
+        RwLockTopic::meta(self)
+    }
+
+    fn read_encoded(&self) -> (Vec<u8>, WriteMeta) {
+        let stamped = self.read();
+        let encoded = bincode::serde::encode_to_vec(&stamped.value, bincode::config::standard())
+            .expect("encoding a topic's current value for the debug recorder should never fail");
+        (encoded, stamped.meta)
     }
 }
 

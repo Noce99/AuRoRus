@@ -13,7 +13,7 @@ use crate::topics::{
     PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
     VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
-use crate::Captain;
+use crate::{Captain, WriteMeta};
 use std::path::Path;
 use tiny_http::{Request, Response, ResponseBox};
 
@@ -37,9 +37,38 @@ pub fn config(config: &WebGuiConfig) -> ResponseBox {
     )
 }
 
+/// The envelope every topic-reading `GET` endpoint wraps its body in: the
+/// topic's value plus the [`WriteMeta`] the topic stamped it with, so the
+/// frontend can tell how fresh it is. `age_ms` is measured server-side (on the
+/// monotonic clock) at response time; it and `written_at_unix_us` are
+/// `null`/`0` while the topic still holds its unwritten seed
+/// (`write_count == 0`).
+#[derive(serde::Serialize)]
+struct StampedBody<'a, T> {
+    value: &'a T,
+    written_at_unix_us: u64,
+    age_ms: Option<f64>,
+    write_count: u64,
+}
+
+/// Serializes `value` (derived from a topic read) wrapped in a
+/// [`StampedBody`] carrying that read's `meta`.
+fn stamped_json<T: serde::Serialize>(value: &T, meta: WriteMeta) -> ResponseBox {
+    json_response(
+        &StampedBody {
+            value,
+            written_at_unix_us: meta.written_at_unix_us,
+            age_ms: meta.written_at.map(|written_at| written_at.elapsed().as_secs_f64() * 1000.0),
+            write_count: meta.write_count,
+        },
+        200,
+    )
+}
+
 /// `GET /api/map` - the currently selected map's name and dimensions (not
 /// its pixels - see [`raster`]), read from the `map` topic. `name` is
 /// derived from the topic's folder path, or `null` if no map is selected.
+/// Served as a [`StampedBody`].
 #[derive(serde::Serialize)]
 struct LiveMap {
     name: Option<String>,
@@ -55,14 +84,14 @@ pub fn map(captain: &Captain) -> ResponseBox {
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .map(str::to_string);
-    json_response(&LiveMap { name, width_px: selected.width_px, height_px: selected.height_px }, 200)
+    stamped_json(&LiveMap { name, width_px: selected.width_px, height_px: selected.height_px }, selected.meta)
 }
 
 /// `GET /api/map/raster` - the currently selected map's pixels, read from
 /// the `map` topic rather than disk, in the same one-byte-per-pixel format
 /// as [`super::maps_api::raster`].
 pub fn raster(captain: &Captain) -> ResponseBox {
-    let selected = captain.topic::<SelectedMap>(MAP_TOPIC_NAME).read();
+    let selected = captain.topic::<SelectedMap>(MAP_TOPIC_NAME).read().into_value();
     let len = selected.pixels.len();
     Response::new(
         tiny_http::StatusCode(200),
@@ -104,18 +133,20 @@ pub fn select_map(request: &mut Request, captain: &Captain, writer_id: u8, maps_
 }
 
 /// `GET /api/vehicle_status` - the vehicle's live position, heading, and
-/// speed, read from the `vehicle_status` topic.
+/// speed, read from the `vehicle_status` topic, as a [`StampedBody`].
 pub fn vehicle_status(captain: &Captain) -> ResponseBox {
-    json_response(&captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME).read(), 200)
+    let status = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME).read();
+    stamped_json(&status.value, status.meta)
 }
 
 /// `GET /api/lidar_scan` - the most recent LIDAR scan, read from the
 /// `lidar_scan` topic - distances/intensities per ray, plus the sensor's
 /// `fov`/`min_distance`/`max_distance`, which the frontend needs to turn
 /// each ray back into a world-frame point relative to the vehicle's current
-/// pose.
+/// pose - as a [`StampedBody`].
 pub fn lidar_scan(captain: &Captain) -> ResponseBox {
-    json_response(&captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME).read(), 200)
+    let scan = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME).read();
+    stamped_json(&scan.value, scan.meta)
 }
 
 #[derive(serde::Deserialize)]
@@ -164,10 +195,10 @@ struct LiveVehicleModel {
 }
 
 /// `GET /api/vehicle_model` - the vehicle model kind currently running, read
-/// from the `vehicle_model_status` topic.
+/// from the `vehicle_model_status` topic, as a [`StampedBody`].
 pub fn vehicle_model(captain: &Captain) -> ResponseBox {
     let status = captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME).read();
-    json_response(&LiveVehicleModel { kind: status.kind.api_str() }, 200)
+    stamped_json(&LiveVehicleModel { kind: status.kind.api_str() }, status.meta)
 }
 
 #[derive(serde::Deserialize)]

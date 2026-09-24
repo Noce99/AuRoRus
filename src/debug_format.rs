@@ -22,8 +22,9 @@
 //!   `topic_id: u16` (assigned sequentially from 0, in first-seen order),
 //!   `topic_name_len: u16` + UTF-8 name, `writer_name_len: u16` + UTF-8 writer
 //!   executor name (captured once via `Captain::name_of`).
-//! - `Sample` (`tag = 0x02`, one per recorded change): `topic_id: u16`,
-//!   `timestamp_us: u64` (elapsed microseconds since `session_start_unix_micros`),
+//! - `Sample` (`tag = 0x02`, one per recorded write): `topic_id: u16`,
+//!   `timestamp_us: u64` (when the value was *written* to its topic, as elapsed
+//!   microseconds since `session_start_unix_micros`),
 //!   `payload_len: u32`, `payload: [u8; payload_len]` (bincode-encoded value, via
 //!   `bincode::serde::encode_to_vec`/`decode_from_slice` with
 //!   `bincode::config::standard()`).
@@ -338,7 +339,9 @@ pub struct DebugFileReader {
     pub session_start_unix_micros: u128,
     /// `index == topic_id`.
     pub topics: Vec<TopicMeta>,
-    /// In file order, which is also timestamp order - the writer only ever appends.
+    /// In file order. Each topic's own samples are in timestamp order (one writer
+    /// per topic, stamped at write time); samples of *different* topics recorded in
+    /// the same tick may be slightly out of order relative to each other.
     pub samples: Vec<Sample>,
 }
 

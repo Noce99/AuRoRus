@@ -47,20 +47,75 @@ let liveVehicleModelKind = null;
  *  updated without re-fetching every time the selection changes. */
 let vehicleModelOptions = [];
 
-/** Raw latest payload from each topic this page polls, keyed the same as
- *  `#topic-select`'s option values - feeds the Topics panel's live view
- *  (see `renderTopicContent` below). Updated by the same poll functions
- *  that already drive the map/vehicle/lidar state above. */
+/** Latest response from each topic this page polls, keyed the same as
+ *  `#topic-select`'s option values - the full server envelope
+ *  (`{value, written_at_unix_us, age_ms, write_count}`) plus `receivedAtMs`
+ *  (`performance.now()` on arrival), so the Topics panel can show how old
+ *  the value is right now (see `renderTopicContent` below). Updated by the
+ *  same poll functions that already drive the map/vehicle/lidar state above. */
 const topicSnapshots = { map: null, vehicle_status: null, lidar_scan: null, vehicle_model: null };
+
+/** How often, in Hz, this page reads each topic it polls, keyed like
+ *  `topicSnapshots` - where the Topics panel's read-rate slider starts for
+ *  each topic (and returns to on reload). */
+const DEFAULT_POLL_RATES_HZ = { vehicle_status: 30, lidar_scan: 30, map: 2, vehicle_model: 2 };
+/** The rates currently in effect - changed live by that slider. */
+const pollRatesHz = { ...DEFAULT_POLL_RATES_HZ };
+
+/** Window the Topics panel's mean write rate is measured over. */
+const TOPIC_RATE_WINDOW_MS = 10_000;
+
+/** Per topic (same keys as `topicSnapshots`), the `{atMs, writeCount}` of
+ *  every poll within the last `TOPIC_RATE_WINDOW_MS`, plus the newest one
+ *  just before it as an anchor, so the window stays fully covered even for
+ *  slowly polled topics - see `meanWriteRateHz`. */
+const topicWriteHistory = { map: [], vehicle_status: [], lidar_scan: [], vehicle_model: [] };
+
+/** Fetches a topic-backed endpoint, records its envelope in
+ *  `topicSnapshots[key]` (and its write count in `topicWriteHistory[key]`),
+ *  and returns just the topic's value. */
+async function fetchTopic(url, key) {
+  const envelope = await fetchJSON(url);
+  const receivedAtMs = performance.now();
+  topicSnapshots[key] = { ...envelope, receivedAtMs };
+
+  const history = topicWriteHistory[key];
+  // A server-side restart starts every write count over from 0 - earlier
+  // samples no longer compare, so start measuring afresh.
+  if (history.length > 0 && envelope.write_count < history[history.length - 1].writeCount) history.length = 0;
+  history.push({ atMs: receivedAtMs, writeCount: envelope.write_count });
+  while (history.length > 1 && history[1].atMs <= receivedAtMs - TOPIC_RATE_WINDOW_MS) history.shift();
+  return envelope.value;
+}
+
+/** Mean writes per second of `key`'s topic over (up to) the last
+ *  `TOPIC_RATE_WINDOW_MS` - `0` if its write count didn't move in that
+ *  time - or `null` until two polls have been seen. Measured on this page's
+ *  poll arrival times, so it's exact over the window up to one poll's
+ *  jitter at either end. */
+function meanWriteRateHz(key) {
+  const history = topicWriteHistory[key];
+  if (history.length < 2) return null;
+  const oldest = history[0];
+  const newest = history[history.length - 1];
+  const spanS = (newest.atMs - oldest.atMs) / 1000;
+  return spanS > 0 ? (newest.writeCount - oldest.writeCount) / spanS : null;
+}
 
 // ---------------------------------------------------------------------
 // Vehicle pose
 // ---------------------------------------------------------------------
 
-/** Never dead-reckon further than this past the last sample: if polling
- *  stalls (tab backgrounded, server busy) we'd rather park the vehicle a
- *  little behind than fling it across the map on stale data. */
-const MAX_EXTRAPOLATION_MS = 150;
+/** Never dead-reckon further than this past the last sample (or 1.5 poll
+ *  periods, when `vehicle_status` is polled slowly enough that this would
+ *  otherwise make the vehicle stutter between samples): if polling stalls
+ *  (tab backgrounded, server busy) we'd rather park the vehicle a little
+ *  behind than fling it across the map on stale data. */
+const MIN_MAX_EXTRAPOLATION_MS = 150;
+
+function maxExtrapolationMs() {
+  return Math.max(MIN_MAX_EXTRAPOLATION_MS, 1.5 * (1000 / pollRatesHz.vehicle_status));
+}
 
 /** The last sample advanced to `nowMs` along its own heading at its own
  *  speed - the same straight-line motion the simulator itself integrates
@@ -68,7 +123,7 @@ const MAX_EXTRAPOLATION_MS = 150;
  *  modelled, which at a 33 ms period and 8 m/s is a few millimetres. */
 function predictedVehiclePose(nowMs) {
   if (!vehicleStatus) return null;
-  const dt_s = Math.min(Math.max(nowMs - vehicleStatusAtMs, 0), MAX_EXTRAPOLATION_MS) / 1000;
+  const dt_s = Math.min(Math.max(nowMs - vehicleStatusAtMs, 0), maxExtrapolationMs()) / 1000;
   return {
     x_m: vehicleStatus.x_m + vehicleStatus.speed_mps * Math.cos(vehicleStatus.heading_rad) * dt_s,
     y_m: vehicleStatus.y_m + vehicleStatus.speed_mps * Math.sin(vehicleStatus.heading_rad) * dt_s,
@@ -167,8 +222,7 @@ async function refreshMapList() {
 // live selection actually changes - driven by `map_selection`, written by
 // `selectMap` above (sidebar clicks, or a freshly generated map).
 async function pollLiveMap() {
-  const live = await fetchJSON("/api/map");
-  topicSnapshots.map = live;
+  const live = await fetchTopic("/api/map", "map");
   if (live.name === liveMapName) return;
 
   liveMapName = live.name;
@@ -180,13 +234,9 @@ async function pollLiveMap() {
   await refreshMapList();
 }
 
-const LIVE_MAP_POLL_MS = 500;
-const VEHICLE_STATUS_POLL_MS = 33;
-const LIDAR_SCAN_POLL_MS = 33;
 
 async function pollVehicleStatus() {
-  const status = await fetchJSON("/api/vehicle_status");
-  topicSnapshots.vehicle_status = status;
+  const status = await fetchTopic("/api/vehicle_status", "vehicle_status");
   // A still vehicle produces an identical sample every poll; repainting for
   // those is pure waste, and MapView already keeps painting by itself while
   // `isAnimating()` holds.
@@ -202,8 +252,7 @@ async function pollVehicleStatus() {
 }
 
 async function pollLidarScan() {
-  lidarScan = await fetchJSON("/api/lidar_scan");
-  topicSnapshots.lidar_scan = lidarScan;
+  lidarScan = await fetchTopic("/api/lidar_scan", "lidar_scan");
   MapView.requestRedraw();
 }
 
@@ -252,8 +301,7 @@ vehicleModelSelectEl.addEventListener("change", () => {
 // driven by `vehicle_model_selection`, written by `selectVehicleModel`
 // above (this tab's dropdown, or another client's).
 async function pollVehicleModel() {
-  const live = await fetchJSON("/api/vehicle_model");
-  topicSnapshots.vehicle_model = live;
+  const live = await fetchTopic("/api/vehicle_model", "vehicle_model");
   // The dropdown's own value has to be checked too, not just the last kind
   // we saw: this poll starts before `populateVehicleModelOptions` has added
   // any `<option>`s, and assigning `.value` on an empty `<select>` silently
@@ -291,16 +339,81 @@ for (const btn of panelNavButtons) {
 // ---------------------------------------------------------------------
 
 const topicSelectEl = document.getElementById("topic-select");
+const topicFreshnessEl = document.getElementById("topic-freshness");
+const topicRateEl = document.getElementById("topic-rate");
 const topicContentEl = document.getElementById("topic-content");
 
 const TOPIC_CONTENT_REFRESH_MS = 200;
 
-function renderTopicContent() {
-  const topic = topicSelectEl.value;
-  topicContentEl.textContent = topic ? JSON.stringify(topicSnapshots[topic], null, 2) : "";
+/** Range of the Topics panel's read-rate slider, in Hz. */
+const POLL_RATE_MIN_HZ = 1;
+const POLL_RATE_MAX_HZ = 100;
+
+/** The read-rate slider under `#topic-select`: shows, and retunes, the
+ *  rate of whichever topic is selected - hidden while none is. */
+const pollRateRowEl = document.getElementById("poll-rate-row");
+const pollRateEl = document.getElementById("poll-rate");
+const pollRateValueEl = document.getElementById("poll-rate-value");
+pollRateEl.min = POLL_RATE_MIN_HZ;
+pollRateEl.max = POLL_RATE_MAX_HZ;
+
+/** Points the slider at the currently selected topic's rate. */
+function syncPollRateSlider() {
+  const key = topicSelectEl.value;
+  pollRateRowEl.hidden = !key;
+  if (!key) return;
+  pollRateEl.value = pollRatesHz[key];
+  pollRateValueEl.textContent = `${pollRatesHz[key]} Hz`;
 }
 
-topicSelectEl.addEventListener("change", renderTopicContent);
+pollRateEl.addEventListener("input", () => {
+  const key = topicSelectEl.value;
+  if (!key) return;
+  pollRatesHz[key] = Number(pollRateEl.value);
+  pollRateValueEl.textContent = `${pollRatesHz[key]} Hz`;
+  pollers[key].setIntervalMs(1000 / pollRatesHz[key]);
+});
+
+/** A topic whose latest write is older than this is flagged as stale. */
+const TOPIC_STALE_AFTER_MS = 1000;
+
+/** Human-readable age, e.g. "42 ms", "3.1 s", "5 min". */
+function formatAge(ms) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.round(ms / 60_000)} min`;
+}
+
+function renderTopicContent() {
+  const topic = topicSelectEl.value;
+  const snapshot = topic ? topicSnapshots[topic] : null;
+  if (!snapshot) {
+    topicFreshnessEl.textContent = "";
+    topicFreshnessEl.classList.remove("stale");
+    topicRateEl.textContent = "";
+    topicContentEl.textContent = "";
+    return;
+  }
+  const rateHz = meanWriteRateHz(topic);
+  topicRateEl.textContent =
+    rateHz === null ? "measuring write rate\u2026" : `${rateHz.toFixed(1)} Hz mean over the last ${TOPIC_RATE_WINDOW_MS / 1000} s`;
+  const { value, receivedAtMs, ...meta } = snapshot;
+  if (meta.age_ms === null) {
+    topicFreshnessEl.textContent = "never written (initial value)";
+    topicFreshnessEl.classList.add("stale");
+  } else {
+    // The server measured age_ms when it answered; add how long ago that was.
+    const ageMs = meta.age_ms + (performance.now() - receivedAtMs);
+    topicFreshnessEl.textContent = `written ${formatAge(ageMs)} ago \u00b7 write #${meta.write_count}`;
+    topicFreshnessEl.classList.toggle("stale", ageMs > TOPIC_STALE_AFTER_MS);
+  }
+  topicContentEl.textContent = JSON.stringify({ ...meta, value }, null, 2);
+}
+
+topicSelectEl.addEventListener("change", () => {
+  syncPollRateSlider();
+  renderTopicContent();
+});
 
 setInterval(() => {
   // Only worth the work while the Topics panel is actually visible with a
@@ -506,14 +619,19 @@ fetchJSON("/api/config")
   })
   .catch((err) => console.error(err));
 
-startPolling(pollLiveMap, LIVE_MAP_POLL_MS);
-startPolling(pollVehicleStatus, VEHICLE_STATUS_POLL_MS);
-startPolling(pollLidarScan, LIDAR_SCAN_POLL_MS);
-startPolling(pollVehicleModel, LIVE_MAP_POLL_MS);
+/** Each polled topic's `startPolling` handle, keyed like `pollRatesHz`, so
+ *  the read-rate slider can retune it live. */
+const pollers = {
+  map: startPolling(pollLiveMap, 1000 / pollRatesHz.map),
+  vehicle_status: startPolling(pollVehicleStatus, 1000 / pollRatesHz.vehicle_status),
+  lidar_scan: startPolling(pollLidarScan, 1000 / pollRatesHz.lidar_scan),
+  vehicle_model: startPolling(pollVehicleModel, 1000 / pollRatesHz.vehicle_model),
+};
+syncPollRateSlider();
 
 refreshMapList()
   .then(async (maps) => {
-    const live = await fetchJSON("/api/map");
+    const live = (await fetchJSON("/api/map")).value;
     if (!live.name && maps.length > 0) {
       await selectMap(maps[0].name);
     }

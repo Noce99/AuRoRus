@@ -16,7 +16,7 @@ use crate::topics::{
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TOPIC_NAME,
     VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
-use crate::{Captain, Executor, Ticker};
+use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
 
 /// The physical limits a [`VehicleModel`]'s simulated actuators can't
@@ -384,13 +384,14 @@ fn advance(
     (next_state, next_steering_rad)
 }
 
-/// Picks whichever of an autonomous and a human command was published more
-/// recently - see [`VescCommand::time_stamp_us`]. With no autonomous
-/// controller implemented yet, `autonomous` is whatever
-/// [`VESC_COMMAND_TOPIC_NAME`] was pre-seeded with, so this always resolves
-/// to `human` in practice today.
-fn select_command(autonomous: VescCommand, human: VescCommand) -> VescCommand {
-    if human.time_stamp_us >= autonomous.time_stamp_us { human } else { autonomous }
+/// Picks whichever of an autonomous and a human command was written more
+/// recently, by each topic's [`crate::WriteMeta::written_at`] - a topic still
+/// holding its seed (never written) always loses to one that was, and `human`
+/// wins ties. With no autonomous controller implemented yet,
+/// [`VESC_COMMAND_TOPIC_NAME`] is never written, so this always resolves to
+/// `human` in practice today.
+fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>) -> VescCommand {
+    if human.meta.written_at >= autonomous.meta.written_at { human.value } else { autonomous.value }
 }
 
 /// Runs `model` forward in time at [`SimulatedVehicleConfig::tick_rate_hz`], reading the freshest of
@@ -444,7 +445,7 @@ impl Executor for SimulatedVehicle {
             .write(self.id, VehicleModelStatus { kind: applied_kind })
             .expect("lost writer authorization for the vehicle_model_status topic");
 
-        let mut applied_start = start_state_topic.read();
+        let mut applied_start = start_state_topic.read().into_value();
         let mut applied_place_request = place_at_start_topic.read().requested;
         let mut state = state_from_start(applied_start, applied_kind);
         let mut steering_angle_rad = 0.0;
@@ -467,7 +468,7 @@ impl Executor for SimulatedVehicle {
                     .expect("lost writer authorization for the vehicle_model_status topic");
             }
 
-            let wanted_start = start_state_topic.read();
+            let wanted_start = start_state_topic.read().into_value();
             let wanted_place_request = place_at_start_topic.read().requested;
             if wanted_start != applied_start || wanted_place_request != applied_place_request {
                 state = state_from_start(wanted_start, applied_kind);
@@ -520,6 +521,7 @@ impl Executor for SimulatedVehicle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WriteMeta;
 
     fn test_model() -> VehicleModel {
         VehicleModel::Bicycle {
@@ -738,11 +740,27 @@ mod tests {
     }
 
     #[test]
-    fn select_command_prefers_the_fresher_timestamp() {
-        let older = VescCommand { time_stamp_us: 1, servo_position_rad: 0.0, speed_mps: 1.0 };
-        let newer = VescCommand { time_stamp_us: 2, servo_position_rad: 0.0, speed_mps: 2.0 };
-        assert_eq!(select_command(older, newer).speed_mps, 2.0);
+    fn select_command_prefers_the_fresher_write() {
+        let now = std::time::Instant::now();
+        let stamped = |speed_mps, written_at| Stamped {
+            value: VescCommand { servo_position_rad: 0.0, speed_mps },
+            meta: WriteMeta { write_count: 1, written_at: Some(written_at), written_at_unix_us: 1 },
+        };
+        let older = stamped(1.0, now);
+        let newer = stamped(2.0, now + std::time::Duration::from_millis(1));
+        assert_eq!(select_command(older.clone(), newer.clone()).speed_mps, 2.0);
         assert_eq!(select_command(newer, older).speed_mps, 2.0);
+    }
+
+    #[test]
+    fn select_command_never_prefers_an_unwritten_seed() {
+        let seed = Stamped { value: VescCommand::new(0.0, 5.0), meta: WriteMeta::default() };
+        let written = Stamped {
+            value: VescCommand::new(0.0, 1.0),
+            meta: WriteMeta { write_count: 1, written_at: Some(std::time::Instant::now()), written_at_unix_us: 1 },
+        };
+        assert_eq!(select_command(seed.clone(), written.clone()).speed_mps, 1.0);
+        assert_eq!(select_command(written, seed).speed_mps, 1.0);
     }
 
     #[test]

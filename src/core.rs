@@ -14,4 +14,4 @@ pub use captain::Captain;
 pub use executor::Executor;
 pub use rate::Ticker;
 pub use runner::{Runner, StopHandle, SwitchExecutorError};
-pub use topic::{RwLockTopic, TopicError};
+pub use topic::{RwLockTopic, Stamped, TopicError, WriteMeta};

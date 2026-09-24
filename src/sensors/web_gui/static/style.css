@@ -111,6 +111,49 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
   line-height: 1.4;
 }
 
+#poll-rate-row {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr 3.5em;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#poll-rate-row[hidden] {
+  display: none;
+}
+
+#poll-rate {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: #3f6dc9;
+}
+
+#poll-rate-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #e8e8e8;
+}
+
+#topic-freshness {
+  margin: 0;
+  font-size: 13px;
+  color: #7fd18b;
+}
+
+#topic-freshness.stale {
+  color: #e0a458;
+}
+
+#topic-rate {
+  margin: 0;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
 #topic-content {
   flex: 1 1 auto;
   min-height: 0;
@@ -172,7 +215,8 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
   flex: 0 0 auto;
 }
 
-#vehicle-model-select {
+#vehicle-model-select,
+#topic-select {
   flex: 0 0 auto;
   font: inherit;
   background: #22272e;

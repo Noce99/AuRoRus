@@ -86,7 +86,7 @@ impl Executor for WebGui {
 
     fn run(&mut self, captain: &Captain) {
         let bind_addr = &self.config.bind_addr;
-        let server = match tiny_http::Server::http(bind_addr) {
+        let server = match crate::web::bind_http(bind_addr.as_str()) {
             Ok(server) => Arc::new(server),
             Err(err) => {
                 eprintln!("{}: failed to bind {bind_addr}: {err}", self.name);

@@ -18,6 +18,11 @@ tiny_http = "0.12.0"
 toml = "1.1.4"
 voronoice = "0.2.0"
 
+# Only to switch Nagle's algorithm off on the web UIs' listening socket - see
+# `web::bind_http`. Already in the dependency tree via other crates.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [profile.release]
 lto = true # Link-Time Optimization: better optimization between the crates instead of single crate optimization. Slower compile time.
 codegen-units = 1 # This disable parallel compilation, LTO works better with just one codegen unit. Slower compile time.

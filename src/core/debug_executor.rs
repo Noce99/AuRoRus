@@ -9,7 +9,7 @@ use crate::debug_format::DebugFileWriter;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// How long a rolling window is, for measuring the achieved recording rate against
 /// the requested one - see [`DebugExecutor::run`].
@@ -22,8 +22,13 @@ const RATE_WARNING_THRESHOLD: f64 = 0.8;
 const RATE_WARNING_COOLDOWN: Duration = Duration::from_secs(10);
 
 /// Snapshots every topic somebody is currently writing, at `frequency_hz`, into a
-/// `.debug` file - but only when a topic's value actually changed since the last
-/// snapshot, so a steady-state topic doesn't bloat the file with identical repeats.
+/// `.debug` file - but only when a topic was written again since the last snapshot
+/// (its [`crate::WriteMeta::write_count`] moved), so a topic nobody is updating
+/// doesn't bloat the file with repeats. Each sample is timestamped with when it was
+/// *written* (its [`crate::WriteMeta::written_at_unix_us`]), not when this recorder
+/// happened to poll it. A writer re-publishing an identical value is recorded each
+/// time it does - that is itself information - but only once per tick at most, since
+/// writes landing between two ticks collapse into the latest one.
 ///
 /// Added automatically by [`crate::Runner::debug_mode`], never by a binary's
 /// `main` directly. Never claims any topic's writer slot, so it can never appear
@@ -65,7 +70,7 @@ impl Executor for DebugExecutor {
         };
 
         let session_start_us = writer.session_start_unix_micros();
-        let mut last_bytes: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut last_write_count: HashMap<String, u64> = HashMap::new();
 
         let mut ticker = Ticker::new(self.frequency_hz);
 
@@ -74,25 +79,26 @@ impl Executor for DebugExecutor {
         let mut last_warned = Instant::now() - RATE_WARNING_COOLDOWN;
 
         while captain.is_running(self.id) {
-            // Wall-clock elapsed-since-session-start, not `Instant`-based: this
-            // must stay consistent with whatever a `resume()`d writer already
-            // wrote before a restart, and an `Instant` from a previous process
-            // can't be reconstructed from the file - only a wall-clock epoch can.
-            let now_us = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros();
-            let elapsed_us = now_us.saturating_sub(session_start_us) as u64;
-
             for (name, topic) in captain.debug_topics_snapshot() {
                 let Some(writer_id) = topic.writer() else { continue }; // only "topics somebody is writing"
-                let encoded = topic.read_encoded();
-                if last_bytes.get(&name) != Some(&encoded) {
-                    let topic_id = writer
-                        .topic_id(&name, &captain.name_of(writer_id))
-                        .expect("failed to write to the debug file");
-                    writer
-                        .write_sample(topic_id, elapsed_us, &encoded)
-                        .expect("failed to write to the debug file");
-                    last_bytes.insert(name, encoded);
+                let write_count = topic.meta().write_count;
+                // Still the seed, or nothing new since the last snapshot - skip without encoding.
+                if write_count == 0 || last_write_count.get(&name) == Some(&write_count) {
+                    continue;
                 }
+                let (encoded, meta) = topic.read_encoded();
+                // Wall-clock elapsed-since-session-start, not `Instant`-based: this
+                // must stay consistent with whatever a `resume()`d writer already
+                // wrote before a restart, and an `Instant` from a previous process
+                // can't be reconstructed from the file - only a wall-clock epoch can.
+                let elapsed_us = (meta.written_at_unix_us as u128).saturating_sub(session_start_us) as u64;
+                let topic_id = writer
+                    .topic_id(&name, &captain.name_of(writer_id))
+                    .expect("failed to write to the debug file");
+                writer
+                    .write_sample(topic_id, elapsed_us, &encoded)
+                    .expect("failed to write to the debug file");
+                last_write_count.insert(name, meta.write_count);
             }
             writer.maybe_flush().expect("failed to flush the debug file");
 

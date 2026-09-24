@@ -1,7 +1,5 @@
 //! The [`LidarScan`] topic: one full sweep from a 2D LIDAR sensor.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 /// Name of the topic a [`LidarScan`] is published on.
 pub const LIDAR_SCAN_TOPIC_NAME: &str = "lidar_scan";
 
@@ -14,8 +12,6 @@ pub const LIDAR_SCAN_TOPIC_NAME: &str = "lidar_scan";
 /// radians.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LidarScan {
-    /// When this scan was captured, as microseconds since the Unix epoch.
-    pub time_stamp: u128,
     /// Number of readings in this scan; equal to both `points.len()` and
     /// `intensities.len()`.
     pub num_lidar_points: usize,
@@ -32,8 +28,9 @@ pub struct LidarScan {
 }
 
 impl LidarScan {
-    /// Builds a scan from `points`/`intensities` readings, stamped with the
-    /// current time. `num_lidar_points` is derived from their shared length.
+    /// Builds a scan from `points`/`intensities` readings. `num_lidar_points` is
+    /// derived from their shared length. When it was written is tracked by the
+    /// topic itself - see [`crate::WriteMeta`].
     ///
     /// # Panics
     ///
@@ -51,13 +48,8 @@ impl LidarScan {
             intensities.len(),
             "LidarScan: points and intensities must have the same length"
         );
-        let time_stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
         let num_lidar_points = points.len();
         Self {
-            time_stamp,
             num_lidar_points,
             points,
             min_distance,

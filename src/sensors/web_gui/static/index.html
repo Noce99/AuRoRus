@@ -64,6 +64,13 @@
         <option value="lidar_scan">lidar_scan</option>
         <option value="vehicle_model">vehicle_model_status</option>
       </select>
+      <div id="poll-rate-row" hidden>
+        <label for="poll-rate">Read rate</label>
+        <input type="range" id="poll-rate" step="1" />
+        <span id="poll-rate-value"></span>
+      </div>
+      <p id="topic-freshness"></p>
+      <p id="topic-rate"></p>
       <pre id="topic-content"></pre>
     </section>
 

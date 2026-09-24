@@ -453,16 +453,36 @@ async function fetchJSON(url, options) {
 /** Runs `poll` every `intervalMs`, but only ever with one request in
  *  flight: the next wait starts when the last response lands. `setInterval`
  *  would instead keep firing into a slow or stalled server and pile
- *  requests up behind each other. */
+ *  requests up behind each other.
+ *
+ *  Returns `{ setIntervalMs(ms) }` to change the period on the fly: a wait
+ *  already pending is rescheduled against the new period right away (so
+ *  going from 1 Hz to 30 Hz doesn't first sit out the rest of a 1 s wait),
+ *  while a request in flight just uses the new period once it lands. */
 function startPolling(poll, intervalMs) {
+  let timer = null;
+  let startedMs = 0;
+  const schedule = () => {
+    timer = setTimeout(tick, Math.max(0, intervalMs - (performance.now() - startedMs)));
+  };
   const tick = async () => {
-    const startedMs = performance.now();
+    timer = null;
+    startedMs = performance.now();
     try {
       await poll();
     } catch (err) {
       console.error(err);
     }
-    setTimeout(tick, Math.max(0, intervalMs - (performance.now() - startedMs)));
+    schedule();
   };
   tick();
+  return {
+    setIntervalMs(ms) {
+      intervalMs = ms;
+      if (timer !== null) {
+        clearTimeout(timer);
+        schedule();
+      }
+    },
+  };
 }
