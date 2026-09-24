@@ -2,7 +2,7 @@
 //! each record's *payload* is bincode-encoded - the outer structure is fixed-width
 //! so a reader always knows exactly how many bytes to expect next) written by
 //! [`crate::core::debug_executor::DebugExecutor`] and read back by the
-//! `debug_web_interface` binary.
+//! `replay_web_gui` binary.
 //!
 //! Deliberately tolerant of a hard kill mid-write: there is no trailing
 //! footer/index a reader depends on, so [`DebugFileReader::open`] simply reads

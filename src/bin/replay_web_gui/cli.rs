@@ -1,8 +1,8 @@
-//! Command-line argument parsing for the `debug_web_interface` binary.
+//! Command-line argument parsing for the `replay_web_gui` binary.
 
 use std::path::PathBuf;
 
-/// Default address `debug_web_interface` binds its HTTP server to - distinct
+/// Default address `replay_web_gui` binds its HTTP server to - distinct
 /// from `web_gui`'s default (`1999`) so both can run side by side, e.g. to
 /// compare a live session against a recorded one.
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:1998";

@@ -1,26 +1,24 @@
 "use strict";
 
 // ---------------------------------------------------------------------
-// debug_web_interface's frontend: everything specific to *replaying* a
-// recorded session - the playback clock, the sidebar summary, and loading
-// the recorded map.
+// replay_web_gui's frontend: everything specific to *replaying* a
+// recorded session - the playback clock, and the sidebar summary.
 //
-// The map canvas itself (drawing, panning, zooming, the redraw loop) is
-// shared with web_gui and lives in /map_view.js, loaded before this file.
-// `fetchJSON` comes from there too. timeline.js loads after this one and
-// drives the same PlaybackClock.
+// The map canvas itself (painting, panning, zooming, the redraw loop) and
+// the drawing layers behind it are shared with web_gui and live in
+// /map_view.js and /draw_layers.js, loaded before this file - the canvas
+// shows whatever the recorded executors drew, exactly as web_gui showed
+// it live. `fetchJSON`, `startPolling` and `formatAge` come from there too.
+// timeline.js loads after this one and drives the same PlaybackClock.
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
 // PlaybackClock: the single source of truth for "what time is it" during
 // playback, shared by this file (main canvas) and timeline.js (timeline +
-// transport bar). Holds the full, pre-fetched vehicle status timeline so
-// scrubbing/playing never needs a network round trip per frame.
+// transport bar).
 // ---------------------------------------------------------------------
 
 window.PlaybackClock = {
-  /** @type {{t_us:number,x_m:number,y_m:number,heading_rad:number,speed_mps:number}[]} */
-  vehicleTimeline: [],
   durationUs: 0,
   currentTimeUs: 0,
   playing: false,
@@ -73,31 +71,41 @@ window.PlaybackClock = {
     }
     requestAnimationFrame((ms) => this._tick(ms));
   },
-
-  /** Hold-last-value lookup, matching how a live RwLockTopic read behaves. */
-  currentVehicleStatus() {
-    return statusAt(this.vehicleTimeline, this.currentTimeUs);
-  },
 };
 
-function statusAt(timeline, timeUs) {
-  if (timeline.length === 0) return null;
-  let lo = 0;
-  let hi = timeline.length - 1;
-  if (timeUs < timeline[0].t_us) return null;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (timeline[mid].t_us <= timeUs) lo = mid;
-    else hi = mid - 1;
-  }
-  return timeline[lo];
-}
+// ---------------------------------------------------------------------
+// Drawing layers - aged and dead-reckoned against the playback time, not
+// the wall clock, so a paused recording stays still, and a recorded
+// executor that stopped publishing fades out on replay just as it did live.
+// ---------------------------------------------------------------------
+
+/** How often the drawings at the current playback time are fetched. In
+ *  between, vehicles are dead-reckoned along the playback clock. */
+const DRAW_RATE_HZ = 30;
+
+/** Never dead-reckon a vehicle further than this past its sample (or 1.5
+ *  recording periods, for a recording made slowly enough that this would
+ *  otherwise make it stutter between samples). */
+const MIN_MAX_EXTRAPOLATION_MS = 150;
+let recordingFrequencyHz = 100;
+
+let fileName = null;
+
+const drawLayers = DrawLayers.create({
+  clock: () => window.PlaybackClock.currentTimeUs / 1000,
+  requestExtras: () => ({ t_us: Math.round(window.PlaybackClock.currentTimeUs) }),
+  maxExtrapolationMs: () => Math.max(MIN_MAX_EXTRAPOLATION_MS, 1.5 * (1000 / recordingFrequencyHz)),
+  listEl: document.getElementById("layer-list"),
+  // The view is the user's: only center it the first time a map shows up,
+  // never again on seeking back and forth across when it was loaded.
+  homeOnEveryNewRaster: false,
+});
 
 // ---------------------------------------------------------------------
 // Status bar extras
 //
-// The map name, vertical size and speed are MapView's; playback time is
-// this UI's own, so it's filled in from the same frame via `onFrame`.
+// The title, vertical size and speed are MapView's; playback time is this
+// UI's own, so it's filled in from the same frame via `onFrame`.
 // ---------------------------------------------------------------------
 
 const statusTime = document.getElementById("status-time");
@@ -111,49 +119,34 @@ function updatePlaybackTime() {
 }
 
 MapView.init({
-  vehiclePoseAt: () => window.PlaybackClock.currentVehicleStatus(),
-  isAnimating: () => window.PlaybackClock.playing,
-  onFrame: updatePlaybackTime,
+  layersAt: drawLayers.layersAt,
+  worldBounds: drawLayers.worldBounds,
+  homeTarget: drawLayers.homeTarget,
+  statusTitle: () => fileName,
+  speedMps: drawLayers.speedMps,
+  isAnimating: () => window.PlaybackClock.playing || drawLayers.isAnimating(),
+  onFrame: (nowMs) => {
+    updatePlaybackTime();
+    drawLayers.renderFreshness();
+  },
 });
 
 // ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
-async function loadMap(mapSummary) {
-  if (!mapSummary || !mapSummary.info) {
-    MapView.setMap(null);
-    return;
-  }
-  const rasterResponse = await fetch("/api/map/raster");
-  if (!rasterResponse.ok) throw new Error("failed to load the recorded map raster");
-  const bytes = new Uint8Array(await rasterResponse.arrayBuffer());
-
-  MapView.setMap({
-    name: mapSummary.name,
-    info: mapSummary.info,
-    offscreen: MapView.offscreenFromRaster(bytes, mapSummary.width_px, mapSummary.height_px),
-  });
-}
-
 async function start() {
   const session = await fetchJSON("/api/session");
 
-  document.getElementById("sidebar-map-name").textContent =
-    session.map && session.map.name ? session.map.name : "No map recorded";
-  // The label comes from the server (which reads it off VehicleModelKind),
-  // so there's no second copy of the kind -> label mapping to keep in sync.
-  document.getElementById("sidebar-vehicle-model").textContent =
-    session.vehicle_model_label || session.vehicle_model || "-";
+  fileName = session.file_name;
+  recordingFrequencyHz = session.frequency_hz;
+  document.getElementById("sidebar-file-name").textContent = session.file_name;
   document.getElementById("sidebar-frequency").textContent = `Recorded at ${session.frequency_hz} Hz`;
   document.getElementById("sidebar-duration").textContent = `Duration: ${(session.duration_us / 1e6).toFixed(2)} s`;
 
   window.PlaybackClock.durationUs = session.duration_us;
-  window.PlaybackClock.vehicleTimeline = await fetchJSON("/api/vehicle_status_timeline");
-
-  await loadMap(session.map);
   updatePlaybackTime();
-  MapView.requestRedraw();
+  startPolling(drawLayers.poll, 1000 / DRAW_RATE_HZ);
 
   window.dispatchEvent(new CustomEvent("aurorus:session-loaded", { detail: session }));
 }

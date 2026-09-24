@@ -15,32 +15,53 @@
     </div>
 
     <aside id="sidebar">
-      <h1>Map</h1>
-      <span id="sidebar-map-name" class="readonly-value">No map recorded</span>
-
-      <h1>Vehicle model</h1>
-      <span id="sidebar-vehicle-model" class="readonly-value">-</span>
-
       <h1>Session</h1>
+      <span id="sidebar-file-name" class="readonly-value"></span>
       <span id="sidebar-frequency" class="readonly-value"></span>
       <span id="sidebar-duration" class="readonly-value"></span>
+
+      <nav id="panel-nav">
+        <button class="panel-nav-btn selected" data-panel="layers">Layers</button>
+        <button class="panel-nav-btn" data-panel="topics">Analyzed Topics</button>
+      </nav>
     </aside>
 
     <main id="canvas-area">
       <canvas id="map-canvas"></canvas>
 
       <div id="status-bar">
-        <span id="status-map-name">No map loaded</span>
+        <span id="status-map-name"></span>
         <span id="status-vertical-size"></span>
         <span id="status-speed"></span>
         <span id="status-time"></span>
       </div>
 
       <div id="zoom-controls">
-        <button id="home-btn" title="Center start/finish, zoom to 10 m" aria-label="Home">&#8962;</button>
+        <button id="home-btn" title="Center on the vehicle, zoom to 10 m" aria-label="Home">&#8962;</button>
         <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
       </div>
     </main>
+
+    <div id="right-panel-toggle">
+      <button id="right-panel-toggle-btn" title="Show/hide details" aria-label="Show/hide details">&#9654;</button>
+    </div>
+
+    <aside id="right-panel">
+      <section id="panel-layers" class="panel-section">
+        <h1>Layers</h1>
+        <ul id="layer-list"></ul>
+      </section>
+
+      <section id="panel-topics" class="panel-section" hidden>
+        <h1>Analyzed topics</h1>
+        <p class="panel-hint">Topics shown in the timeline below.</p>
+        <div id="topic-list-actions">
+          <button id="topics-all-btn">All</button>
+          <button id="topics-none-btn">None</button>
+        </div>
+        <ul id="topic-list"></ul>
+      </section>
+    </aside>
   </div>
 
   <div id="timeline-toggle">
@@ -49,7 +70,11 @@
 
   <section id="timeline-panel">
     <div id="timeline-canvas-wrap">
-      <canvas id="timeline-canvas"></canvas>
+      <!-- Sized to the whole timeline, so the wrap scrolls over it; the
+           canvas inside sticks to the visible area and draws only that. -->
+      <div id="timeline-spacer">
+        <canvas id="timeline-canvas"></canvas>
+      </div>
     </div>
     <div id="timeline-tooltip" hidden></div>
 
@@ -75,6 +100,7 @@
   </section>
 </div>
 <script src="/map_view.js"></script>
+<script src="/draw_layers.js"></script>
 <script src="/app.js"></script>
 <script src="/timeline.js"></script>
 </body>

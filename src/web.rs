@@ -2,11 +2,14 @@
 //! response helpers each one was otherwise re-implementing, and the
 //! frontend assets they share.
 //!
-//! Both `web_gui` (driving live) and `debug_web_interface` (replaying a
-//! recording) show the same map canvas, so the JavaScript that draws it
-//! ([`MAP_VIEW_JS`]) and the CSS that frames it ([`BASE_CSS`]) live here
-//! once and are served by both, ahead of each binary's own `app.js` and
-//! `style.css`.
+//! Both `web_gui` (driving live) and `replay_web_gui` (replaying a
+//! recording) show the same map canvas, fed the same way - through the
+//! drawing protocol in [`draw`] - so the JavaScript that paints it
+//! ([`MAP_VIEW_JS`]), the client of that protocol ([`DRAW_LAYERS_JS`]), and
+//! the CSS that frames them ([`BASE_CSS`]) live here once and are served by
+//! both, ahead of each binary's own `app.js` and `style.css`.
+
+pub mod draw;
 
 use std::error::Error;
 use std::io::{self, ErrorKind, Write};
@@ -15,6 +18,8 @@ use tiny_http::{Method, Request, Response, ResponseBox};
 
 /// The shared map-canvas frontend, served at `/map_view.js`.
 pub const MAP_VIEW_JS: &str = include_str!("web/map_view.js");
+/// The shared drawing-protocol client, served at `/draw_layers.js`.
+pub const DRAW_LAYERS_JS: &str = include_str!("web/draw_layers.js");
 /// The shared page/canvas styles, served at `/base.css`.
 pub const BASE_CSS: &str = include_str!("web/base.css");
 
@@ -110,6 +115,7 @@ pub fn header(name: &str, value: &str) -> tiny_http::Header {
 pub fn shared_asset(path: &str) -> Option<ResponseBox> {
     let (body, content_type) = match path {
         "/map_view.js" => (MAP_VIEW_JS, "text/javascript; charset=utf-8"),
+        "/draw_layers.js" => (DRAW_LAYERS_JS, "text/javascript; charset=utf-8"),
         "/base.css" => (BASE_CSS, "text/css; charset=utf-8"),
         _ => return None,
     };

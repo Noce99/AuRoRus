@@ -42,6 +42,80 @@
 .readonly-value {
   color: #cdd3db;
   font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+#panel-nav {
+  margin-top: 14px;
+}
+
+/* ---------- analyzed topics (right panel) ---------- */
+
+.panel-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#topic-list-actions {
+  display: flex;
+  gap: 6px;
+}
+
+#topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#topic-list .topic-group {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #9aa4b2;
+}
+
+#topic-list .topic-group:first-child {
+  margin-top: 0;
+}
+
+#topic-list label {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #22272e;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#topic-list input {
+  margin: 0;
+  accent-color: #3f6dc9;
+}
+
+.topic-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.topic-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #6b7684;
 }
 
 /* ---------- timeline panel ---------- */
@@ -92,9 +166,22 @@ body:has(#timeline-panel.collapsed) #timeline-toggle-btn {
   position: relative;
 }
 
+#timeline-spacer {
+  position: relative;
+}
+
 #timeline-canvas {
+  position: sticky;
+  top: 0;
+  left: 0;
   display: block;
   cursor: crosshair;
+  /* Pointer drags pan and scrub the timeline - not the page. */
+  touch-action: none;
+}
+
+#timeline-canvas.panning {
+  cursor: grabbing;
 }
 
 #timeline-tooltip {

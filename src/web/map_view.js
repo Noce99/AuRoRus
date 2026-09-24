@@ -3,15 +3,13 @@
 // ---------------------------------------------------------------------
 // MapView - the map canvas shared by every web UI in this project.
 //
-// Both frontends (`web_gui`, for driving live, and `debug_web_interface`,
-// for replaying a recording) show the same thing: an occupancy raster, its
-// start/finish line, and a vehicle on top, pannable and zoomable. All of
-// that lives here, once.
+// Both frontends (`web_gui`, for driving live, and `replay_web_gui`,
+// for replaying a recording) show the same thing: whatever the drawing
+// topics hold, pannable and zoomable. All of that lives here, once.
 //
-// What they don't share is where the content comes from - drawing topics
-// polled live in one, a pre-fetched timeline in the other - so that is what
-// a host supplies to `MapView.init` as hooks. Everything else (canvas
-// sizing, world <-> screen transforms, drawing every shape kind of a
+// What's drawn, and when, comes from the host - through `/draw_layers.js`
+// in both - as hooks supplied to `MapView.init`. Everything else (canvas
+// sizing, world <-> screen transforms, painting every shape kind of a
 // `Drawing` topic, wheel/drag/slider zoom and pan, the sidebar toggle, the
 // redraw loop) is identical and handled here.
 //
@@ -23,9 +21,6 @@ window.MapView = (() => {
   const MIN_VERTICAL_SIZE_M = 0.01;
   const DEFAULT_VERTICAL_SIZE_M = 10;
   const SLIDER_STEPS = 1000;
-  const VEHICLE_LENGTH_M = 0.45;
-  const VEHICLE_WIDTH_M = 0.25;
-  const LIDAR_POINT_RADIUS_PX = 2.5;
 
   /** World-space view: how many meters of world height are visible, and
    *  which world point (in meters, same frame as MapInfo) is centered. */
@@ -33,16 +28,12 @@ window.MapView = (() => {
 
   let canvas = null;
   let ctx = null;
-  /** @type {{name:string|null, info:object|null, offscreen:HTMLCanvasElement}|null} */
-  let currentMap = null;
 
   // Host hooks, filled in by init().
-  let vehiclePoseAt = () => null;
-  let lidarPointsAt = () => [];
   let layersAt = () => [];
   let worldBounds = () => null;
   let homeTarget = () => null;
-  let mapName = () => null;
+  let statusTitle = () => null;
   let speedMps = () => null;
   let isAnimating = () => false;
   let onFrame = () => {};
@@ -68,7 +59,6 @@ window.MapView = (() => {
   }
 
   function maxVerticalSizeM() {
-    if (currentMap && currentMap.info) return currentMap.info.height_px * currentMap.info.resolution_m_per_px;
     const bounds = worldBounds();
     if (bounds && bounds.maxY > bounds.minY) return bounds.maxY - bounds.minY;
     return 100;
@@ -123,57 +113,6 @@ window.MapView = (() => {
   // -------------------------------------------------------------------
   // Rendering
   // -------------------------------------------------------------------
-
-  function drawVehicle(nowMs) {
-    const pose = vehiclePoseAt(nowMs);
-    if (!pose) return;
-
-    const { x, y } = worldToScreen(pose.x_m, pose.y_m);
-    const scale = scalePxPerMeter();
-    const lengthPx = VEHICLE_LENGTH_M * scale;
-    const widthPx = VEHICLE_WIDTH_M * scale;
-
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.translate(x, y);
-    ctx.rotate(pose.heading_rad);
-
-    ctx.fillStyle = "#ffb020";
-    ctx.fillRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
-    ctx.strokeStyle = "#101418";
-    ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-    ctx.strokeRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
-
-    // Small triangle marking the front, so heading is visible at a glance.
-    ctx.beginPath();
-    ctx.moveTo(lengthPx / 2, 0);
-    ctx.lineTo(lengthPx / 2 - widthPx * 0.4, -widthPx * 0.35);
-    ctx.lineTo(lengthPx / 2 - widthPx * 0.4, widthPx * 0.35);
-    ctx.closePath();
-    ctx.fillStyle = "#101418";
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  /** Draws each live LIDAR hit (world-frame `{x_m, y_m}`, as returned by
-   *  `lidarPointsAt`) as a small red dot - a fixed device-pixel radius, so
-   *  points stay legible at any zoom level rather than shrinking to nothing
-   *  when zoomed out. */
-  function drawLidarPoints(nowMs) {
-    const points = lidarPointsAt(nowMs);
-    if (!points || points.length === 0) return;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const radius = LIDAR_POINT_RADIUS_PX * (window.devicePixelRatio || 1);
-    ctx.fillStyle = "#ff3b3b";
-    for (const point of points) {
-      const { x, y } = worldToScreen(point.x_m, point.y_m);
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      ctx.fill();
-    }
-  }
 
   // -------------------------------------------------------------------
   // Drawing topics - one painter per `Shape` kind (see
@@ -341,39 +280,12 @@ window.MapView = (() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#008080";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
     drawLayers(nowMs);
-
-    if (!currentMap || !currentMap.info) return;
-
-    const info = currentMap.info;
-    const scale = scalePxPerMeter();
-    const pixelScale = scale * info.resolution_m_per_px;
-    const e = (info.origin.x - view.centerX) * scale + canvas.width / 2;
-    const f = (info.origin.y - view.centerY) * scale + canvas.height / 2;
-
-    ctx.imageSmoothingEnabled = false;
-    ctx.setTransform(pixelScale, 0, 0, pixelScale, e, f);
-    ctx.drawImage(currentMap.offscreen, 0, 0);
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const a = worldToScreen(info.start_finish_line.a.x, info.start_finish_line.a.y);
-    const b = worldToScreen(info.start_finish_line.b.x, info.start_finish_line.b.y);
-    ctx.strokeStyle = "#ff3b3b";
-    ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-
-    drawLidarPoints(nowMs);
-    drawVehicle(nowMs);
   }
 
   function updateStatusBar(nowMs) {
-    const pose = vehiclePoseAt(nowMs);
-    const name = currentMap && currentMap.name ? currentMap.name : mapName();
-    const speed = pose ? pose.speed_mps : speedMps(nowMs);
+    const name = statusTitle();
+    const speed = speedMps(nowMs);
     setText(statusName, name || "No map loaded");
     setText(statusVerticalSize, `Vertical size: ${view.verticalSizeM.toFixed(2)} m`);
     setText(statusSpeed, speed === null || speed === undefined ? "" : `Speed: ${speed.toFixed(2)} m/s`);
@@ -451,17 +363,10 @@ window.MapView = (() => {
     requestRedraw();
   }
 
-  /** Centers the view at the default zoom on the start/finish line of the
-   *  map given to `setMap`, or else on whatever the host's `homeTarget()`
-   *  returns. */
+  /** Centers the view at the default zoom on whatever the host's
+   *  `homeTarget()` returns. */
   function home() {
-    let target = null;
-    if (currentMap && currentMap.info) {
-      const line = currentMap.info.start_finish_line;
-      target = { x: (line.a.x + line.b.x) / 2, y: (line.a.y + line.b.y) / 2 };
-    } else {
-      target = homeTarget();
-    }
+    const target = homeTarget();
     if (!target) return;
     view.centerX = target.x;
     view.centerY = target.y;
@@ -507,7 +412,7 @@ window.MapView = (() => {
 
     if (zoomSlider) {
       zoomSlider.addEventListener("input", () => {
-        if (syncingSlider || !currentMap) return;
+        if (syncingSlider) return;
         setVerticalSize(verticalSizeFromSlider(Number(zoomSlider.value)));
         requestRedraw();
       });
@@ -522,12 +427,16 @@ window.MapView = (() => {
       sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
     }
 
-    // Only present in web_gui - debug_web_interface has no right panel, so
-    // these lookups just come back null and this is a no-op there.
     const rightPanel = document.getElementById("right-panel");
     const rightPanelToggle = document.getElementById("right-panel-toggle-btn");
     if (rightPanel && rightPanelToggle) {
       rightPanelToggle.addEventListener("click", () => rightPanel.classList.toggle("collapsed"));
+    }
+
+    // Left nav rail -> right panel: each `.panel-nav-btn` shows the
+    // `#panel-<data-panel>` section of the right panel and hides the rest.
+    for (const btn of document.querySelectorAll(".panel-nav-btn")) {
+      btn.addEventListener("click", () => selectPanel(btn.dataset.panel));
     }
 
     // The ResizeObserver already fires for every size change of the
@@ -535,6 +444,17 @@ window.MapView = (() => {
     // `resize` listener on top of it would only buy a second redraw for the
     // same event.
     new ResizeObserver(requestRedraw).observe(canvas.parentElement);
+  }
+
+  /** Selects the nav rail's `name` button and shows the right panel's
+   *  `#panel-<name>` section, hiding every other one. */
+  function selectPanel(name) {
+    for (const btn of document.querySelectorAll(".panel-nav-btn")) {
+      btn.classList.toggle("selected", btn.dataset.panel === name);
+    }
+    for (const section of document.querySelectorAll(".panel-section")) {
+      section.hidden = section.id !== `panel-${name}`;
+    }
   }
 
   // -------------------------------------------------------------------
@@ -571,7 +491,7 @@ window.MapView = (() => {
   }
 
   /** Decodes a raster into an offscreen canvas of its own, ready to be
-   *  handed to `setMap`. */
+   *  painted as a raster shape's `offscreen`. */
   function offscreenFromRaster(bytes, widthPx, heightPx) {
     const offscreen = document.createElement("canvas");
     offscreen.width = widthPx;
@@ -595,21 +515,16 @@ window.MapView = (() => {
      *    world (bounding the zoom-out), or null;
      *  - `homeTarget()` returns the world `{x, y}` the home button centers
      *    on, or null;
-     *  - `mapName()` / `speedMps(nowMs)` feed the status bar;
-     *  - `vehiclePoseAt(nowMs)` (`{x_m, y_m, heading_rad, speed_mps}` or
-     *    null) and `lidarPointsAt(nowMs)` (world-frame `{x_m, y_m}` hits)
-     *    draw a vehicle and LIDAR hits over a map given to `setMap`, for a
-     *    host that has no drawing topics;
+     *  - `statusTitle()` (e.g. the map's name) and `speedMps(nowMs)` feed
+     *    the status bar;
      *  - `isAnimating()` says whether to repaint every frame even with no
      *    input; `onFrame(nowMs)` lets the host update its own status-bar
      *    extras from inside the same frame. */
     init({
-      vehiclePoseAt: poseFn,
-      lidarPointsAt: lidarFn,
       layersAt: layersFn,
       worldBounds: boundsFn,
       homeTarget: homeFn,
-      mapName: mapNameFn,
+      statusTitle: statusTitleFn,
       speedMps: speedFn,
       isAnimating: animFn,
       onFrame: frameFn,
@@ -621,12 +536,10 @@ window.MapView = (() => {
       statusSpeed = document.getElementById("status-speed");
       zoomSlider = document.getElementById("zoom-slider");
 
-      if (poseFn) vehiclePoseAt = poseFn;
-      if (lidarFn) lidarPointsAt = lidarFn;
       if (layersFn) layersAt = layersFn;
       if (boundsFn) worldBounds = boundsFn;
       if (homeFn) homeTarget = homeFn;
-      if (mapNameFn) mapName = mapNameFn;
+      if (statusTitleFn) statusTitle = statusTitleFn;
       if (speedFn) speedMps = speedFn;
       if (animFn) isAnimating = animFn;
       if (frameFn) onFrame = frameFn;
@@ -635,17 +548,9 @@ window.MapView = (() => {
       requestAnimationFrame(renderLoop);
     },
 
-    /** Replaces the displayed map (or clears it with `null`) and recenters
-     *  on its start/finish line. */
-    setMap(map) {
-      currentMap = map;
-      if (map && map.info) home();
-      requestRedraw();
-    },
-
-    currentMap: () => currentMap,
     requestRedraw,
     home,
+    selectPanel,
     scalePxPerMeter,
     screenToWorld,
     worldToScreen,
@@ -655,6 +560,14 @@ window.MapView = (() => {
     setText,
   };
 })();
+
+/** Human-readable age, e.g. "42 ms", "3.1 s", "5 min". Shared by both
+ *  frontends. */
+function formatAge(ms) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.round(ms / 60_000)} min`;
+}
 
 /** Fetches `url` and parses it as JSON, turning a non-2xx response into a
  *  thrown `Error` carrying the API's own `{"error": "..."}` message when it

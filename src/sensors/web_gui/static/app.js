@@ -5,19 +5,16 @@
 // the map list and generator, the model picker, WASD control, the drawing
 // layers polled onto the map canvas, and the generic topic inspector.
 //
-// The map canvas itself (drawing every shape kind, panning, zooming, the
-// redraw loop) is shared with debug_web_interface and lives in
-// /map_view.js, loaded before this file. `fetchJSON` and `startPolling`
-// come from there too.
+// The map canvas itself (painting every shape kind, panning, zooming, the
+// redraw loop) and the drawing layers behind it are shared with
+// replay_web_gui and live in /map_view.js and /draw_layers.js, loaded
+// before this file. `fetchJSON`, `startPolling` and `formatAge` come from
+// there too.
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
-// Drawing layers
-//
-// Everything on the canvas comes from drawing topics (`draw/<executor>`,
-// see `src/topics/drawing.rs`): one layer per topic, polled together from
-// `POST /api/draw`. This page knows how to paint each shape kind, and
-// nothing about which executor drew what.
+// Drawing layers - everything on the canvas, via /draw_layers.js, aged
+// against the wall clock - and the Layers panel listing them.
 // ---------------------------------------------------------------------
 
 /** How often every drawing topic is polled, in Hz, until the Layers
@@ -25,316 +22,32 @@
 const DEFAULT_DRAW_RATE_HZ = 30;
 let drawRateHz = DEFAULT_DRAW_RATE_HZ;
 
-/** A layer older than its drawing's `stale_after_ms` fades out over this
- *  long, down to `STALE_OPACITY` - kept faintly visible rather than hidden,
- *  so the last thing a crashed executor drew is still there to look at. */
-const FADE_DURATION_MS = 1000;
-const STALE_OPACITY = 0.2;
-
 /** Never dead-reckon a vehicle further than this past its sample (or 1.5
  *  poll periods, when polling slowly enough that this would otherwise make
- *  it stutter between samples): if polling stalls (tab backgrounded, server
- *  busy) we'd rather park the vehicle a little behind than fling it across
- *  the map on stale data. */
+ *  it stutter between samples). */
 const MIN_MAX_EXTRAPOLATION_MS = 150;
 
-/** The server's `Captain` epoch the layers below were read under - a
- *  different one in a response means the backend restarted, and every
- *  cached layer is stale. */
-let drawEpoch = null;
-
-/** Topic name -> layer:
- *  `{topic, writer, writeCount, drawing, sampledAtMs, rasters}` -
- *  `drawing` as last received (`{shapes, stale_after_ms, z_index}`),
- *  `sampledAtMs` the `performance.now()` time it was written (receipt time
- *  minus the server-measured age, or null for a never-written seed), and
- *  `rasters` the decoded offscreen canvas of each raster shape, by index. */
-const layers = new Map();
-
-/** Topics the user unticked in the Layers panel - kept by name, so a layer
- *  stays hidden across a backend restart. */
-const hiddenLayers = new Set();
-
-/** Set when a new raster arrives (i.e. the map changed): the view is homed
- *  once a vehicle drawing written *after* it arrives, so it centers on
- *  where the vehicle was placed on the new map, not where it last was on
- *  the old one. Holds the poll sequence number the raster arrived in. */
-let pendingHomeSince = null;
-let drawPollSeq = 0;
-
-function shapeKind(shape) {
-  return Object.keys(shape)[0];
-}
-
-function layerAgeMs(layer, nowMs) {
-  return layer.sampledAtMs === null ? null : nowMs - layer.sampledAtMs;
-}
-
-function layerOpacity(layer, nowMs) {
-  const staleAfterMs = layer.drawing.stale_after_ms;
-  const ageMs = layerAgeMs(layer, nowMs);
-  if (staleAfterMs === null || ageMs === null || ageMs <= staleAfterMs) return 1;
-  return Math.max(STALE_OPACITY, 1 - (ageMs - staleAfterMs) / FADE_DURATION_MS);
-}
-
-function isFading(layer, nowMs) {
-  const staleAfterMs = layer.drawing.stale_after_ms;
-  const ageMs = layerAgeMs(layer, nowMs);
-  return staleAfterMs !== null && ageMs !== null && ageMs > staleAfterMs && ageMs < staleAfterMs + FADE_DURATION_MS;
-}
-
-/** Visible layers with a drawing, bottom first: by `z_index`, then topic. */
-function paintOrder() {
-  return [...layers.values()]
-    .filter((layer) => layer.drawing && !hiddenLayers.has(layer.topic))
-    .sort((a, b) => a.drawing.z_index - b.drawing.z_index || a.topic.localeCompare(b.topic));
-}
-
-/** `vehicle` advanced to `nowMs` along its own heading at its own speed -
- *  the same straight-line motion the simulator integrates between ticks.
- *  Steering curvature within one poll period is not modelled, which at a
- *  33 ms period and 8 m/s is a few millimetres. */
-function extrapolatedVehicle(vehicle, layer, nowMs) {
-  if (layer.sampledAtMs === null || vehicle.speed_mps === 0) return vehicle;
-  const maxMs = Math.max(MIN_MAX_EXTRAPOLATION_MS, 1.5 * (1000 / drawRateHz));
-  const dtS = Math.min(Math.max(nowMs - layer.sampledAtMs, 0), maxMs) / 1000;
-  return {
-    ...vehicle,
-    x_m: vehicle.x_m + vehicle.speed_mps * Math.cos(vehicle.heading_rad) * dtS,
-    y_m: vehicle.y_m + vehicle.speed_mps * Math.sin(vehicle.heading_rad) * dtS,
-  };
-}
-
-/** A layer's shapes as they should be painted at `nowMs`: vehicles
- *  dead-reckoned forward, rasters with their decoded image attached. */
-function shapesAt(layer, nowMs) {
-  return layer.drawing.shapes.map((shape, i) => {
-    const kind = shapeKind(shape);
-    if (kind === "vehicle") return { vehicle: extrapolatedVehicle(shape.vehicle, layer, nowMs) };
-    if (kind === "raster") return { raster: { ...shape.raster, offscreen: layer.rasters[i] } };
-    return shape;
-  });
-}
-
-function layersAt(nowMs) {
-  return paintOrder().map((layer) => ({ opacity: layerOpacity(layer, nowMs), shapes: shapesAt(layer, nowMs) }));
-}
-
-/** The first vehicle any visible layer draws, dead-reckoned to `nowMs`. */
-function firstVehicle(nowMs) {
-  for (const layer of paintOrder()) {
-    for (const shape of layer.drawing.shapes) {
-      if (shapeKind(shape) === "vehicle") return extrapolatedVehicle(shape.vehicle, layer, nowMs);
-    }
-  }
-  return null;
-}
-
-/** Union of every visible raster's extent. */
-function worldBounds() {
-  let bounds = null;
-  for (const layer of paintOrder()) {
-    for (const shape of layer.drawing.shapes) {
-      if (shapeKind(shape) !== "raster") continue;
-      const r = shape.raster;
-      const minX = r.origin_x_m;
-      const minY = r.origin_y_m;
-      const maxX = minX + r.width_px * r.resolution_m_per_px;
-      const maxY = minY + r.height_px * r.resolution_m_per_px;
-      bounds = bounds
-        ? {
-            minX: Math.min(bounds.minX, minX),
-            minY: Math.min(bounds.minY, minY),
-            maxX: Math.max(bounds.maxX, maxX),
-            maxY: Math.max(bounds.maxY, maxY),
-          }
-        : { minX, minY, maxX, maxY };
-    }
-  }
-  return bounds;
-}
-
-/** The vehicle if one is drawn, else the middle of the drawn world. */
-function homeTarget() {
-  const vehicle = firstVehicle(performance.now());
-  if (vehicle) return { x: vehicle.x_m, y: vehicle.y_m };
-  const bounds = worldBounds();
-  return bounds ? { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 } : null;
-}
-
-/** Fetches and decodes every raster shape of `drawing`, or returns null if
- *  any of them couldn't be - e.g. a `409` because the drawing was rewritten
- *  in the meantime - so the caller keeps its previous copy of the layer and
- *  picks the newer drawing up on the next poll. */
-async function loadRasters(topic, writeCount, drawing) {
-  const rasters = [];
-  for (const [i, shape] of drawing.shapes.entries()) {
-    if (shapeKind(shape) !== "raster") continue;
-    const r = shape.raster;
-    const query = new URLSearchParams({ topic, shape: i, epoch: drawEpoch, write_count: writeCount });
-    const response = await fetch(`/api/draw/raster?${query}`);
-    if (!response.ok) return null;
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length !== r.width_px * r.height_px) return null;
-    rasters[i] = MapView.offscreenFromRaster(bytes, r.width_px, r.height_px);
-  }
-  return rasters;
-}
-
-/** Applies one `/api/draw` layer entry to `layers`. Returns which shape
- *  kinds a newly received drawing contained, for the auto-home logic. */
-async function applyLayer(entry, receivedAtMs) {
-  let layer = layers.get(entry.topic);
-  if (!layer) {
-    layer = { topic: entry.topic, writer: null, writeCount: null, drawing: null, sampledAtMs: null, rasters: [] };
-    layers.set(entry.topic, layer);
-  }
-  layer.writer = entry.writer;
-  if (!entry.drawing) {
-    // Unchanged since our copy - only its age moved on.
-    layer.sampledAtMs = entry.age_ms === null ? null : receivedAtMs - entry.age_ms;
-    return new Set();
-  }
-
-  const hasRaster = entry.drawing.shapes.some((shape) => shapeKind(shape) === "raster");
-  const rasters = hasRaster ? await loadRasters(entry.topic, entry.write_count, entry.drawing) : [];
-  if (!rasters) return new Set();
-
-  layer.drawing = entry.drawing;
-  layer.writeCount = entry.write_count;
-  layer.rasters = rasters;
-  layer.sampledAtMs = entry.age_ms === null ? null : receivedAtMs - entry.age_ms;
-  return new Set(entry.drawing.shapes.map(shapeKind));
-}
-
-async function pollDraw() {
-  const known = {};
-  for (const layer of layers.values()) {
-    if (layer.writeCount !== null) known[layer.topic] = layer.writeCount;
-  }
-  const response = await fetchJSON("/api/draw", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ epoch: drawEpoch, known }),
-  });
-  const receivedAtMs = performance.now();
-  const seq = ++drawPollSeq;
-
-  if (response.epoch !== drawEpoch) {
-    // The backend restarted: every cached layer belongs to the old one, and
-    // the server ignored `known`, sending everything in full.
-    layers.clear();
-    drawEpoch = response.epoch;
-  }
-
-  const topicsBefore = [...layers.keys()].join("\n");
-  const present = new Set(response.layers.map((entry) => entry.topic));
-  for (const topic of [...layers.keys()]) {
-    if (!present.has(topic)) layers.delete(topic);
-  }
-
-  let newRaster = false;
-  let newVehicle = false;
-  for (const entry of response.layers) {
-    const kinds = await applyLayer(entry, receivedAtMs);
-    newRaster ||= kinds.has("raster");
-    newVehicle ||= kinds.has("vehicle");
-  }
-
-  if (newRaster) pendingHomeSince = seq;
-  const anyVehicle = firstVehicle(receivedAtMs) !== null;
-  if (pendingHomeSince !== null && ((newVehicle && seq > pendingHomeSince) || !anyVehicle)) {
-    pendingHomeSince = null;
-    MapView.home();
-  }
-
-  if ([...layers.keys()].join("\n") !== topicsBefore) renderLayerList();
-  MapView.requestRedraw();
-}
-
-MapView.init({
-  layersAt,
-  worldBounds,
-  homeTarget,
-  mapName: () => liveMapName,
-  speedMps: (nowMs) => {
-    const vehicle = firstVehicle(nowMs);
-    return vehicle ? vehicle.speed_mps : null;
-  },
-  // A moving vehicle, or a layer mid-fade, changes the picture every frame
-  // even with no input.
-  isAnimating: () => {
-    const nowMs = performance.now();
-    const vehicle = firstVehicle(nowMs);
-    if (vehicle && Math.abs(vehicle.speed_mps) > 1e-3) return true;
-    return paintOrder().some((layer) => isFading(layer, nowMs));
-  },
+const drawLayers = DrawLayers.create({
+  clock: () => performance.now(),
+  maxExtrapolationMs: () => Math.max(MIN_MAX_EXTRAPOLATION_MS, 1.5 * (1000 / drawRateHz)),
+  listEl: document.getElementById("layer-list"),
 });
 
-// ---------------------------------------------------------------------
-// Layers panel - one checkbox per drawing topic, plus the draw poll rate.
-// ---------------------------------------------------------------------
-
-const layerListEl = document.getElementById("layer-list");
-const drawRateEl = document.getElementById("draw-rate");
-const drawRateValueEl = document.getElementById("draw-rate-value");
+MapView.init({
+  layersAt: drawLayers.layersAt,
+  worldBounds: drawLayers.worldBounds,
+  homeTarget: drawLayers.homeTarget,
+  statusTitle: () => liveMapName,
+  speedMps: drawLayers.speedMps,
+  isAnimating: drawLayers.isAnimating,
+});
 
 /** Range of the read-rate sliders, in Hz. */
 const POLL_RATE_MIN_HZ = 1;
 const POLL_RATE_MAX_HZ = 100;
 
-function renderLayerList() {
-  layerListEl.innerHTML = "";
-  if (layers.size === 0) {
-    const li = document.createElement("li");
-    li.className = "empty";
-    li.textContent = "Nothing is drawing yet";
-    layerListEl.appendChild(li);
-    return;
-  }
-  for (const topic of [...layers.keys()].sort()) {
-    const li = document.createElement("li");
-    const label = document.createElement("label");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = !hiddenLayers.has(topic);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) hiddenLayers.delete(topic);
-      else hiddenLayers.add(topic);
-      MapView.requestRedraw();
-    });
-    const name = document.createElement("span");
-    name.className = "layer-name";
-    name.textContent = topic;
-    const freshness = document.createElement("span");
-    freshness.className = "layer-freshness";
-    freshness.dataset.topic = topic;
-    label.append(checkbox, name, freshness);
-    li.appendChild(label);
-    layerListEl.appendChild(li);
-  }
-  renderLayerFreshness();
-}
-
-/** Human-readable age, e.g. "42 ms", "3.1 s", "5 min". */
-function formatAge(ms) {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  return `${Math.round(ms / 60_000)} min`;
-}
-
-function renderLayerFreshness() {
-  const nowMs = performance.now();
-  for (const el of layerListEl.querySelectorAll(".layer-freshness")) {
-    const layer = layers.get(el.dataset.topic);
-    if (!layer || !layer.drawing) continue;
-    const ageMs = layerAgeMs(layer, nowMs);
-    const staleAfterMs = layer.drawing.stale_after_ms;
-    MapView.setText(el, ageMs === null ? "never drawn" : `${formatAge(ageMs)} ago`);
-    el.classList.toggle("stale", ageMs === null || (staleAfterMs !== null && ageMs > staleAfterMs));
-  }
-}
-
+const drawRateEl = document.getElementById("draw-rate");
+const drawRateValueEl = document.getElementById("draw-rate-value");
 drawRateEl.min = POLL_RATE_MIN_HZ;
 drawRateEl.max = POLL_RATE_MAX_HZ;
 drawRateEl.value = drawRateHz;
@@ -473,25 +186,6 @@ async function pollVehicleModel() {
   liveVehicleModelKind = live.kind;
   vehicleModelSelectEl.value = live.kind;
   updateVehicleModelDescription(live.kind);
-}
-
-// ---------------------------------------------------------------------
-// Left nav rail -> right panel switching
-// ---------------------------------------------------------------------
-
-const panelNavButtons = document.querySelectorAll(".panel-nav-btn");
-
-function selectPanel(name) {
-  for (const btn of panelNavButtons) {
-    btn.classList.toggle("selected", btn.dataset.panel === name);
-  }
-  for (const section of document.querySelectorAll(".panel-section")) {
-    section.hidden = section.id !== `panel-${name}`;
-  }
-}
-
-for (const btn of panelNavButtons) {
-  btn.addEventListener("click", () => selectPanel(btn.dataset.panel));
 }
 
 // ---------------------------------------------------------------------
@@ -645,7 +339,7 @@ pollRateEl.addEventListener("input", () => {
 setInterval(() => {
   // Only worth the work while the panel it updates is actually visible.
   if (topicPanelVisible() && topicSelectEl.value) renderTopicContent();
-  if (!document.getElementById("panel-layers").hidden) renderLayerFreshness();
+  if (!document.getElementById("panel-layers").hidden) drawLayers.renderFreshness();
 }, TOPIC_CONTENT_REFRESH_MS);
 
 setInterval(() => {
@@ -852,11 +546,10 @@ fetchJSON("/api/config")
  *  reflect changes made from another tab. */
 const SELECTION_POLL_MS = 500;
 
-const drawPoller = startPolling(pollDraw, 1000 / drawRateHz);
+const drawPoller = startPolling(drawLayers.poll, 1000 / drawRateHz);
 const topicPoller = startPolling(pollSelectedTopic, 1000 / DEFAULT_TOPIC_RATE_HZ);
 startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollVehicleModel, SELECTION_POLL_MS);
-renderLayerList();
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

@@ -44,9 +44,8 @@ impl VehicleModelKind {
     /// label, and a brief description.
     ///
     /// The single source of truth for all four: `web_gui` serves it from
-    /// `GET /api/vehicle_models`, `debug_web_interface` resolves a recorded
-    /// kind through it, and both frontends render the labels/descriptions
-    /// they're given rather than keeping their own copies.
+    /// `GET /api/vehicle_models`, and its frontend renders the
+    /// labels/descriptions it's given rather than keeping its own copy.
     pub const ALL: &'static [(Self, &'static str, &'static str, &'static str)] = &[
         (
             Self::Bicycle,
@@ -137,7 +136,7 @@ mod tests {
     use super::*;
 
     /// The three copies of this mapping that used to exist (web_gui's
-    /// options table, debug_web_interface's `kind_str`, and a hardcoded
+    /// options table, the replay UI's (then `debug_web_interface`) `kind_str`, and a hardcoded
     /// label object in its JavaScript) could drift apart silently. Now
     /// there's one, and this checks it's complete.
     #[test]
