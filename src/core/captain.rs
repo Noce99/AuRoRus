@@ -306,6 +306,7 @@ impl Captain {
     fn topic_or_register<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         name: &str,
+        executor_id: u8,
         initial: impl FnOnce() -> T,
     ) -> Arc<RwLockTopic<T>> {
         if let Some(existing) = self.topics.read().unwrap().get(name) {
@@ -331,7 +332,14 @@ impl Captain {
             });
         }
 
-        self.log_if_verbose(LogColor::Pink, format!("registered topic {name:?}"));
+        self.log_if_verbose(
+            LogColor::Pink,
+            format!(
+                "{} registered topic {name:?} [{}]",
+                self.name_of(executor_id),
+                crate::core::log::short_type_name::<T>(),
+            ),
+        );
         let topic: Arc<RwLockTopic<T>> = Arc::new(RwLockTopic::new(initial()));
         topics.insert(name.to_string(), topic.clone());
         self.debug_topics.write().unwrap().insert(name.to_string(), topic.clone());
@@ -354,7 +362,7 @@ impl Captain {
         executor_id: u8,
         initial: impl FnOnce() -> T,
     ) -> Arc<RwLockTopic<T>> {
-        let topic = self.topic_or_register::<T>(topic_name, initial);
+        let topic = self.topic_or_register::<T>(topic_name, executor_id, initial);
         if topic.set_writer(executor_id).is_err() {
             let holder_id = topic.writer().expect("a writer must be set if set_writer failed");
             Self::fatal(format!(

@@ -143,7 +143,10 @@ impl Runner {
         initial: impl Fn() -> T + Send + Sync + 'static,
     ) {
         let name = name.into();
-        self.log(LogColor::Pink, format!("registered topic {name:?}"));
+        self.log(
+            LogColor::Pink,
+            format!("Runner registered topic {name:?} [{}]", log::short_type_name::<T>()),
+        );
         self.captain.register_topic(name.clone(), initial());
         self.registered_topics.push(Box::new(move |captain: &Captain| {
             captain.register_topic(name.clone(), initial());

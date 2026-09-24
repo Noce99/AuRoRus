@@ -48,3 +48,25 @@ pub(crate) fn format_line(color: LogColor, message: impl fmt::Display) -> String
         now_hhmmss()
     )
 }
+
+/// `T`'s type name with every module path stripped - `std::any::type_name` gives
+/// e.g. `alloc::vec::Vec<aurorus::topics::Drawing>`, this gives `Vec<Drawing>`.
+pub(crate) fn short_type_name<T: ?Sized>() -> String {
+    let full = std::any::type_name::<T>();
+    let mut short = String::with_capacity(full.len());
+    let mut segment_start = 0;
+    for (i, c) in full.char_indices() {
+        if c.is_alphanumeric() || c == '_' || c == ':' {
+            continue;
+        }
+        short.push_str(last_path_segment(&full[segment_start..i]));
+        short.push(c);
+        segment_start = i + c.len_utf8();
+    }
+    short.push_str(last_path_segment(&full[segment_start..]));
+    short
+}
+
+fn last_path_segment(path: &str) -> &str {
+    path.rsplit("::").next().unwrap_or(path)
+}
