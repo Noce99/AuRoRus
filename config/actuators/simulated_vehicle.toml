@@ -21,7 +21,7 @@ max_steering_angle_rad = 0.4189
 max_steering_rate_rad_s = 4.0
 # Largest speed the vehicle can be commanded to, in either direction (i.e.
 # this also bounds reverse), in meters/second.
-max_speed_mps = 8.0
+max_speed_mps = 4.0
 # Largest forward acceleration the motor can produce, in meters/second^2.
 max_accel_mps2 = 4.0
 # Largest deceleration (braking) the motor can produce, in meters/second^2.

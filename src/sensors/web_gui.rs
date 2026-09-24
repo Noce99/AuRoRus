@@ -3,10 +3,10 @@
 //! vehicle status - and for picking which vehicle physics model is running,
 //! on [`WebGuiConfig::bind_addr`]. Claims the writer slot for `human_vesc_command`,
 //! `map_selection`, `vehicle_model_selection`, and `place_at_start` (see
-//! [`live_api`]); reads `map`, `vehicle_status`, and `vehicle_model_status`,
-//! which some other executor in the same [`crate::Runner`] (e.g.
-//! [`crate::sensors::MapServer`], [`crate::actuators::SimulatedVehicle`]) is
-//! expected to be writing.
+//! [`live_api`]); reads `map`, `vehicle_status`, `vehicle_model_status`, and
+//! `lidar_scan`, which some other executor in the same [`crate::Runner`]
+//! (e.g. [`crate::sensors::MapServer`], [`crate::actuators::SimulatedVehicle`],
+//! [`crate::sensors::SimulatedLidar`]) is expected to be writing.
 
 mod assets;
 mod handlers;

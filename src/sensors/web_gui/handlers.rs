@@ -41,6 +41,7 @@ pub fn handle(mut request: Request, maps_root: &Path, captain: &Captain, writer_
         (Method::Get, "/api/map/raster") => live_api::raster(captain),
         (Method::Post, "/api/map_selection") => live_api::select_map(&mut request, captain, writer_id, maps_root),
         (Method::Get, "/api/vehicle_status") => live_api::vehicle_status(captain),
+        (Method::Get, "/api/lidar_scan") => live_api::lidar_scan(captain),
         (Method::Post, "/api/human_vesc_command") => live_api::human_vesc_command(&mut request, captain, writer_id),
         (Method::Get, "/api/vehicle_models") => live_api::vehicle_models(),
         (Method::Get, "/api/vehicle_model") => live_api::vehicle_model(captain),

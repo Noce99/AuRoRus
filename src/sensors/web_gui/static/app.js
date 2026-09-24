@@ -28,6 +28,14 @@ let liveMapName = null;
 let vehicleStatus = null;
 let vehicleStatusAtMs = 0;
 
+/** The most recent sample from `/api/lidar_scan`, or null before the first
+ *  poll. Reprojected into world-frame points (relative to the current
+ *  predicted vehicle pose) by `lidarPointsAt` below, rather than storing
+ *  world coordinates directly - `SimulatedLidar` reports distances/angles
+ *  relative to the vehicle, not absolute positions.
+ *  @type {{points:number[], intensities:number[], num_lidar_points:number, fov:number}|null} */
+let lidarScan = null;
+
 /** Vehicle model kind the `vehicle_model_status` topic currently holds
  *  (server-side, actually-running model), or null before the first poll -
  *  tracked separately from the `<select>`'s own value so polling can tell
@@ -58,8 +66,32 @@ function predictedVehiclePose(nowMs) {
   };
 }
 
+/** Turns the latest `lidarScan` into world-frame hit points, relative to the
+ *  current predicted vehicle pose: ray `i`'s angle is spread evenly across
+ *  `fov`, centered on the vehicle's forward direction, the same formula
+ *  `SimulatedLidar` casts its rays with (see `ray_offset_rad` in
+ *  `src/sensors/simulated_lidar.rs`). Only rays that actually hit something
+ *  are drawn - a no-return ray reports `intensity` 0, an actual hit reports 1. */
+function lidarPointsAt(nowMs) {
+  if (!lidarScan) return [];
+  const pose = predictedVehiclePose(nowMs);
+  if (!pose) return [];
+
+  const numPoints = lidarScan.num_lidar_points;
+  const points = [];
+  for (let i = 0; i < numPoints; i++) {
+    if (lidarScan.intensities[i] !== 1) continue;
+    const offset = numPoints > 1 ? -lidarScan.fov / 2 + (i * lidarScan.fov) / (numPoints - 1) : 0;
+    const angle = pose.heading_rad + offset;
+    const distance = lidarScan.points[i];
+    points.push({ x_m: pose.x_m + distance * Math.cos(angle), y_m: pose.y_m + distance * Math.sin(angle) });
+  }
+  return points;
+}
+
 MapView.init({
   vehiclePoseAt: predictedVehiclePose,
+  lidarPointsAt,
   // A moving vehicle changes the picture every frame even with no input.
   isAnimating: () => vehicleStatus !== null && Math.abs(vehicleStatus.speed_mps) > 1e-3,
 });
@@ -138,6 +170,7 @@ async function pollLiveMap() {
 
 const LIVE_MAP_POLL_MS = 500;
 const VEHICLE_STATUS_POLL_MS = 33;
+const LIDAR_SCAN_POLL_MS = 33;
 
 async function pollVehicleStatus() {
   const status = await fetchJSON("/api/vehicle_status");
@@ -153,6 +186,11 @@ async function pollVehicleStatus() {
   vehicleStatus = status;
   vehicleStatusAtMs = performance.now();
   if (moved) MapView.requestRedraw();
+}
+
+async function pollLidarScan() {
+  lidarScan = await fetchJSON("/api/lidar_scan");
+  MapView.requestRedraw();
 }
 
 // ---------------------------------------------------------------------
@@ -402,6 +440,7 @@ fetchJSON("/api/config")
 
 startPolling(pollLiveMap, LIVE_MAP_POLL_MS);
 startPolling(pollVehicleStatus, VEHICLE_STATUS_POLL_MS);
+startPolling(pollLidarScan, LIDAR_SCAN_POLL_MS);
 startPolling(pollVehicleModel, LIVE_MAP_POLL_MS);
 
 refreshMapList()

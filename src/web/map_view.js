@@ -24,6 +24,7 @@ window.MapView = (() => {
   const SLIDER_STEPS = 1000;
   const VEHICLE_LENGTH_M = 0.45;
   const VEHICLE_WIDTH_M = 0.25;
+  const LIDAR_POINT_RADIUS_PX = 2.5;
 
   /** World-space view: how many meters of world height are visible, and
    *  which world point (in meters, same frame as MapInfo) is centered. */
@@ -36,6 +37,7 @@ window.MapView = (() => {
 
   // Host hooks, filled in by init().
   let vehiclePoseAt = () => null;
+  let lidarPointsAt = () => [];
   let isAnimating = () => false;
   let onFrame = () => {};
 
@@ -146,6 +148,25 @@ window.MapView = (() => {
     ctx.restore();
   }
 
+  /** Draws each live LIDAR hit (world-frame `{x_m, y_m}`, as returned by
+   *  `lidarPointsAt`) as a small red dot - a fixed device-pixel radius, so
+   *  points stay legible at any zoom level rather than shrinking to nothing
+   *  when zoomed out. */
+  function drawLidarPoints(nowMs) {
+    const points = lidarPointsAt(nowMs);
+    if (!points || points.length === 0) return;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const radius = LIDAR_POINT_RADIUS_PX * (window.devicePixelRatio || 1);
+    ctx.fillStyle = "#ff3b3b";
+    for (const point of points) {
+      const { x, y } = worldToScreen(point.x_m, point.y_m);
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
   function draw(nowMs) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#008080";
@@ -173,6 +194,7 @@ window.MapView = (() => {
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
 
+    drawLidarPoints(nowMs);
     drawVehicle(nowMs);
   }
 
@@ -365,10 +387,12 @@ window.MapView = (() => {
 
     /** Wires the shared map view to the page and starts its render loop.
      *  `vehiclePoseAt(nowMs)` returns `{x_m, y_m, heading_rad, speed_mps}`
-     *  or null; `isAnimating()` says whether to repaint every frame even
-     *  with no input; `onFrame(nowMs)` lets the host update its own
-     *  status-bar extras from inside the same frame. */
-    init({ vehiclePoseAt: poseFn, isAnimating: animFn, onFrame: frameFn } = {}) {
+     *  or null; `lidarPointsAt(nowMs)` returns an array of world-frame
+     *  `{x_m, y_m}` LIDAR hits to draw, or an empty array; `isAnimating()`
+     *  says whether to repaint every frame even with no input; `onFrame(nowMs)`
+     *  lets the host update its own status-bar extras from inside the same
+     *  frame. */
+    init({ vehiclePoseAt: poseFn, lidarPointsAt: lidarFn, isAnimating: animFn, onFrame: frameFn } = {}) {
       canvas = document.getElementById("map-canvas");
       ctx = canvas.getContext("2d");
       statusName = document.getElementById("status-map-name");
@@ -377,6 +401,7 @@ window.MapView = (() => {
       zoomSlider = document.getElementById("zoom-slider");
 
       if (poseFn) vehiclePoseAt = poseFn;
+      if (lidarFn) lidarPointsAt = lidarFn;
       if (animFn) isAnimating = animFn;
       if (frameFn) onFrame = frameFn;
 

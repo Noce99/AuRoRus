@@ -9,8 +9,8 @@ use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
 use crate::web::{bad_request, header, json_response};
 use crate::topics::{
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
-    PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SelectedMap, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
     VEHICLE_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::Captain;
@@ -107,6 +107,15 @@ pub fn select_map(request: &mut Request, captain: &Captain, writer_id: u8, maps_
 /// speed, read from the `vehicle_status` topic.
 pub fn vehicle_status(captain: &Captain) -> ResponseBox {
     json_response(&captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME).read(), 200)
+}
+
+/// `GET /api/lidar_scan` - the most recent LIDAR scan, read from the
+/// `lidar_scan` topic - distances/intensities per ray, plus the sensor's
+/// `fov`/`min_distance`/`max_distance`, which the frontend needs to turn
+/// each ray back into a world-frame point relative to the vehicle's current
+/// pose.
+pub fn lidar_scan(captain: &Captain) -> ResponseBox {
+    json_response(&captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME).read(), 200)
 }
 
 #[derive(serde::Deserialize)]

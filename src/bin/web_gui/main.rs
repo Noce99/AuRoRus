@@ -1,5 +1,5 @@
 use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
-use aurorus::sensors::{MapServer, MapServerConfig, WebGui, WebGuiConfig};
+use aurorus::sensors::{MapServer, MapServerConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig};
 use aurorus::topics::{VESC_COMMAND_TOPIC_NAME, VehicleModelKind, VescCommand};
 use aurorus::{Executor, Runner};
 
@@ -12,6 +12,8 @@ fn main() {
         aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml")).unwrap_or_else(|_| WebGuiConfig::default());
     let map_server_config = aurorus::config::load(&config.config_dir.join("sensors/map_server.toml"))
         .unwrap_or_else(|_| MapServerConfig::default());
+    let simulated_lidar_config = aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
+        .unwrap_or_else(|_| SimulatedLidarConfig::default());
     let vehicle_config = aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
         .unwrap_or_else(|_| SimulatedVehicleConfig::default());
 
@@ -24,6 +26,7 @@ fn main() {
 
     runner.add_executor(WebGui::new("WebGui", config.maps_root, web_gui_config).boxed());
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
+    runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
     runner.add_executor(
         SimulatedVehicle::new(
             "SimulatedVehicle",

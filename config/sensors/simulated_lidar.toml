@@ -1,0 +1,15 @@
+# Configuration for `aurorus::sensors::SimulatedLidar`, a synthetic LIDAR
+# sensor that raycasts against the currently loaded map from the vehicle's
+# real position, for exercising downstream algorithms without real hardware.
+
+# Rate at which SimulatedLidar publishes a new scan, in Hz.
+rate_hz = 50.0
+# How many points SimulatedLidar puts in every scan.
+num_points = 360
+# SimulatedLidar's reported minimum distance, in meters.
+min_distance_m = 0.15
+# SimulatedLidar's reported maximum distance, in meters.
+max_distance_m = 12.0
+# SimulatedLidar's field of view, centered on the vehicle's forward
+# direction, in radians (2*pi = 6.283185307179586).
+fov_rad = 4.2
