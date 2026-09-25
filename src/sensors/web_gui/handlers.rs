@@ -98,6 +98,17 @@ pub fn handle(
             live_api::slam_command(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/slam_save") => live_api::slam_save(&mut request, captain, writer_id),
+        (Method::Get, "/api/planning") => live_api::planning(captain),
+        (Method::Post, "/api/planning_parameter") => {
+            live_api::set_planning_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/planning_parameters_save") => {
+            live_api::save_planning_parameters(captain)
+        }
+        (Method::Post, "/api/planning_parameters_load") => {
+            live_api::load_planning_parameters(captain, writer_id)
+        }
+        (Method::Post, "/api/planning_start") => live_api::planning_start(captain, writer_id),
         _ => not_found(),
     };
 

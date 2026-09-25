@@ -31,7 +31,9 @@
 #algorithm-description,
 #algorithm-status,
 #slam-details,
-#localization-details {
+#localization-details,
+#planning-details,
+#planning-outcome {
   margin: 0;
   font-size: 13px;
   color: #9aa4b2;
@@ -95,6 +97,7 @@
   word-break: break-word;
 }
 
+#planning-outcome.error,
 #algorithm-status.stale {
   color: #f59e0b;
 }
@@ -172,7 +175,8 @@
 }
 
 #slam-state,
-#localization-state {
+#localization-state,
+#planning-state {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
@@ -180,7 +184,8 @@
 }
 
 #slam-state.running,
-#localization-state.localizing {
+#localization-state.localizing,
+#planning-state.computing {
   color: #7fd18b;
 }
 
@@ -190,20 +195,23 @@
 }
 
 #slam-state.stale,
-#localization-state.stale {
+#localization-state.stale,
+#planning-state.stale {
   color: #f59e0b;
 }
 
 #slam-controls,
 #localization-controls,
-#algorithm-controls {
+#algorithm-controls,
+#planning-controls {
   display: flex;
   gap: 8px;
 }
 
 #slam-controls button,
 #localization-controls button,
-#algorithm-controls button {
+#algorithm-controls button,
+#planning-controls button {
   flex: 1 1 0;
 }
 
@@ -351,4 +359,9 @@
 
 #generate-confirm-btn:hover {
   background: #4a7ad9;
+}
+
+/* The outcome quotes file paths, which have no spaces to wrap at. */
+#planning-outcome {
+  overflow-wrap: anywhere;
 }

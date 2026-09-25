@@ -5,7 +5,7 @@
 use std::path::Path;
 
 /// One race-line point paired with its target speed.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SpeedPoint {
     pub x: f64,
     pub y: f64,

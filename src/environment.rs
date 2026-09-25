@@ -16,7 +16,10 @@ mod tiff;
 pub use info::{
     GenerationInfo, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint, now_rfc3339,
 };
-pub use map::{Map, MapLoadError, MapSaveError, map_folder, read_info, save};
-pub use race_line::SpeedPoint;
+pub use map::{
+    CENTERLINE_FILE_NAME, Map, MapLoadError, MapSaveError, RACE_LINE_FILE_NAME, map_folder,
+    read_info, save, write_line,
+};
+pub use race_line::{RaceLineWriteError, SpeedPoint};
 pub use raster::Raster;
 pub use simulator::{GeneratedMap, GenerationConfig, MapGenerationError, generate, random_seed};

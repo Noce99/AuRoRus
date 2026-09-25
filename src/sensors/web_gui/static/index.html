@@ -22,6 +22,7 @@
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
       <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
       <button class="panel-nav-btn" data-panel="localization">Localization</button>
+      <button class="panel-nav-btn" data-panel="planning">Planning</button>
     </nav>
   </aside>
 
@@ -138,6 +139,24 @@
         <button type="button" id="localization-pause-btn" data-state="localization_paused" title="Pause, keeping the pose">&#10074;&#10074; Pause</button>
       </div>
       <p id="localization-details"></p>
+    </section>
+
+    <section id="panel-planning" class="panel-section" hidden>
+      <h1>Planning</h1>
+      <p id="planning-state"></p>
+      <div id="planning-controls">
+        <button type="button" id="planning-start-btn" title="Plan a minimum-curvature race line for the selected map, and save it in its folder">&#9654; Start computation</button>
+      </div>
+      <p id="planning-details"></p>
+      <p id="planning-outcome"></p>
+      <h2 class="parameter-group-title">Parameters</h2>
+      <p class="parameter-description">Applied as soon as they change - set them before starting.</p>
+      <div id="planning-parameters" class="parameter-list" hidden></div>
+      <div id="planning-save" class="parameter-save" hidden>
+        <button type="button" id="planning-save-btn" class="parameter-save-btn" title="Write these values into the planner's config file">Save parameters</button>
+        <button type="button" id="planning-load-btn" class="parameter-load-btn" title="Use the values in the planner's config file again, dropping unsaved changes">Load from file</button>
+        <p id="planning-save-status"></p>
+      </div>
     </section>
   </aside>
 

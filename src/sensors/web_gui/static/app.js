@@ -684,6 +684,90 @@ function renderLocalization(status, stale) {
 }
 
 // ---------------------------------------------------------------------
+// Planning panel - asks the planner for a race line for the selected map
+// through the `planning_request` topic, tunes it through
+// `planning_parameters` (applied right away, so before starting), and
+// shows what it's doing and how its latest request went, from the
+// `planning_status` topic. The race line itself is drawn by `MapServer`
+// once saved.
+// ---------------------------------------------------------------------
+
+const planningStateEl = document.getElementById("planning-state");
+const planningDetailsEl = document.getElementById("planning-details");
+const planningOutcomeEl = document.getElementById("planning-outcome");
+const planningStartBtn = document.getElementById("planning-start-btn");
+
+const syncPlanningParameters = createParameterPanel({
+  containerEl: document.getElementById("planning-parameters"),
+  saveEl: document.getElementById("planning-save"),
+  setUrl: "/api/planning_parameter",
+  saveUrl: "/api/planning_parameters_save",
+  loadUrl: "/api/planning_parameters_load",
+});
+
+/** Whether the planner was last reported planning. */
+let planningComputing = false;
+
+planningStartBtn.addEventListener("click", () => {
+  planningStartBtn.disabled = true;
+  planningOutcomeEl.classList.remove("error");
+  planningOutcomeEl.textContent = "";
+  fetchJSON("/api/planning_start", { method: "POST" })
+    .then(() => pollPlanning())
+    .catch((err) => {
+      planningOutcomeEl.classList.add("error");
+      planningOutcomeEl.textContent = `Couldn't start: ${err.message}`;
+      planningStartBtn.disabled = planningComputing || liveMapName === null;
+    });
+});
+
+/** The last outcome, in words. */
+function describePlanningOutcome(outcome) {
+  const map = outcome.map ? outcome.map.split("/").pop() : "no map";
+  if (outcome.error !== null) return `Planning for ${map} failed: ${outcome.error}`;
+  const parts = [
+    `Race line for ${map} saved to ${outcome.saved_to} (${(outcome.elapsed_ms / 1000).toFixed(1)} s).`,
+    `Lap: ${outcome.lap_length_m.toFixed(1)} m in ${outcome.lap_time_s.toFixed(2)} s.`,
+    `Max curvature ${outcome.max_curvature_per_m.toFixed(2)} 1/m`,
+    `(centerline: ${outcome.reference_max_curvature_per_m.toFixed(2)} 1/m).`,
+  ];
+  if (outcome.computed_centerline) {
+    parts.push("The map had no centerline: one was computed from its walls and saved too.");
+  }
+  return parts.join(" ");
+}
+
+// Polls the `planning_status` topic (via `/api/planning`). The planner only
+// writes it when something changes, so its age says nothing about whether
+// it's alive - only a status never written at all means there's no planner.
+async function pollPlanning() {
+  const response = await fetchJSON("/api/planning");
+  const status = response.value;
+  const missing = response.age_ms === null;
+  planningComputing = !missing && status.state === "computing";
+
+  planningStateEl.className = missing ? "stale" : status.state;
+  planningStateEl.textContent = missing ? "Planner not running" : planningComputing ? "Computing" : "Idle";
+  planningStartBtn.disabled = missing || planningComputing || liveMapName === null;
+
+  if (missing) {
+    planningDetailsEl.textContent = "";
+  } else if (planningComputing) {
+    planningDetailsEl.textContent = `${status.stage}...`;
+  } else if (liveMapName === null) {
+    planningDetailsEl.textContent = "Select a map to plan a race line for.";
+  } else {
+    planningDetailsEl.textContent = `Plans a minimum-curvature race line for ${liveMapName}, with a speed profile.`;
+  }
+
+  const outcome = status.last_outcome;
+  planningOutcomeEl.classList.toggle("error", outcome !== null && outcome.error !== null);
+  if (outcome !== null) planningOutcomeEl.textContent = describePlanningOutcome(outcome);
+
+  syncPlanningParameters("planner", status.parameters);
+}
+
+// ---------------------------------------------------------------------
 // Topics panel - inspects any registered topic, generically: the list
 // comes from `/api/topics`, the picked topic's value from `/api/topic`.
 // ---------------------------------------------------------------------
@@ -1037,8 +1121,9 @@ fetchJSON("/api/config")
   })
   .catch((err) => console.error(err));
 
-/** How often the current map, vehicle model, autonomous algorithm, and
- *  SLAM state are re-read, to reflect changes made from another tab. */
+/** How often the current map, vehicle model, autonomous algorithm, SLAM
+ *  state, and planner state are re-read, to reflect changes made from
+ *  another tab. */
 const SELECTION_POLL_MS = 500;
 
 const drawPoller = startPolling(drawLayers.poll, 1000 / drawRateHz);
@@ -1047,6 +1132,7 @@ startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollVehicleModel, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
+startPolling(pollPlanning, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

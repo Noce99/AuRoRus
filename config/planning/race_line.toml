@@ -1,0 +1,52 @@
+# Configuration for `aurorus::planning::Planner`, which plans a
+# minimum-curvature race line for the selected map, with a speed profile -
+# see documentation/planning.md. Every value but `poll_interval_ms` and
+# `solver_tolerance` can be tuned live from web_gui's Planning panel, and
+# saved back here from it.
+
+# How often the planner checks for a new request or parameter change, in
+# milliseconds.
+poll_interval_ms = 50
+
+# --- Geometry ---------------------------------------------------------------
+
+# Distance between the race line's points, in meters.
+spacing_m = 0.1
+# Points averaged (a moving average) to smooth a centerline computed from the
+# walls, for maps that have none. 1 means no smoothing.
+centerline_smoothing_window = 5
+
+# --- Minimum-curvature optimization -----------------------------------------
+
+# The vehicle's width, in meters. The race line keeps half of it, plus the
+# safety margin, from either wall.
+vehicle_width_m = 0.3
+# Extra distance kept from either wall, in meters.
+safety_margin_m = 0.1
+# Penalty on neighboring points' sideways offsets differing, in 1/m^4. 0 is
+# pure minimum curvature.
+smoothness_weight = 0.0
+# Farthest any point may move in one iteration, in meters. Each iteration
+# optimizes a linearization of the curvature, only accurate for small moves.
+max_step_m = 0.3
+# Most times the optimization is solved again around its latest solution.
+iterations = 30
+# Stops once no point moved further than this in an iteration, in meters.
+tolerance_m = 0.005
+# PANOC's tolerance on its fixed-point residual.
+solver_tolerance = 1e-6
+# Most PANOC iterations per solve. The problem is stiff (its curvature terms
+# couple neighbors through second differences), so PANOC typically needs
+# thousands; planning fails rather than use an unconverged solution.
+solver_max_iterations = 100000
+
+# --- Speed profile ----------------------------------------------------------
+
+# Top speed, in m/s.
+max_speed_mps = 8.0
+# Largest cornering (lateral) acceleration, in m/s^2.
+max_lateral_accel_mps2 = 6.0
+# Largest forward acceleration, in m/s^2.
+max_accel_mps2 = 4.0
+# Largest braking deceleration, in m/s^2.
+max_decel_mps2 = 6.0

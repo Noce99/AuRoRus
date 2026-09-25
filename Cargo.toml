@@ -9,6 +9,8 @@ csv = "1.4.0"
 ctrlc = "3.5"
 faer = "0.24.4"
 fax = "0.3.0"
+# PANOC, for the minimum-curvature race line - see `planning::min_curvature`.
+optimization_engine = "0.12.0"
 rand = "0.10.2"
 # "rc" enables the Arc/Rc Serialize+Deserialize impls, which `topics::SelectedMap`
 # needs to carry its raster as a shared `Arc<[u8]>` rather than an owned copy.

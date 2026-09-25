@@ -9,6 +9,8 @@ mod lidar_scan;
 mod map;
 mod odometry;
 mod place_at_start;
+mod planning;
+mod race_line;
 mod slam;
 mod start_state;
 mod vehicle_limits;
@@ -29,6 +31,11 @@ pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
 pub use odometry::{ODOMETRY_TOPIC_NAME, Odometry};
 pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
+pub use planning::{
+    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
+    PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState, PlanningStatus,
+};
+pub use race_line::{RACE_LINE_TOPIC_NAME, RaceLineKind, SelectedRaceLine};
 pub use slam::{
     SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
     SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,
