@@ -3,9 +3,10 @@
 //! and for picking which vehicle physics model and autonomous algorithm are
 //! running, on [`WebGuiConfig::bind_addr`]. Claims the writer slot for
 //! `human_vesc_command`, `map_selection`, `vehicle_model_selection`,
-//! `autonomous_algorithm_selection`, and `place_at_start` (see
-//! [`live_api`]); reads `map`, `vehicle_model_status`, and
-//! `autonomous_algorithm_status` to reflect the current selections.
+//! `autonomous_algorithm_selection`, `place_at_start`, and `slam_command`
+//! (see [`live_api`]); reads `map`, `vehicle_model_status`,
+//! `autonomous_algorithm_status`, and `slam_status` to reflect the current
+//! selections.
 //!
 //! Everything on the map canvas comes from drawing topics (see
 //! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
@@ -24,8 +25,8 @@ mod topics_api;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AutonomousAlgorithmSelection,
     HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VehicleModelSelection, VescCommand,
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SlamCommand,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
@@ -122,6 +123,7 @@ impl Executor for WebGui {
             self.id,
             PlaceAtStart::default,
         );
+        captain.claim_writer::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME, self.id, SlamCommand::default);
     }
 
     fn run(&mut self, captain: &Captain) {

@@ -40,4 +40,10 @@ pub struct Odometry {
     /// noise assumed in [`crate::localization::DeadReckoningConfig`]
     /// accumulates.
     pub covariance: [[f64; 3]; 3],
+    /// How many times dead reckoning has been reset to the `odom` origin
+    /// since it started - bumped on every reset, so a consumer buffering
+    /// poses (e.g. [`crate::localization::Slam`]) can tell samples from
+    /// before a reset, in a frame that no longer exists, from those after
+    /// it.
+    pub reset_count: u64,
 }

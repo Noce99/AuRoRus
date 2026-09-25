@@ -29,7 +29,8 @@
 
 #vehicle-model-description,
 #algorithm-description,
-#algorithm-status {
+#algorithm-status,
+#slam-details {
   margin: 0;
   font-size: 13px;
   color: #9aa4b2;
@@ -95,6 +96,34 @@
 
 #algorithm-status.stale {
   color: #f59e0b;
+}
+
+#slam-state {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #9aa4b2;
+}
+
+#slam-state.running {
+  color: #7fd18b;
+}
+
+#slam-state.waiting {
+  color: #e0a458;
+}
+
+#slam-state.stale {
+  color: #f59e0b;
+}
+
+#slam-controls {
+  display: flex;
+  gap: 8px;
+}
+
+#slam-controls button {
+  flex: 1 1 0;
 }
 
 .placeholder-text {

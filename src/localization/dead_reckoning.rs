@@ -145,7 +145,10 @@ impl Executor for DeadReckoning {
             let wanted_start = start_state_topic.read().into_value();
             let wanted_place_request = place_at_start_topic.read().requested;
             if wanted_start != applied_start || wanted_place_request != applied_place_request {
-                odometry = Odometry::default();
+                odometry = Odometry {
+                    reset_count: odometry.reset_count.wrapping_add(1),
+                    ..Odometry::default()
+                };
                 trail = Trail::new(wanted_start);
                 last_written_at = None;
                 applied_start = wanted_start;
@@ -263,6 +266,7 @@ fn step(
         ax_mps2: reading.ax_mps2,
         ay_mps2: reading.ay_mps2,
         covariance,
+        reset_count: odometry.reset_count,
     }
 }
 
@@ -481,6 +485,21 @@ mod tests {
         // Heading variance is exactly n * (sigma_w * dt)^2.
         let expected = 500.0 * (config.yaw_rate_std_rad_s * 0.01).powi(2);
         assert!((odometry.covariance[2][2] - expected).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_step_keeps_the_reset_count() {
+        let odometry = Odometry {
+            reset_count: 7,
+            ..Odometry::default()
+        };
+        let stepped = step(
+            odometry,
+            &reading(1.0, 0.1),
+            0.01,
+            &config(Integration::Euler),
+        );
+        assert_eq!(stepped.reset_count, 7);
     }
 
     #[test]

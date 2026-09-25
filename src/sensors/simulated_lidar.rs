@@ -166,14 +166,10 @@ impl Executor for SimulatedLidar {
 }
 
 /// The angle of ray `index` (of `config.num_points` total), relative to the
-/// vehicle's forward direction: rays are spread evenly across
-/// `config.fov_rad`, with the first and last ray landing exactly on the
-/// FOV's edges.
+/// vehicle's forward direction - see [`LidarScan::ray_angle_rad`], which
+/// every consumer of the scan uses to interpret it.
 fn ray_offset_rad(config: &SimulatedLidarConfig, index: usize) -> f32 {
-    if config.num_points <= 1 {
-        return 0.0;
-    }
-    -config.fov_rad / 2.0 + index as f32 * config.fov_rad / (config.num_points - 1) as f32
+    LidarScan::ray_angle_rad(config.fov_rad, config.num_points, index)
 }
 
 /// Marches a ray from `(origin_x, origin_y)` (world meters) at `angle_rad`

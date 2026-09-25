@@ -20,6 +20,7 @@
       <button class="panel-nav-btn" data-panel="vehicle-model">Vehicle Model</button>
       <button class="panel-nav-btn" data-panel="topics">Topics</button>
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
+      <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
     </nav>
   </aside>
 
@@ -86,6 +87,17 @@
       <select id="algorithm-select"></select>
       <p id="algorithm-description"></p>
       <p id="algorithm-status"></p>
+    </section>
+
+    <section id="panel-mapping" class="panel-section" hidden>
+      <h1>Mapping</h1>
+      <p id="slam-state"></p>
+      <div id="slam-controls">
+        <button type="button" id="slam-play-btn" data-state="running" title="Start or resume mapping">&#9654; Play</button>
+        <button type="button" id="slam-pause-btn" data-state="waiting" title="Pause, keeping the map">&#10074;&#10074; Pause</button>
+        <button type="button" id="slam-clear-btn" data-state="off" title="Stop and throw the map away">Clear</button>
+      </div>
+      <p id="slam-details"></p>
     </section>
   </aside>
 

@@ -276,6 +276,61 @@ async function pollAlgorithms() {
 }
 
 // ---------------------------------------------------------------------
+// Mapping panel - drives SLAM through the `slam_command` topic (Play:
+// running, Pause: waiting, Clear: off) and shows what it's actually doing,
+// from the `slam_status` topic.
+// ---------------------------------------------------------------------
+
+const slamStateEl = document.getElementById("slam-state");
+const slamDetailsEl = document.getElementById("slam-details");
+const slamButtons = document.querySelectorAll("#slam-controls button");
+
+/** `slam_status` older than this means SLAM isn't running at all. */
+const SLAM_STATUS_STALE_MS = 1000;
+
+const SLAM_STATE_LABELS = { off: "Off", waiting: "Waiting", running: "Running" };
+
+for (const button of slamButtons) {
+  button.addEventListener("click", () => {
+    fetchJSON("/api/slam_command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: button.dataset.state }),
+    })
+      .then(() => pollSlam())
+      .catch((err) => console.error(err));
+  });
+}
+
+// Polls the `slam_status` topic (via `/api/slam`): the state SLAM is
+// actually in - whoever asked for it, this tab or another - and how far the
+// map has got.
+async function pollSlam() {
+  const response = await fetchJSON("/api/slam");
+  const status = response.value;
+  const stale = response.age_ms === null || response.age_ms > SLAM_STATUS_STALE_MS;
+
+  slamStateEl.className = stale ? "stale" : status.state;
+  slamStateEl.textContent = stale ? "SLAM not running" : SLAM_STATE_LABELS[status.state];
+  for (const button of slamButtons) {
+    button.disabled = !stale && button.dataset.state === status.state;
+  }
+
+  if (stale) {
+    slamDetailsEl.textContent = "";
+    return;
+  }
+  const parts = [`${status.scans} scan${status.scans === 1 ? "" : "s"} in the map.`];
+  if (status.last_match_response !== null) {
+    parts.push(`Last match: ${(status.last_match_response * 100).toFixed(0)}%`);
+  }
+  if (status.last_process_ms !== null) {
+    parts.push(`in ${status.last_process_ms.toFixed(1)} ms.`);
+  }
+  slamDetailsEl.textContent = parts.join(" ");
+}
+
+// ---------------------------------------------------------------------
 // Topics panel - inspects any registered topic, generically: the list
 // comes from `/api/topics`, the picked topic's value from `/api/topic`.
 // ---------------------------------------------------------------------
@@ -629,9 +684,8 @@ fetchJSON("/api/config")
   })
   .catch((err) => console.error(err));
 
-/** How often the current map, vehicle model, and autonomous algorithm
- *  selections are re-read, to
- *  reflect changes made from another tab. */
+/** How often the current map, vehicle model, autonomous algorithm, and
+ *  SLAM state are re-read, to reflect changes made from another tab. */
 const SELECTION_POLL_MS = 500;
 
 const drawPoller = startPolling(drawLayers.poll, 1000 / drawRateHz);
@@ -639,6 +693,7 @@ const topicPoller = startPolling(pollSelectedTopic, 1000 / DEFAULT_TOPIC_RATE_HZ
 startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollVehicleModel, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
+startPolling(pollSlam, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

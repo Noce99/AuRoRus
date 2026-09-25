@@ -41,7 +41,8 @@ window.DrawLayers = (() => {
    *  - `listEl`: a `<ul>` to render one show/hide checkbox per layer into,
    *    with how old each layer is;
    *  - `homeOnEveryNewRaster`: whether to home the view every time a new
-   *    raster arrives (live, where that means the map was switched), or
+   *    base-map raster (the bottom-most one) arrives (live, where that
+   *    means the map was switched), or
    *    only the first time (replay, where seeking back and forth across the
    *    moment the map was loaded brings the same raster back again - and the
    *    view is the user's to move, not the timeline's). */
@@ -101,6 +102,14 @@ window.DrawLayers = (() => {
       return [...layers.values()]
         .filter((layer) => layer.drawing && !hidden.has(layer.topic))
         .sort((a, b) => a.drawing.z_index - b.drawing.z_index || a.topic.localeCompare(b.topic));
+    }
+
+    /** The bottom-most layer drawing a raster - the base map - whether
+     *  it's shown or not. */
+    function baseRasterLayer() {
+      return [...layers.values()]
+        .filter((layer) => layer.drawing?.shapes.some((shape) => shapeKind(shape) === "raster"))
+        .sort((a, b) => a.drawing.z_index - b.drawing.z_index || a.topic.localeCompare(b.topic))[0];
     }
 
     /** `vehicle` advanced to `nowMs` along its own heading at its own
@@ -281,12 +290,16 @@ window.DrawLayers = (() => {
         if (!present.has(topic)) layers.delete(topic);
       }
 
+      const newRasterTopics = new Set();
       for (const entry of response.layers) {
         const kinds = await applyLayer(entry, requestedAtMs);
-        if (kinds.has("raster") && (homeOnEveryNewRaster || !homedOnce)) {
-          const layer = layers.get(entry.topic);
-          pendingHomeAfterMs = Math.max(pendingHomeAfterMs ?? -Infinity, layer.sampledAtMs ?? -Infinity);
-        }
+        if (kinds.has("raster")) newRasterTopics.add(entry.topic);
+      }
+      // Only the base map moves the view: an overlay raster republished as
+      // it grows (e.g. SLAM's map) would otherwise re-home it every time.
+      const base = baseRasterLayer();
+      if (base && newRasterTopics.has(base.topic) && (homeOnEveryNewRaster || !homedOnce)) {
+        pendingHomeAfterMs = Math.max(pendingHomeAfterMs ?? -Infinity, base.sampledAtMs ?? -Infinity);
       }
       if (pendingHomeAfterMs !== null && vehiclePlacedSince(pendingHomeAfterMs)) {
         pendingHomeAfterMs = null;

@@ -1,0 +1,77 @@
+# Configuration for `aurorus::localization::Slam`, which builds an occupancy
+# map of the track from the lidar_scan and odometry topics - a Rust port of
+# slam_toolbox's mapping core (Karto). Parameter names follow slam_toolbox's
+# config/mapper_params_online_async.yaml, with units added; see
+# documentation/slam.md.
+
+# How often Slam polls its input topics, in Hz. Above the lidar's rate, so a
+# new scan is picked up soon after it's written.
+rate_hz = 100.0
+# How many odometry samples are kept to interpolate the pose each scan was
+# taken from. At dead reckoning's ~100 Hz, 50 samples cover half a second.
+odometry_buffer_len = 50
+# Shortest time between two publications of the map (and its drawing), in
+# seconds. Each publication sends the whole raster to every viewer.
+map_publish_period_s = 0.5
+# Whether to draw the map, the trajectory, and the estimated vehicle on the
+# web UI's canvas.
+draw = true
+
+# --- Which scans are kept -------------------------------------------------
+
+# A scan is kept if at least this long passed since the last one kept, in
+# seconds...
+minimum_time_interval_s = 0.5
+# ... or the vehicle moved at least this far, in meters (slam_toolbox: 0.5,
+# lowered for a 1/10 car on small tracks)...
+minimum_travel_distance_m = 0.2
+# ... or turned at least this much, in radians (slam_toolbox: 0.5).
+minimum_travel_heading_rad = 0.2
+# How many of the most recent kept scans a new scan is matched against.
+scan_buffer_size = 10
+# Longest distance those scans may span, in meters.
+scan_buffer_maximum_scan_distance_m = 10.0
+
+# --- Scan matching --------------------------------------------------------
+
+# Side of the square window searched around the odometry prior, in meters -
+# odometry must be at least this close to the truth for a match to be found.
+correlation_search_space_dimension_m = 0.5
+# Resolution of that search, in meters.
+correlation_search_space_resolution_m = 0.01
+# How much reference points are blurred before matching, in meters - between
+# half and ten times the resolution.
+correlation_search_space_smear_deviation_m = 0.1
+# Heading searched either side of the prior, in radians (0.349 = 20 degrees).
+coarse_search_angle_offset_rad = 0.349
+# Heading step of the coarse search, in radians (2 degrees).
+coarse_angle_resolution_rad = 0.0349
+# Heading step of the fine search, in radians (0.2 degrees). Named "offset"
+# as in slam_toolbox, which also uses it as a resolution.
+fine_search_angle_offset_rad = 0.00349
+# How fast a candidate pose's score falls with its distance from the prior -
+# larger trusts odometry less.
+distance_variance_penalty = 0.5
+# How fast a candidate pose's score falls with its heading change from the
+# prior - larger trusts odometry less.
+angle_variance_penalty = 1.0
+# Floor of the distance penalty factor.
+minimum_distance_penalty = 0.5
+# Floor of the heading penalty factor.
+minimum_angle_penalty = 0.9
+# Whether to widen the heading search (by 20 degrees, up to three times) when
+# the scan doesn't overlap the recent scans at all.
+use_response_expansion = true
+
+# --- The map --------------------------------------------------------------
+
+# Readings farther than this only mark the cells they cross as free, and
+# aren't matched against, in meters (slam_toolbox's max_laser_range, capped
+# by the lidar's own maximum distance).
+max_laser_range_m = 12.0
+# Side of one cell of the published map, in meters.
+resolution_m = 0.05
+# How many beams must cross a cell before it's anything but unknown.
+min_pass_through = 2
+# Hit/pass ratio above which a cell is occupied rather than free.
+occupancy_threshold = 0.1

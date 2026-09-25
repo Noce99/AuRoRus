@@ -58,6 +58,24 @@ impl LidarScan {
             intensities,
         }
     }
+
+    /// The angle of reading `index` (of `num_points` total), relative to the
+    /// sensor's forward direction: readings are spread evenly across `fov`,
+    /// with the first and last landing exactly on the FOV's edges. Shared by
+    /// whoever produces a scan and whoever interprets one, so the two can't
+    /// disagree on where a reading points.
+    pub fn ray_angle_rad(fov: f32, num_points: usize, index: usize) -> f32 {
+        if num_points <= 1 {
+            return 0.0;
+        }
+        -fov / 2.0 + index as f32 * fov / (num_points - 1) as f32
+    }
+
+    /// The angle of `points[index]`, relative to the sensor's forward
+    /// direction - see [`Self::ray_angle_rad`].
+    pub fn angle_rad(&self, index: usize) -> f32 {
+        Self::ray_angle_rad(self.fov, self.num_lidar_points, index)
+    }
 }
 
 #[cfg(test)]
