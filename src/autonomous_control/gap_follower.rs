@@ -9,9 +9,6 @@ use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::Duration;
 
-/// How often a command is published, in Hz.
-const RATE_HZ: f64 = 50.0;
-
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(name: &str) -> Box<dyn Executor> {
     Box::new(GapFollower {
@@ -32,6 +29,8 @@ pub struct GapFollowerConfig {
     pub t_m: f32,
     /// Minimum number of far away point to create a gap, pure number,
     pub n: usize,
+    /// Bubble radius, pure number.
+    pub b_radius: usize,
 }
 
 impl Default for GapFollowerConfig {
@@ -67,7 +66,7 @@ impl Executor for GapFollower {
         let vehicle_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
 
-        let mut ticker = Ticker::new(RATE_HZ);
+        let mut ticker = Ticker::new(self.config.rate_hz as f64);
 
         let stale_after = Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz as f64));
 
@@ -112,7 +111,7 @@ impl Executor for GapFollower {
                 let direction: f32 = (start_angle + end_angle) / 2.;
                 let a_gap: Gap = Gap{
                     mean_distance: mean,
-                    size: length,
+                    // size: length,
                     direction: direction,
                     start_angle: start_angle + vehicle_heading,
                     end_angle: end_angle + vehicle_heading,
@@ -132,8 +131,30 @@ impl Executor for GapFollower {
                 }
             };
 
+            let mut closer_i: usize = 0;
+            let mut closer_distance: f32 = points[0];
+
+            for i in 1..points.len(){
+                if points[i] < closer_distance{
+                    closer_i  = i;
+                    closer_distance = points[i];
+                }
+            }
+
+            shapes.push(
+                Shape::CircularSector {
+                    x_m: vehice_x as f64,
+                    y_m: vehice_y as f64,
+                    radius_m: closer_distance as f64,
+                    start_rad: (-fov/2. + closer_i.saturating_sub(self.config.b_radius) as f32*rad_per_point + vehicle_heading) as f64,
+                    end_rad: (-fov/2. + (closer_i+self.config.b_radius).min(points.len()-1) as f32*rad_per_point + vehicle_heading) as f64,
+                    filled: false,
+                    color: Color::RED,
+                }
+            );
+
             for i in 0..points.len(){
-                if points[i] >= self.config.t_m{
+                if points[i] >= self.config.t_m && i.abs_diff(closer_i) > self.config.b_radius{
                     match last_gap_start{
                         None => {
                             last_gap_start = Some(i);
@@ -220,7 +241,7 @@ struct Gap{
     // Mean distance of the lidar points that created this gap, in meters.
     mean_distance: f32,
     // Size of the gap in number of lidar points, pure number.
-    size: usize,
+    // size: usize,
     // Direction of the gap respect to the vehicle, in rad.
     direction: f32,
     // Start angle, in rad.

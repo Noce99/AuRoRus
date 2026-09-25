@@ -7,3 +7,5 @@ rate_hz = 50.0
 t_m = 5.0
 # Minimum number of far away point to create a gap, pure number,
 n = 4
+# Bubble radius, pure number.
+b_radius = 100
