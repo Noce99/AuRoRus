@@ -251,16 +251,78 @@ body:has(#right-panel.collapsed) #right-panel-toggle-btn {
   gap: 4px;
 }
 
-#layer-list label {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+#layer-list details {
   border-radius: 6px;
   background: #22272e;
   font-size: 13px;
+}
+
+#layer-list summary {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
   cursor: pointer;
+  list-style: none;
+}
+
+#layer-list summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Disclosure arrow, turned down while open. */
+#layer-list summary::before {
+  content: "\25B8";
+  grid-column: 2;
+  grid-row: 1;
+  color: #9aa4b2;
+  transition: transform 0.15s;
+}
+
+#layer-list details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+#layer-list summary > input {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#layer-list summary > .layer-name {
+  grid-column: 3;
+}
+
+#layer-list summary > .layer-freshness {
+  grid-column: 4;
+}
+
+.layer-elements {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A hidden layer's elements aren't drawn whatever their own checkbox says. */
+#layer-list details.layer-hidden .layer-elements {
+  opacity: 0.45;
+}
+
+.layer-elements label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.layer-elements label:hover {
+  background: #2a3039;
 }
 
 #layer-list input {

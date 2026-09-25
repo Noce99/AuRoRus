@@ -138,13 +138,17 @@ impl Executor for SimulatedLidar {
             drawing_topic
                 .write(
                     self.id,
-                    Drawing::new(vec![Shape::Points {
-                        points: hits,
-                        radius_px: 2.5,
-                        color: Color::RED,
-                    }])
-                    .stale_after(stale_after)
-                    .z_index(5),
+                    Drawing::default()
+                        .element(
+                            "Hits",
+                            [Shape::Points {
+                                points: hits,
+                                radius_px: 2.5,
+                                color: Color::RED,
+                            }],
+                        )
+                        .stale_after(stale_after)
+                        .z_index(5),
                 )
                 .expect("lost writer authorization for the lidar's drawing topic");
 

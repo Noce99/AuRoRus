@@ -671,15 +671,7 @@ fn drawing(
         })
         .collect();
 
-    let mut shapes = vec![
-        world_raster(map, &anchor),
-        Shape::Polyline {
-            points: trajectory,
-            closed: false,
-            width_px: 2.0,
-            color: DRAWN_COLOR,
-        },
-    ];
+    let mut loop_closures = Vec::new();
     for (from, to) in loop_edges {
         let world = |pose: &Pose2| {
             let (x, y) = anchor.transform_point(pose.x_m, pose.y_m);
@@ -688,21 +680,21 @@ fn drawing(
         // Once optimized, the two ends of a loop edge are usually only
         // centimeters apart: the circle is what makes the closure visible.
         let [x, y] = world(to);
-        shapes.push(Shape::Circle {
+        loop_closures.push(Shape::Circle {
             x_m: f64::from(x),
             y_m: f64::from(y),
             radius_m: LOOP_MARKER_RADIUS_M,
             filled: false,
             color: LOOP_EDGE_COLOR,
         });
-        shapes.push(Shape::Polyline {
+        loop_closures.push(Shape::Polyline {
             points: vec![world(from), world(to)],
             closed: false,
             width_px: 3.0,
             color: LOOP_EDGE_COLOR,
         });
     }
-    shapes.push(Shape::Vehicle {
+    let vehicle = Shape::Vehicle {
         x_m: vehicle.x_m,
         y_m: vehicle.y_m,
         heading_rad: vehicle.heading_rad,
@@ -715,31 +707,42 @@ fn drawing(
         front_axle_m: DRAWN_AXLE_M,
         rear_axle_m: DRAWN_AXLE_M,
         color: DRAWN_COLOR,
-    });
-    Drawing::new(shapes).z_index(DRAWN_Z_INDEX)
+    };
+    Drawing::default()
+        .element("Map", [world_raster(map, &anchor)])
+        .element(
+            "Trajectory",
+            [Shape::Polyline {
+                points: trajectory,
+                closed: false,
+                width_px: 2.0,
+                color: DRAWN_COLOR,
+            }],
+        )
+        .element("Loop closures", loop_closures)
+        .element("Vehicle", [vehicle])
+        .z_index(DRAWN_Z_INDEX)
 }
 
 /// What [`Slam`] draws while localizing: the vehicle at `pose`, already in
 /// the map's frame. Empty before the first scan.
 fn localized_drawing(pose: Option<Pose2>) -> Drawing {
-    let shapes = pose
-        .map(|pose| {
-            vec![Shape::Vehicle {
-                x_m: pose.x_m,
-                y_m: pose.y_m,
-                heading_rad: pose.heading_rad,
-                // Redrawn on every scan only: don't extrapolate in between.
-                speed_mps: 0.0,
-                steering_rad: 0.0,
-                length_m: DRAWN_BODY_LENGTH_M,
-                width_m: DRAWN_BODY_WIDTH_M,
-                front_axle_m: DRAWN_AXLE_M,
-                rear_axle_m: DRAWN_AXLE_M,
-                color: LOCALIZED_COLOR,
-            }]
-        })
-        .unwrap_or_default();
-    Drawing::new(shapes).z_index(DRAWN_Z_INDEX)
+    let vehicle = pose.map(|pose| Shape::Vehicle {
+        x_m: pose.x_m,
+        y_m: pose.y_m,
+        heading_rad: pose.heading_rad,
+        // Redrawn on every scan only: don't extrapolate in between.
+        speed_mps: 0.0,
+        steering_rad: 0.0,
+        length_m: DRAWN_BODY_LENGTH_M,
+        width_m: DRAWN_BODY_WIDTH_M,
+        front_axle_m: DRAWN_AXLE_M,
+        rear_axle_m: DRAWN_AXLE_M,
+        color: LOCALIZED_COLOR,
+    });
+    Drawing::default()
+        .element("Vehicle", vehicle)
+        .z_index(DRAWN_Z_INDEX)
 }
 
 /// `map` resampled into the world frame, with SLAM's frame placed at

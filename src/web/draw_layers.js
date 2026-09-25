@@ -30,6 +30,34 @@ window.DrawLayers = (() => {
     return Object.keys(shape)[0];
   }
 
+  /** What shapes the ones no element covers are listed as. */
+  const UNNAMED_ELEMENT = "Other";
+
+  /** `drawing`'s elements as `{name, start, count}` - `start` the index of
+   *  their first shape - with any shapes left over after the last one
+   *  gathered into an `UNNAMED_ELEMENT`. */
+  function elementsOf(drawing) {
+    const elements = [];
+    let start = 0;
+    for (const { name, shape_count: count } of drawing.elements ?? []) {
+      elements.push({ name, start, count });
+      start += count;
+    }
+    if (start < drawing.shapes.length) {
+      elements.push({ name: UNNAMED_ELEMENT, start, count: drawing.shapes.length - start });
+    }
+    return elements;
+  }
+
+  /** `drawing`'s distinct element names, in order. */
+  function elementNames(drawing) {
+    return [...new Set(elementsOf(drawing).map((element) => element.name))];
+  }
+
+  function elementKey(topic, name) {
+    return `${topic}\n${name}`;
+  }
+
   /** Creates the layers of one page. Options:
    *  - `clock()`: the "now", in ms, layers are aged and dead-reckoned
    *    against;
@@ -38,8 +66,9 @@ window.DrawLayers = (() => {
    *  - `maxExtrapolationMs()`: never dead-reckon a vehicle further than
    *    this past its sample - if samples stall, park it a little behind
    *    rather than fling it across the map;
-   *  - `listEl`: a `<ul>` to render one show/hide checkbox per layer into,
-   *    with how old each layer is;
+   *  - `listEl`: a `<ul>` to render the layers into: one collapsible
+   *    entry per layer, with a show/hide checkbox and how old it is, that
+   *    opens onto a show/hide checkbox per element of its drawing;
    *  - `homeOnEveryNewRaster`: whether to home the view every time a new
    *    base-map raster (the bottom-most one) arrives (live, where that
    *    means the map was switched), or
@@ -69,6 +98,16 @@ window.DrawLayers = (() => {
     /** Topics the user unticked - kept by name, so a layer stays hidden
      *  across an epoch change. */
     const hidden = new Set();
+
+    /** Elements the user unticked, by `elementKey` - kept by name too, so
+     *  an element stays hidden across rewrites of its drawing, even ones it
+     *  is missing from for a while. Independent of `hidden`: unticking a
+     *  whole layer and ticking it back keeps which of its elements were
+     *  hidden. */
+    const hiddenElements = new Set();
+
+    /** Topics whose entry in the list is open. */
+    const openTopics = new Set();
 
     /** Set when a new raster arrives (i.e. the map changed) to the `clock()`
      *  time it was drawn at: the view is homed once some vehicle drawing
@@ -104,6 +143,19 @@ window.DrawLayers = (() => {
         .sort((a, b) => a.drawing.z_index - b.drawing.z_index || a.topic.localeCompare(b.topic));
     }
 
+    /** The shapes of `layer` whose element isn't hidden, as
+     *  `{shape, index}` - `index` into `layer.drawing.shapes`. */
+    function visibleShapes(layer) {
+      const visible = [];
+      for (const { name, start, count } of elementsOf(layer.drawing)) {
+        if (hiddenElements.has(elementKey(layer.topic, name))) continue;
+        for (let index = start; index < start + count; index++) {
+          visible.push({ shape: layer.drawing.shapes[index], index });
+        }
+      }
+      return visible;
+    }
+
     /** The bottom-most layer drawing a raster - the base map - whether
      *  it's shown or not. */
     function baseRasterLayer() {
@@ -126,13 +178,14 @@ window.DrawLayers = (() => {
       };
     }
 
-    /** A layer's shapes as they should be painted at `nowMs`: vehicles
-     *  dead-reckoned forward, rasters with their decoded image attached. */
+    /** A layer's visible shapes as they should be painted at `nowMs`:
+     *  vehicles dead-reckoned forward, rasters with their decoded image
+     *  attached. */
     function shapesAt(layer, nowMs) {
-      return layer.drawing.shapes.map((shape, i) => {
+      return visibleShapes(layer).map(({ shape, index }) => {
         const kind = shapeKind(shape);
         if (kind === "vehicle") return { vehicle: extrapolatedVehicle(shape.vehicle, layer, nowMs) };
-        if (kind === "raster") return { raster: { ...shape.raster, offscreen: layer.rasters[i] } };
+        if (kind === "raster") return { raster: { ...shape.raster, offscreen: layer.rasters[index] } };
         return shape;
       });
     }
@@ -148,7 +201,7 @@ window.DrawLayers = (() => {
     function firstVehicle() {
       const nowMs = clock();
       for (const layer of paintOrder()) {
-        for (const shape of layer.drawing.shapes) {
+        for (const { shape } of visibleShapes(layer)) {
           if (shapeKind(shape) === "vehicle") return extrapolatedVehicle(shape.vehicle, layer, nowMs);
         }
       }
@@ -159,7 +212,7 @@ window.DrawLayers = (() => {
     function worldBounds() {
       let bounds = null;
       for (const layer of paintOrder()) {
-        for (const shape of layer.drawing.shapes) {
+        for (const { shape } of visibleShapes(layer)) {
           if (shapeKind(shape) !== "raster") continue;
           const r = shape.raster;
           const minX = r.origin_x_m;
@@ -199,7 +252,7 @@ window.DrawLayers = (() => {
     function vehiclePlacedSince(sinceMs) {
       let anyVehicle = false;
       for (const layer of paintOrder()) {
-        if (!layer.drawing.shapes.some((shape) => shapeKind(shape) === "vehicle")) continue;
+        if (!visibleShapes(layer).some(({ shape }) => shapeKind(shape) === "vehicle")) continue;
         anyVehicle = true;
         if (layer.sampledAtMs !== null && layer.sampledAtMs >= sinceMs) return true;
       }
@@ -284,7 +337,7 @@ window.DrawLayers = (() => {
         epoch = response.epoch;
       }
 
-      const topicsBefore = [...layers.keys()].join("\n");
+      const listedBefore = listSignature();
       const present = new Set(response.layers.map((entry) => entry.topic));
       for (const topic of [...layers.keys()]) {
         if (!present.has(topic)) layers.delete(topic);
@@ -307,13 +360,32 @@ window.DrawLayers = (() => {
         MapView.home();
       }
 
-      if (listEl && [...layers.keys()].join("\n") !== topicsBefore) renderList();
+      if (listEl && listSignature() !== listedBefore) renderList();
       MapView.requestRedraw();
     }
 
     // -----------------------------------------------------------------
     // Layer list
     // -----------------------------------------------------------------
+
+    /** What the list shows - every layer and its element names - so it's
+     *  only rebuilt when that changes, not on every poll. */
+    function listSignature() {
+      return [...layers.values()]
+        .map((layer) => [layer.topic, ...(layer.drawing ? elementNames(layer.drawing) : [])].join("\n"))
+        .join("\n\n");
+    }
+
+    function checkbox(checked, onChange) {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = checked;
+      input.addEventListener("change", () => {
+        onChange(input.checked);
+        MapView.requestRedraw();
+      });
+      return input;
+    }
 
     function renderList() {
       listEl.innerHTML = "";
@@ -325,15 +397,23 @@ window.DrawLayers = (() => {
         return;
       }
       for (const topic of [...layers.keys()].sort()) {
+        const layer = layers.get(topic);
         const li = document.createElement("li");
-        const label = document.createElement("label");
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = !hidden.has(topic);
-        checkbox.addEventListener("change", () => {
-          if (checkbox.checked) hidden.delete(topic);
+        const details = document.createElement("details");
+        details.open = openTopics.has(topic);
+        details.classList.toggle("layer-hidden", hidden.has(topic));
+        details.addEventListener("toggle", () => {
+          if (details.open) openTopics.add(topic);
+          else openTopics.delete(topic);
+        });
+
+        // The checkbox sits right in the summary: clicking it toggles the
+        // layer, clicking anywhere else opens or closes the entry.
+        const summary = document.createElement("summary");
+        const layerCheckbox = checkbox(!hidden.has(topic), (checked) => {
+          if (checked) hidden.delete(topic);
           else hidden.add(topic);
-          MapView.requestRedraw();
+          details.classList.toggle("layer-hidden", !checked);
         });
         const name = document.createElement("span");
         name.className = "layer-name";
@@ -341,8 +421,38 @@ window.DrawLayers = (() => {
         const freshness = document.createElement("span");
         freshness.className = "layer-freshness";
         freshness.dataset.topic = topic;
-        label.append(checkbox, name, freshness);
-        li.appendChild(label);
+        summary.append(layerCheckbox, name, freshness);
+        details.appendChild(summary);
+
+        const elements = document.createElement("ul");
+        elements.className = "layer-elements";
+        const names = layer.drawing ? elementNames(layer.drawing) : [];
+        if (names.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "empty";
+          empty.textContent = "Nothing drawn";
+          elements.appendChild(empty);
+        }
+        for (const elementName of names) {
+          const key = elementKey(topic, elementName);
+          const item = document.createElement("li");
+          const label = document.createElement("label");
+          const text = document.createElement("span");
+          text.className = "layer-name";
+          text.textContent = elementName;
+          label.append(
+            checkbox(!hiddenElements.has(key), (checked) => {
+              if (checked) hiddenElements.delete(key);
+              else hiddenElements.add(key);
+            }),
+            text,
+          );
+          item.appendChild(label);
+          elements.appendChild(item);
+        }
+        details.appendChild(elements);
+
+        li.appendChild(details);
         listEl.appendChild(li);
       }
       renderFreshness();

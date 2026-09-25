@@ -352,29 +352,34 @@ impl Trail {
     /// coordinates.
     fn drawing(&self, odometry: &Odometry) -> Drawing {
         let (x_m, y_m) = self.to_world(odometry.x_m, odometry.y_m);
-        Drawing::new(vec![
-            Shape::Polyline {
-                points: self.points.iter().copied().collect(),
-                closed: false,
-                width_px: 2.0,
-                color: DRAWN_COLOR,
-            },
-            Shape::Vehicle {
-                x_m,
-                y_m,
-                heading_rad: self.anchor.heading_rad + odometry.heading_rad,
-                speed_mps: odometry.speed_mps,
-                // Dead reckoning never sees the steering command.
-                steering_rad: 0.0,
-                length_m: DRAWN_BODY_LENGTH_M,
-                width_m: DRAWN_BODY_WIDTH_M,
-                front_axle_m: DRAWN_AXLE_M,
-                rear_axle_m: DRAWN_AXLE_M,
-                color: DRAWN_COLOR,
-            },
-        ])
-        .stale_after(Drawing::DEFAULT_STALE_AFTER.max(3 * DRAWING_PERIOD))
-        .z_index(DRAWN_Z_INDEX)
+        Drawing::default()
+            .element(
+                "Trail",
+                [Shape::Polyline {
+                    points: self.points.iter().copied().collect(),
+                    closed: false,
+                    width_px: 2.0,
+                    color: DRAWN_COLOR,
+                }],
+            )
+            .element(
+                "Vehicle",
+                [Shape::Vehicle {
+                    x_m,
+                    y_m,
+                    heading_rad: self.anchor.heading_rad + odometry.heading_rad,
+                    speed_mps: odometry.speed_mps,
+                    // Dead reckoning never sees the steering command.
+                    steering_rad: 0.0,
+                    length_m: DRAWN_BODY_LENGTH_M,
+                    width_m: DRAWN_BODY_WIDTH_M,
+                    front_axle_m: DRAWN_AXLE_M,
+                    rear_axle_m: DRAWN_AXLE_M,
+                    color: DRAWN_COLOR,
+                }],
+            )
+            .stale_after(Drawing::DEFAULT_STALE_AFTER.max(3 * DRAWING_PERIOD))
+            .z_index(DRAWN_Z_INDEX)
     }
 }
 

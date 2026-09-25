@@ -225,11 +225,13 @@ fn progress_drawing(reference: &[Point2], solution: &[Point2], color: Color) -> 
         width_px,
         color,
     };
-    Drawing::new(vec![
-        polyline(reference, 1.0, Color::WHITE.with_alpha(120)),
-        polyline(solution, 2.0, color),
-    ])
-    .z_index(PROGRESS_Z_INDEX)
+    Drawing::default()
+        .element(
+            "Reference line",
+            [polyline(reference, 1.0, Color::WHITE.with_alpha(120))],
+        )
+        .element("Solution", [polyline(solution, 2.0, color)])
+        .z_index(PROGRESS_Z_INDEX)
 }
 
 impl Executor for Planner {

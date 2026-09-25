@@ -270,6 +270,7 @@
 
 #vehicle-model-select,
 #topic-select,
+#algorithm-select,
 #planning-objective,
 #slam-save-name {
   flex: 0 0 auto;

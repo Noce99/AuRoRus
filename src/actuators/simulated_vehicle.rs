@@ -612,22 +612,26 @@ fn axles_of(model: &VehicleModel) -> (f64, f64) {
 /// vehicle at `state`, front wheels turned by `steering_angle_rad`.
 fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) -> Drawing {
     let (front_axle_m, rear_axle_m) = axles_of(model);
-    Drawing::new(vec![Shape::Vehicle {
-        x_m: state.x_m(),
-        y_m: state.y_m(),
-        heading_rad: state.heading_rad(),
-        // Signed, unlike `VehicleStatus::speed_mps`, so a viewer dead-reckoning
-        // the vehicle between samples moves it backward while reversing.
-        speed_mps: state.longitudinal_speed_mps(),
-        steering_rad: steering_angle_rad,
-        length_m: DRAWN_BODY_LENGTH_M,
-        width_m: DRAWN_BODY_WIDTH_M,
-        front_axle_m,
-        rear_axle_m,
-        color: Color::AMBER,
-    }])
-    .stale_after(Drawing::DEFAULT_STALE_AFTER)
-    .z_index(10)
+    Drawing::default()
+        .element(
+            "Vehicle",
+            [Shape::Vehicle {
+                x_m: state.x_m(),
+                y_m: state.y_m(),
+                heading_rad: state.heading_rad(),
+                // Signed, unlike `VehicleStatus::speed_mps`, so a viewer dead-reckoning
+                // the vehicle between samples moves it backward while reversing.
+                speed_mps: state.longitudinal_speed_mps(),
+                steering_rad: steering_angle_rad,
+                length_m: DRAWN_BODY_LENGTH_M,
+                width_m: DRAWN_BODY_WIDTH_M,
+                front_axle_m,
+                rear_axle_m,
+                color: Color::AMBER,
+            }],
+        )
+        .stale_after(Drawing::DEFAULT_STALE_AFTER)
+        .z_index(10)
 }
 
 /// Whether `command` was written, and recently enough to act on - see

@@ -209,11 +209,14 @@ mod tests {
     }
 
     fn dot_at(x: f32) -> Drawing {
-        Drawing::new(vec![Shape::Points {
-            points: vec![[x, 0.0]],
-            radius_px: 2.0,
-            color: Color::RED,
-        }])
+        Drawing::default().element(
+            "Dot",
+            [Shape::Points {
+                points: vec![[x, 0.0]],
+                radius_px: 2.0,
+                color: Color::RED,
+            }],
+        )
     }
 
     #[test]

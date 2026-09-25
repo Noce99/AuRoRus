@@ -9,6 +9,10 @@
 //! it wants shown changes. A viewer finds every such topic by its prefix, so
 //! a new sensor or algorithm shows up on the map without the viewer knowing
 //! anything about it: the viewer only knows how to draw each [`Shape`] kind.
+//!
+//! A drawing's shapes are grouped into named [`DrawingElement`]s - e.g. the map
+//! server's "Map", "Race line" and "Start/finish line" - which a viewer
+//! lets the user show or hide one by one.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,9 +24,17 @@ pub const DRAW_TOPIC_PREFIX: &str = "draw/";
 /// Everything one executor currently wants drawn, replacing whatever it
 /// published before. Coordinates are in the same world frame (meters) as
 /// [`crate::environment::MapInfo`].
+///
+/// Build one with [`Drawing::element`], which keeps
+/// [`shapes`](Self::shapes) and [`elements`](Self::elements) in step.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Drawing {
     pub shapes: Vec<Shape>,
+    /// Names [`shapes`](Self::shapes) in consecutive runs: the first
+    /// element covers the first `shape_count` shapes, the next one the
+    /// following ones, and so on. A viewer shows or hides the shapes of
+    /// every element with the same name together.
+    pub elements: Vec<DrawingElement>,
     /// How old this drawing may get before a viewer starts fading it out,
     /// in milliseconds - `None` for a drawing that's only republished when
     /// it changes (e.g. the map), which must never fade.
@@ -43,13 +55,21 @@ impl Drawing {
     /// periodically republished drawing.
     pub const DEFAULT_STALE_AFTER: Duration = Duration::from_millis(500);
 
-    /// A drawing of `shapes` that never fades, painted at z-index `0`.
-    pub fn new(shapes: Vec<Shape>) -> Self {
-        Self {
-            shapes,
-            stale_after_ms: None,
-            z_index: 0,
-        }
+    /// Appends `shapes` as one element called `name` - kept even when
+    /// `shapes` is empty (e.g. no loop closed yet), so the element stays
+    /// listed in a viewer rather than coming and going.
+    pub fn element(
+        mut self,
+        name: impl Into<String>,
+        shapes: impl IntoIterator<Item = Shape>,
+    ) -> Self {
+        let before = self.shapes.len();
+        self.shapes.extend(shapes);
+        self.elements.push(DrawingElement {
+            name: name.into(),
+            shape_count: u32::try_from(self.shapes.len() - before).unwrap_or(u32::MAX),
+        });
+        self
     }
 
     /// Sets [`stale_after_ms`](Self::stale_after_ms).
@@ -63,6 +83,13 @@ impl Drawing {
         self.z_index = z_index;
         self
     }
+}
+
+/// A named run of a [`Drawing`]'s shapes - see [`Drawing::elements`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DrawingElement {
+    pub name: String,
+    pub shape_count: u32,
 }
 
 /// An RGBA color, `a = 255` being fully opaque.
@@ -219,88 +246,117 @@ mod tests {
     /// every shape kind has to survive a bincode round trip.
     #[test]
     fn every_shape_survives_a_bincode_round_trip() {
-        let drawing = Drawing::new(vec![
-            Shape::Vehicle {
-                x_m: 1.0,
-                y_m: 2.0,
-                heading_rad: 0.5,
-                speed_mps: -1.0,
-                steering_rad: 0.1,
-                length_m: 0.45,
-                width_m: 0.25,
-                front_axle_m: 0.16,
-                rear_axle_m: 0.16,
-                color: Color::AMBER,
-            },
-            Shape::Points {
-                points: vec![[1.0, 2.0]],
-                radius_px: 2.5,
-                color: Color::RED,
-            },
-            Shape::Polyline {
-                points: vec![[0.0, 0.0], [1.0, 1.0]],
-                closed: true,
-                width_px: 2.0,
-                color: Color::BLUE,
-            },
-            Shape::Circle {
-                x_m: 0.0,
-                y_m: 0.0,
-                radius_m: 1.0,
-                filled: false,
-                color: Color::GREEN,
-            },
-            Shape::CircularArc {
-                x_m: 0.0,
-                y_m: 0.0,
-                radius_m: 1.0,
-                start_rad: -0.5,
-                end_rad: 0.5,
-                width_px: 2.0,
-                color: Color::GREEN,
-            },
-            Shape::CircularSector {
-                x_m: 0.0,
-                y_m: 0.0,
-                radius_m: 1.0,
-                start_rad: -0.5,
-                end_rad: 0.5,
-                filled: true,
-                color: Color::GREEN.with_alpha(64),
-            },
-            Shape::Rect {
-                x_m: 0.0,
-                y_m: 0.0,
-                length_m: 1.0,
-                width_m: 1.0,
-                heading_rad: 0.0,
-                filled: true,
-                color: Color::WHITE,
-            },
-            Shape::Text {
-                x_m: 0.0,
-                y_m: 0.0,
-                text: "hi".into(),
-                size_px: 12.0,
-                color: Color::BLACK.with_alpha(128),
-            },
-            Shape::Raster {
-                origin_x_m: 0.0,
-                origin_y_m: 0.0,
-                resolution_m_per_px: 0.05,
-                width_px: 2,
-                height_px: 1,
-                pixels: vec![0u8, 255].into(),
-            },
-        ])
-        .stale_after(Drawing::DEFAULT_STALE_AFTER)
-        .z_index(-3);
+        let drawing = Drawing::default()
+            .element(
+                "Everything",
+                [
+                    Shape::Vehicle {
+                        x_m: 1.0,
+                        y_m: 2.0,
+                        heading_rad: 0.5,
+                        speed_mps: -1.0,
+                        steering_rad: 0.1,
+                        length_m: 0.45,
+                        width_m: 0.25,
+                        front_axle_m: 0.16,
+                        rear_axle_m: 0.16,
+                        color: Color::AMBER,
+                    },
+                    Shape::Points {
+                        points: vec![[1.0, 2.0]],
+                        radius_px: 2.5,
+                        color: Color::RED,
+                    },
+                    Shape::Polyline {
+                        points: vec![[0.0, 0.0], [1.0, 1.0]],
+                        closed: true,
+                        width_px: 2.0,
+                        color: Color::BLUE,
+                    },
+                    Shape::Circle {
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        radius_m: 1.0,
+                        filled: false,
+                        color: Color::GREEN,
+                    },
+                    Shape::CircularArc {
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        radius_m: 1.0,
+                        start_rad: -0.5,
+                        end_rad: 0.5,
+                        width_px: 2.0,
+                        color: Color::GREEN,
+                    },
+                    Shape::CircularSector {
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        radius_m: 1.0,
+                        start_rad: -0.5,
+                        end_rad: 0.5,
+                        filled: true,
+                        color: Color::GREEN.with_alpha(64),
+                    },
+                    Shape::Rect {
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        length_m: 1.0,
+                        width_m: 1.0,
+                        heading_rad: 0.0,
+                        filled: true,
+                        color: Color::WHITE,
+                    },
+                    Shape::Text {
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        text: "hi".into(),
+                        size_px: 12.0,
+                        color: Color::BLACK.with_alpha(128),
+                    },
+                    Shape::Raster {
+                        origin_x_m: 0.0,
+                        origin_y_m: 0.0,
+                        resolution_m_per_px: 0.05,
+                        width_px: 2,
+                        height_px: 1,
+                        pixels: vec![0u8, 255].into(),
+                    },
+                ],
+            )
+            .element("Nothing", [])
+            .stale_after(Drawing::DEFAULT_STALE_AFTER)
+            .z_index(-3);
 
         let encoded = bincode::serde::encode_to_vec(&drawing, bincode::config::standard()).unwrap();
         let (decoded, _): (Drawing, _) =
             bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
 
         assert_eq!(decoded, drawing);
+    }
+
+    #[test]
+    fn element_names_consecutive_runs_of_shapes() {
+        let dot = |x| Shape::Circle {
+            x_m: x,
+            y_m: 0.0,
+            radius_m: 1.0,
+            filled: true,
+            color: Color::RED,
+        };
+
+        let drawing = Drawing::default()
+            .element("Two", [dot(0.0), dot(1.0)])
+            .element("None", [])
+            .element("One", [dot(2.0)]);
+
+        assert_eq!(drawing.shapes, vec![dot(0.0), dot(1.0), dot(2.0)]);
+        let runs: Vec<_> = drawing
+            .elements
+            .iter()
+            .map(|e| (e.name.as_str(), e.shape_count))
+            .collect();
+        assert_eq!(runs, vec![("Two", 2), ("None", 0), ("One", 1)]);
     }
 
     #[test]

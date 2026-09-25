@@ -25,7 +25,7 @@ pub use autonomous_control::{
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
     AvailableAlgorithm, ParameterKind,
 };
-pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, Shape};
+pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, DrawingElement, Shape};
 pub use imu::{IMU_TOPIC_NAME, ImuReading};
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};

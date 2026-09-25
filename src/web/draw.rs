@@ -159,14 +159,17 @@ mod tests {
 
     #[test]
     fn raster_pixels_are_stripped_but_everything_else_is_kept() {
-        let drawing = Drawing::new(vec![Shape::Raster {
-            origin_x_m: 1.0,
-            origin_y_m: 2.0,
-            resolution_m_per_px: 0.5,
-            width_px: 2,
-            height_px: 1,
-            pixels: vec![0u8, 255].into(),
-        }]);
+        let drawing = Drawing::default().element(
+            "Map",
+            [Shape::Raster {
+                origin_x_m: 1.0,
+                origin_y_m: 2.0,
+                resolution_m_per_px: 0.5,
+                width_px: 2,
+                height_px: 1,
+                pixels: vec![0u8, 255].into(),
+            }],
+        );
 
         let stripped = without_raster_pixels(drawing);
 

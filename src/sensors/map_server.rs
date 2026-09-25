@@ -101,16 +101,15 @@ fn drawing(map: &SelectedMap, race_line: &SelectedRaceLine) -> Drawing {
         return Drawing::default().z_index(-100);
     };
     let line = &info.start_finish_line;
-    let mut shapes = vec![Shape::Raster {
+    let raster = Shape::Raster {
         origin_x_m: info.origin.x,
         origin_y_m: info.origin.y,
         resolution_m_per_px: info.resolution_m_per_px,
         width_px: map.width_px,
         height_px: map.height_px,
         pixels: map.pixels.clone(),
-    }];
-    shapes.extend(race_line_shapes(race_line));
-    shapes.push(Shape::Polyline {
+    };
+    let start_finish_line = Shape::Polyline {
         points: vec![
             [line.a.x as f32, line.a.y as f32],
             [line.b.x as f32, line.b.y as f32],
@@ -118,8 +117,12 @@ fn drawing(map: &SelectedMap, race_line: &SelectedRaceLine) -> Drawing {
         closed: false,
         width_px: 2.0,
         color: Color::RED,
-    });
-    Drawing::new(shapes).z_index(-100)
+    };
+    Drawing::default()
+        .element("Map", [raster])
+        .element("Race line", race_line_shapes(race_line))
+        .element("Start/finish line", [start_finish_line])
+        .z_index(-100)
 }
 
 /// `race_line` drawn colored by speed - blue at its slowest point, through

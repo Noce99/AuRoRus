@@ -183,8 +183,8 @@ impl Executor for PurePursuit {
             };
 
             // A stationary command, and why, unless following the line.
-            let stopped = |why: String| (VescCommand::new(0.0, 0.0), Vec::new(), Some(why));
-            let (command, shapes, message) = match (line, pose) {
+            let stopped = |why: String| (VescCommand::new(0.0, 0.0), Drawing::default(), Some(why));
+            let (command, drawing, message) = match (line, pose) {
                 (None, _) => stopped("No race line on the selected map - vehicle held stopped.".into()),
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
                 (Some(line), Ok(pose)) => {
@@ -194,7 +194,7 @@ impl Executor for PurePursuit {
                             hint = Some(control.nearest.segment);
                             (
                                 VescCommand::new(control.steering_rad, control.speed_mps),
-                                control.shapes(),
+                                control.drawing(),
                                 None,
                             )
                         }
@@ -215,7 +215,7 @@ impl Executor for PurePursuit {
                 .write(self.id, command)
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
-                .write(self.id, Drawing::new(shapes).stale_after(stale_after))
+                .write(self.id, drawing.stale_after(stale_after))
                 .expect("lost writer authorization for the pure pursuit drawing topic");
             ticker.wait();
         }
@@ -502,31 +502,30 @@ fn steering(rear_axle: Pose, target_x_m: f64, target_y_m: f64, wheelbase_m: f64)
 impl Control {
     /// The nearest point, the lookahead point, the chord to it, and the arc
     /// the rear axle is steered along.
-    fn shapes(&self) -> Vec<Shape> {
+    fn drawing(&self) -> Drawing {
         let rear = self.rear_axle;
         let (x, y) = (self.target.x, self.target.y);
-        let mut shapes = vec![
-            Shape::Circle {
+        let nearest = Shape::Circle {
                 x_m: self.nearest.x_m,
                 y_m: self.nearest.y_m,
                 radius_m: 0.06,
                 filled: true,
                 color: Color::BLUE,
-            },
-            Shape::Circle {
+            };
+        let lookahead = Shape::Circle {
                 x_m: x,
                 y_m: y,
                 radius_m: 0.08,
                 filled: true,
                 color: Color::PURPLE,
-            },
-            Shape::Polyline {
+            };
+        let chord = Shape::Polyline {
                 points: vec![[rear.x_m as f32, rear.y_m as f32], [x as f32, y as f32]],
                 closed: false,
                 width_px: 1.0,
                 color: Color::PURPLE.with_alpha(128),
-            },
-        ];
+            };
+        let mut arc = None;
 
         // Signed radius, positive toward increasing heading: ld / (2 sin(alpha)).
         let (dx, dy) = (x - rear.x_m, y - rear.y_m);
@@ -539,7 +538,7 @@ impl Control {
             let to = (y - cy).atan2(x - cx);
             // Driven in increasing angle for a positive radius.
             let (start, end) = if radius_m > 0.0 { (from, to) } else { (to, from) };
-            shapes.push(Shape::CircularArc {
+            arc = Some(Shape::CircularArc {
                 x_m: cx,
                 y_m: cy,
                 radius_m: radius_m.abs(),
@@ -549,7 +548,11 @@ impl Control {
                 color: Color::PURPLE,
             });
         }
-        shapes
+        Drawing::default()
+            .element("Nearest point", [nearest])
+            .element("Lookahead point", [lookahead])
+            .element("Chord", [chord])
+            .element("Steering arc", arc)
     }
 }
 

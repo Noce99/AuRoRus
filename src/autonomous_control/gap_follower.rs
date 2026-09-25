@@ -138,7 +138,8 @@ impl Executor for GapFollower {
             let vehice_y = vehicle_status.y_m as f32;
             let vehicle_heading = vehicle_status.heading_rad as f32;
 
-            let mut shapes: Vec<Shape> = Vec::new();
+            let mut obstacle_shapes: Vec<Shape> = Vec::new();
+            let mut gap_shapes: Vec<Shape> = Vec::new();
 
             let mut add_gap = |i: usize, length: usize, mean: f32| {
                 let start_angle: f32 = -fov/2. + (i-length) as f32*rad_per_point;
@@ -176,7 +177,7 @@ impl Executor for GapFollower {
                 }
             }
 
-            shapes.push(
+            obstacle_shapes.push(
                 Shape::CircularSector {
                     x_m: vehice_x as f64,
                     y_m: vehice_y as f64,
@@ -231,7 +232,7 @@ impl Executor for GapFollower {
                 }else{
                     color = Color::GREEN;
                 }
-                shapes.push(
+                gap_shapes.push(
                     Shape::CircularSector {
                         x_m: vehice_x as f64,
                         y_m: vehice_y as f64,
@@ -253,7 +254,10 @@ impl Executor for GapFollower {
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic.write(
                 self.id,
-                Drawing::new(shapes).stale_after(stale_after),
+                Drawing::default()
+                    .element("Closest obstacle", obstacle_shapes)
+                    .element("Gaps", gap_shapes)
+                    .stale_after(stale_after),
             ).expect("lost writer authorization for the gap follower drawing topic");
             ticker.wait();
         }

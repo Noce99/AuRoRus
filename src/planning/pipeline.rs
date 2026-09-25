@@ -203,18 +203,28 @@ mod tests {
         assert!(planned.lap_time_s.is_finite() && planned.lap_time_s > 0.0);
     }
 
+    /// A generated track a fraction the size of a default one - the
+    /// optimizers' cost grows with the track's length, and these tests run
+    /// unoptimized - written under `root`.
+    fn small_generated_map(root: &std::path::Path) -> Map {
+        let generation = GenerationConfig {
+            output_root: root.to_path_buf(),
+            area_width_m: 18.0,
+            area_height_m: 18.0,
+            num_sites: 12,
+            seed: 7,
+            ..GenerationConfig::default()
+        };
+        let generated = generate(&generation, Some("track"), true).unwrap();
+        Map::load(&generated.folder).unwrap()
+    }
+
     /// On a generated track, the race line stays `margin` inside the walls
     /// everywhere and is no curvier than the centerline it started from.
     #[test]
     fn a_generated_map_s_race_line_stays_on_the_track() {
         let root = std::env::temp_dir().join(format!("aurorus_plan_{}", std::process::id()));
-        let generation = GenerationConfig {
-            output_root: root.clone(),
-            seed: 7,
-            ..GenerationConfig::default()
-        };
-        let generated = generate(&generation, Some("track"), true).unwrap();
-        let map = Map::load(&generated.folder).unwrap();
+        let map = small_generated_map(&root);
         let config = PlanningConfig::default();
 
         let planned = plan(&map, &config, PlanningObjective::MinCurvature, &mut |_| {
@@ -251,14 +261,13 @@ mod tests {
     #[test]
     fn a_generated_map_s_min_time_line_is_faster_and_on_the_track() {
         let root = std::env::temp_dir().join(format!("aurorus_min_time_{}", std::process::id()));
-        let generation = GenerationConfig {
-            output_root: root.clone(),
-            seed: 7,
-            ..GenerationConfig::default()
+        let map = small_generated_map(&root);
+        // Half as many points as by default, for the same reason as the
+        // small map.
+        let config = PlanningConfig {
+            min_time_spacing_m: 0.4,
+            ..PlanningConfig::default()
         };
-        let generated = generate(&generation, Some("track"), true).unwrap();
-        let map = Map::load(&generated.folder).unwrap();
-        let config = PlanningConfig::default();
 
         let started = std::time::Instant::now();
         let planned = plan(&map, &config, PlanningObjective::MinTime, &mut |_| true).unwrap();
