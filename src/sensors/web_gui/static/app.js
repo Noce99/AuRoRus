@@ -92,7 +92,10 @@ function renderMapList(maps, selectedName) {
   for (const map of maps) {
     const li = document.createElement("li");
     li.textContent = map.name;
-    const origin = map.seed == null ? `recorded ${map.generated_at}` : `seed ${map.seed}`;
+    const origin =
+      map.seed != null
+        ? `seed ${map.seed}`
+        : `${map.source === "imported" ? "imported" : "recorded"} ${map.generated_at}`;
     li.title = `${map.width_px}x${map.height_px} px, ${origin}`;
     if (map.name === selectedName) li.classList.add("selected");
     li.addEventListener("click", () => {
@@ -1130,6 +1133,339 @@ form.addEventListener("submit", async (event) => {
   } finally {
     confirmBtn.disabled = false;
   }
+});
+
+// ---------------------------------------------------------------------
+// Import Map modal - the browser decodes the chosen image (anything it can
+// display, plus PGM, the ROS map format - TIFFs go through the server),
+// thresholds it into a drivable / not-drivable raster, lets the user click
+// the start line on a preview, and uploads the raster to `POST /api/maps/import`, which writes the new
+// map folder (`map.tiff` + `info.json`).
+// ---------------------------------------------------------------------
+
+const importOverlay = document.getElementById("import-overlay");
+const importForm = document.getElementById("import-form");
+const importFileEl = document.getElementById("import-file");
+const importNameEl = document.getElementById("import-name");
+const importResolutionEl = document.getElementById("import-resolution");
+const importThresholdEl = document.getElementById("import-threshold");
+const importInvertEl = document.getElementById("import-invert");
+const importPreviewWrapEl = document.getElementById("import-preview-wrap");
+const importHintEl = document.getElementById("import-hint");
+const importPreviewEl = document.getElementById("import-preview");
+const importFlipBtn = document.getElementById("import-flip-btn");
+const importClearBtn = document.getElementById("import-clear-btn");
+const importErrorEl = document.getElementById("import-error");
+const importSuccessEl = document.getElementById("import-success");
+const importCancelBtn = document.getElementById("import-cancel-btn");
+const importReloadBtn = document.getElementById("import-reload-btn");
+const importConfirmBtn = document.getElementById("import-confirm-btn");
+
+/** The decoded image: `{ width, height, gray }`, `gray` one 0-255
+ *  brightness per pixel (fully transparent pixels count as black), or
+ *  null before a file is chosen. */
+let importImage = null;
+/** The start line's ends, in (fractional) image pixels - `[a, b]`, each
+ *  `{ x, y }`, in click order until flipped. */
+let importLinePoints = [];
+
+function showImportError(message) {
+  importErrorEl.textContent = message;
+  importErrorEl.hidden = false;
+}
+
+/** Parses a binary (P5) or ASCII (P2) PGM, which browsers can't decode. */
+function parsePgm(bytes) {
+  const magic = String.fromCharCode(bytes[0], bytes[1]);
+  if (magic !== "P5" && magic !== "P2") throw new Error("not a PGM file");
+  let pos = 2;
+  // Next whitespace-separated header token, skipping `#` comments.
+  function token() {
+    for (;;) {
+      while (pos < bytes.length && /\s/.test(String.fromCharCode(bytes[pos]))) pos++;
+      if (bytes[pos] !== 0x23) break;
+      while (pos < bytes.length && bytes[pos] !== 0x0a) pos++;
+    }
+    let text = "";
+    while (pos < bytes.length && !/\s/.test(String.fromCharCode(bytes[pos]))) {
+      text += String.fromCharCode(bytes[pos++]);
+    }
+    return Number(text);
+  }
+  const width = token();
+  const height = token();
+  const maxValue = token();
+  if (!(width > 0 && height > 0 && maxValue > 0)) throw new Error("malformed PGM header");
+  const gray = new Uint8ClampedArray(width * height);
+  if (magic === "P5") {
+    pos++; // the single whitespace byte ending the header
+    const wide = maxValue > 255;
+    for (let i = 0; i < gray.length; i++) {
+      const value = wide ? (bytes[pos + 2 * i] << 8) | bytes[pos + 2 * i + 1] : bytes[pos + i];
+      gray[i] = Math.round((value * 255) / maxValue);
+    }
+  } else {
+    for (let i = 0; i < gray.length; i++) gray[i] = Math.round((token() * 255) / maxValue);
+  }
+  return { width, height, gray };
+}
+
+/** Browsers can't decode TIFF, so the server does: it answers with the
+ *  width and height (little-endian u32s) followed by one brightness byte
+ *  per pixel. */
+async function decodeTiff(bytes) {
+  const response = await fetch("/api/maps/import/decode_tiff", {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: bytes,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body && body.error ? body.error : `request failed (${response.status})`);
+  }
+  const data = new Uint8Array(await response.arrayBuffer());
+  const header = new DataView(data.buffer, 0, 8);
+  const width = header.getUint32(0, true);
+  const height = header.getUint32(4, true);
+  return { width, height, gray: new Uint8ClampedArray(data.buffer, 8) };
+}
+
+async function decodeImage(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0x50 && (bytes[1] === 0x35 || bytes[1] === 0x32)) return parsePgm(bytes);
+  const isTiff =
+    (bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) ||
+    (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a);
+  if (isTiff) return decodeTiff(bytes);
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error("this browser can't decode that image - try PNG, JPEG, BMP, WebP, PGM or TIFF");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0);
+  const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  const gray = new Uint8ClampedArray(bitmap.width * bitmap.height);
+  for (let i = 0; i < gray.length; i++) {
+    const luma = 0.299 * rgba[4 * i] + 0.587 * rgba[4 * i + 1] + 0.114 * rgba[4 * i + 2];
+    gray[i] = Math.round((luma * rgba[4 * i + 3]) / 255);
+  }
+  return { width: bitmap.width, height: bitmap.height, gray };
+}
+
+/** One byte per pixel, 255 for drivable and 0 otherwise - the body
+ *  `/api/maps/import` expects. */
+function importRaster() {
+  const threshold = Number(importThresholdEl.value);
+  const invert = importInvertEl.checked;
+  const raster = new Uint8Array(importImage.gray.length);
+  for (let i = 0; i < raster.length; i++) {
+    const light = importImage.gray[i] >= threshold;
+    raster[i] = light !== invert ? 255 : 0;
+  }
+  return raster;
+}
+
+/** The direction of travel across the start line `a -> b`, as a unit
+ *  vector - `b - a` rotated a quarter turn, matching
+ *  `StartFinishLine::start_pose` on the server. */
+function importTravelDirection([a, b]) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+  return { x: -dy / length, y: dx / length };
+}
+
+function drawImportPreview() {
+  if (!importImage) return;
+  const { width, height } = importImage;
+  importPreviewEl.width = width;
+  importPreviewEl.height = height;
+  const ctx = importPreviewEl.getContext("2d");
+  const imageData = ctx.createImageData(width, height);
+  const raster = importRaster();
+  for (let i = 0; i < raster.length; i++) {
+    // Drivable pixels white, the rest dark, like the main map view.
+    const value = raster[i] ? 255 : 40;
+    imageData.data[4 * i] = value;
+    imageData.data[4 * i + 1] = value;
+    imageData.data[4 * i + 2] = value;
+    imageData.data[4 * i + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  // Stroke widths in image pixels, sized to stay visible however much the
+  // canvas is scaled down to fit the modal.
+  const onScreenScale = importPreviewEl.getBoundingClientRect().width / width || 1;
+  const px = 1 / onScreenScale;
+  ctx.fillStyle = "#e5484d";
+  ctx.strokeStyle = "#e5484d";
+  ctx.lineWidth = 3 * px;
+  for (const point of importLinePoints) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 5 * px, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  if (importLinePoints.length === 2) {
+    const [a, b] = importLinePoints;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    const direction = importTravelDirection(importLinePoints);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const length = 40 * px;
+    const tip = { x: mid.x + direction.x * length, y: mid.y + direction.y * length };
+    const head = 12 * px;
+    ctx.strokeStyle = ctx.fillStyle = "#3f9ce5";
+    ctx.beginPath();
+    ctx.moveTo(mid.x, mid.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(
+      tip.x - direction.x * head - direction.y * head * 0.6,
+      tip.y - direction.y * head + direction.x * head * 0.6,
+    );
+    ctx.lineTo(
+      tip.x - direction.x * head + direction.y * head * 0.6,
+      tip.y - direction.y * head - direction.x * head * 0.6,
+    );
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function syncImportControls() {
+  const hints = [
+    "Click one end of the start line.",
+    "Click the other end of the start line.",
+    "The arrow shows the direction of travel. Flip it if needed, or click again to start over.",
+  ];
+  importHintEl.textContent = hints[importLinePoints.length];
+  importFlipBtn.disabled = importLinePoints.length !== 2;
+  importClearBtn.disabled = importLinePoints.length === 0;
+  importConfirmBtn.disabled = !importImage || importLinePoints.length !== 2;
+}
+
+function resetImportModal() {
+  importForm.reset();
+  importImage = null;
+  importLinePoints = [];
+  importPreviewWrapEl.hidden = true;
+  importErrorEl.hidden = true;
+  importSuccessEl.hidden = true;
+  importReloadBtn.hidden = true;
+  importConfirmBtn.hidden = false;
+  importCancelBtn.textContent = "Cancel";
+  for (const el of importForm.elements) el.disabled = false;
+  syncImportControls();
+}
+
+document.getElementById("import-btn").addEventListener("click", () => {
+  resetImportModal();
+  importOverlay.hidden = false;
+});
+importCancelBtn.addEventListener("click", () => {
+  importOverlay.hidden = true;
+});
+importReloadBtn.addEventListener("click", () => window.location.reload());
+
+importFileEl.addEventListener("change", async () => {
+  importErrorEl.hidden = true;
+  importImage = null;
+  importLinePoints = [];
+  importPreviewWrapEl.hidden = true;
+  syncImportControls();
+  const file = importFileEl.files[0];
+  if (!file) return;
+  if (!importNameEl.value) importNameEl.value = file.name.replace(/\.[^.]*$/, "");
+  try {
+    importImage = await decodeImage(file);
+  } catch (err) {
+    showImportError(err.message);
+    return;
+  }
+  importPreviewWrapEl.hidden = false;
+  syncImportControls();
+  drawImportPreview();
+  // Now laid out: redraw so the markers are sized for the on-screen scale.
+  requestAnimationFrame(drawImportPreview);
+});
+
+importThresholdEl.addEventListener("input", drawImportPreview);
+importInvertEl.addEventListener("change", drawImportPreview);
+
+importPreviewEl.addEventListener("click", (event) => {
+  if (!importImage || importConfirmBtn.hidden) return;
+  const rect = importPreviewEl.getBoundingClientRect();
+  const point = {
+    x: ((event.clientX - rect.left) / rect.width) * importImage.width,
+    y: ((event.clientY - rect.top) / rect.height) * importImage.height,
+  };
+  if (importLinePoints.length === 2) importLinePoints = [];
+  importLinePoints.push(point);
+  syncImportControls();
+  drawImportPreview();
+});
+
+importFlipBtn.addEventListener("click", () => {
+  importLinePoints.reverse();
+  drawImportPreview();
+});
+
+importClearBtn.addEventListener("click", () => {
+  importLinePoints = [];
+  syncImportControls();
+  drawImportPreview();
+});
+
+importForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!importImage || importLinePoints.length !== 2) return;
+  importErrorEl.hidden = true;
+  importConfirmBtn.disabled = true;
+
+  const [a, b] = importLinePoints;
+  const name = importNameEl.value.trim();
+  const params = new URLSearchParams({
+    name,
+    width_px: importImage.width,
+    height_px: importImage.height,
+    resolution_m_per_px: importResolutionEl.value,
+    a_x_px: a.x,
+    a_y_px: a.y,
+    b_x_px: b.x,
+    b_y_px: b.y,
+  });
+  try {
+    await fetchJSON(`/api/maps/import?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: importRaster(),
+    });
+  } catch (err) {
+    // Includes the 409 when a folder of that name already exists.
+    showImportError(err.message);
+    importConfirmBtn.disabled = false;
+    return;
+  }
+
+  importSuccessEl.textContent = `Map "${name}" imported into maps/${name}. Reload the page to see it in the list.`;
+  importSuccessEl.hidden = false;
+  for (const el of importForm.elements) {
+    if (el !== importCancelBtn && el !== importReloadBtn) el.disabled = true;
+  }
+  importConfirmBtn.hidden = true;
+  importReloadBtn.hidden = false;
+  importCancelBtn.textContent = "Close";
 });
 
 // ---------------------------------------------------------------------

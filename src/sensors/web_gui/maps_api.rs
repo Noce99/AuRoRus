@@ -1,9 +1,13 @@
-//! The JSON/binary map API: listing, metadata, the raw raster, and map
-//! generation. Built entirely on the existing [`crate::environment`] module
-//! (`Map::load`, `read_info`, `GenerationConfig`, `generate`).
+//! The JSON/binary map API: listing, metadata, the raw raster, map
+//! generation and image import. Built entirely on the existing
+//! [`crate::environment`] module (`Map::load`, `read_info`,
+//! `GenerationConfig`, `generate`, `save`).
 
-use crate::environment::{self, GenerationConfig, Map, MapGenerationError, MapSource, random_seed};
-use crate::web::{bad_request, error_response, header, json_response, not_found};
+use crate::environment::{
+    self, GenerationConfig, ImageOrigin, Map, MapGenerationError, MapInfo, MapSource, Raster,
+    StartFinishLine, WorldPoint, random_seed,
+};
+use crate::web::{bad_request, error_response, header, json_response, not_found, query_param};
 use std::path::{Path, PathBuf};
 use tiny_http::{Request, Response, ResponseBox};
 
@@ -233,7 +237,250 @@ struct GeneratedMapSummary {
     num_race_line_points: usize,
 }
 
+/// `POST /api/maps/import?name=..&width_px=..&height_px=..&resolution_m_per_px=..&a_x_px=..&a_y_px=..&b_x_px=..&b_y_px=..`:
+/// saves an image the browser already decoded and thresholded as a new
+/// map folder (`map.tiff` + `info.json`) under `maps_root`. The body is the
+/// raster, one byte per pixel, row-major, non-zero meaning drivable - the
+/// same layout [`raster`] serves back. The start/finish line comes in pixel
+/// coordinates (`a` on the driver's left, see [`StartFinishLine`]); the
+/// image is placed centered on the world origin, like a generated map.
+/// Returns `409` if a folder of that name already exists.
+pub fn import(request: &mut Request, maps_root: &Path) -> ResponseBox {
+    let url = request.url().to_string();
+    let Some(name) = query_param(&url, "name") else {
+        return bad_request("missing name");
+    };
+    let Some(folder) = safe_map_folder(&name, maps_root) else {
+        return bad_request("invalid name: must not be empty or contain '/', '\\', or '..'");
+    };
+    let number = |key: &str| -> Result<f64, ResponseBox> {
+        query_param(&url, key)
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| bad_request(&format!("missing or invalid {key}")))
+    };
+    let parsed = (|| {
+        Ok::<_, ResponseBox>((
+            number("width_px")?,
+            number("height_px")?,
+            number("resolution_m_per_px")?,
+            [number("a_x_px")?, number("a_y_px")?],
+            [number("b_x_px")?, number("b_y_px")?],
+        ))
+    })();
+    let (width_px, height_px, resolution_m_per_px, a_px, b_px) = match parsed {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    if width_px < 1.0 || height_px < 1.0 || width_px.fract() != 0.0 || height_px.fract() != 0.0 {
+        return bad_request("width_px and height_px must be positive integers");
+    }
+    if resolution_m_per_px <= 0.0 {
+        return bad_request("resolution_m_per_px must be positive");
+    }
+    if a_px == b_px {
+        return bad_request("the start line's two ends must differ");
+    }
+    let (width_px, height_px) = (width_px as u32, height_px as u32);
+
+    let mut pixels = Vec::new();
+    if let Err(err) = request.as_reader().read_to_end(&mut pixels) {
+        return bad_request(&format!("failed to read request body: {err}"));
+    }
+    if pixels.len() != width_px as usize * height_px as usize {
+        return bad_request(&format!(
+            "expected {} raster bytes ({width_px}x{height_px}), got {}",
+            width_px as usize * height_px as usize,
+            pixels.len()
+        ));
+    }
+
+    if folder.exists() {
+        return error_response(409, &format!("a folder named {name:?} already exists"));
+    }
+
+    let origin = ImageOrigin {
+        x: -(width_px as f64) * resolution_m_per_px / 2.0,
+        y: -(height_px as f64) * resolution_m_per_px / 2.0,
+        theta_rad: 0.0,
+    };
+    let to_world = |[x_px, y_px]: [f64; 2]| WorldPoint {
+        x: origin.x + x_px * resolution_m_per_px,
+        y: origin.y + y_px * resolution_m_per_px,
+    };
+    let info = MapInfo {
+        resolution_m_per_px,
+        width_px,
+        height_px,
+        origin,
+        start_finish_line: StartFinishLine {
+            a: to_world(a_px),
+            b: to_world(b_px),
+        },
+        generated_at: environment::now_rfc3339(),
+        source: MapSource::Imported,
+        generation: None,
+    };
+    let raster = Raster::new(
+        width_px,
+        height_px,
+        pixels.iter().map(|&pixel| pixel != 0).collect(),
+    );
+
+    match environment::save(&folder, &info, &raster) {
+        Ok(()) => json_response(&ImportedMapSummary { name }, 200),
+        Err(err) => error_response(500, &err.to_string()),
+    }
+}
+
+/// `POST /api/maps/import/decode_tiff`: decodes the TIFF in the body (the
+/// browser can't) into what the import popup works on: an 8-byte header
+/// (width, then height, each a little-endian `u32`) followed by one
+/// brightness byte per pixel, row-major, `255` being white. See
+/// [`tiff_to_grayscale`].
+pub fn decode_tiff(request: &mut Request) -> ResponseBox {
+    let mut bytes = Vec::new();
+    if let Err(err) = request.as_reader().read_to_end(&mut bytes) {
+        return bad_request(&format!("failed to read request body: {err}"));
+    }
+    match tiff_to_grayscale(&bytes) {
+        Ok((width, height, gray)) => {
+            let mut body = Vec::with_capacity(8 + gray.len());
+            body.extend_from_slice(&width.to_le_bytes());
+            body.extend_from_slice(&height.to_le_bytes());
+            body.extend_from_slice(&gray);
+            Response::from_data(body)
+                .with_header(header("Content-Type", "application/octet-stream"))
+                .boxed()
+        }
+        Err(message) => bad_request(&format!("can't decode this TIFF: {message}")),
+    }
+}
+
+/// Decodes the first image of a TIFF (any compression the `tiff` crate
+/// knows, CCITT Group 4 included) into `(width, height, gray)`: one
+/// brightness byte per pixel, row-major, `255` being white (the crate
+/// already resolves `WhiteIsZero`), treating transparent pixels as black
+/// like the browser-side decoding does. Grayscale and RGB, with or without alpha, at
+/// 1, 8 or 16 bits per sample.
+fn tiff_to_grayscale(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    use tiff::decoder::{Decoder, DecodingResult};
+    use tiff::ColorType;
+
+    let mut decoder = Decoder::new(std::io::Cursor::new(bytes)).map_err(|err| err.to_string())?;
+    let (width, height) = decoder.dimensions().map_err(|err| err.to_string())?;
+    let color_type = decoder.colortype().map_err(|err| err.to_string())?;
+    let (channels, bits) = match color_type {
+        ColorType::Gray(bits) => (1, bits),
+        ColorType::GrayA(bits) => (2, bits),
+        ColorType::RGB(bits) => (3, bits),
+        ColorType::RGBA(bits) => (4, bits),
+        other => return Err(format!("unsupported color type {other:?}")),
+    };
+    let image = decoder.read_image().map_err(|err| err.to_string())?;
+
+    let (width_px, height_px) = (width as usize, height as usize);
+    let samples_per_row = width_px * channels;
+    // Every sample of pixel row `y`, scaled to 0-255.
+    let row_samples: Box<dyn Fn(usize) -> Vec<u8>> = match (bits, &image) {
+        (1, DecodingResult::U8(packed)) => {
+            // Bit-packed, MSB first, each row padded to a whole byte.
+            let row_bytes = samples_per_row.div_ceil(8);
+            Box::new(move |y| {
+                (0..samples_per_row)
+                    .map(|i| {
+                        let byte = packed.get(y * row_bytes + i / 8).copied().unwrap_or(0);
+                        if byte & (0x80 >> (i % 8)) != 0 { 255 } else { 0 }
+                    })
+                    .collect()
+            })
+        }
+        (8, DecodingResult::U8(samples)) => {
+            Box::new(move |y| samples[y * samples_per_row..][..samples_per_row].to_vec())
+        }
+        (16, DecodingResult::U16(samples)) => Box::new(move |y| {
+            samples[y * samples_per_row..][..samples_per_row]
+                .iter()
+                .map(|&sample| (sample >> 8) as u8)
+                .collect()
+        }),
+        _ => return Err(format!("unsupported {bits}-bit samples")),
+    };
+
+    let mut gray = Vec::with_capacity(width_px * height_px);
+    for y in 0..height_px {
+        for pixel in row_samples(y).chunks_exact(channels) {
+            let (value, alpha) = match *pixel {
+                [g] => (g, 255),
+                [g, a] => (g, a),
+                [r, g, b] => (luma(r, g, b), 255),
+                [r, g, b, a] => (luma(r, g, b), a),
+                _ => unreachable!("chunks_exact(channels) with channels in 1..=4"),
+            };
+            gray.push((value as u16 * alpha as u16 / 255) as u8);
+        }
+    }
+    Ok((width, height, gray))
+}
+
+/// Rec. 601 luma of an RGB pixel, like the browser-side decoding.
+fn luma(r: u8, g: u8, b: u8) -> u8 {
+    (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64).round() as u8
+}
+
+/// A freshly imported map's summary, returned by a successful [`import`].
+#[derive(serde::Serialize)]
+struct ImportedMapSummary {
+    name: String,
+}
+
 /// `name`'s folder under `maps_root` - see [`environment::map_folder`].
 pub(super) fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
     environment::map_folder(maps_root, name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_map_tiff_decodes_to_the_same_pixels_as_its_raster() {
+        let (width, height) = (37u32, 11u32);
+        let white: Vec<bool> = (0..width * height).map(|i| (i * 7) % 5 < 2).collect();
+        let raster = Raster::new(width, height, white.clone());
+        let info = MapInfo {
+            resolution_m_per_px: 0.05,
+            width_px: width,
+            height_px: height,
+            origin: ImageOrigin {
+                x: 0.0,
+                y: 0.0,
+                theta_rad: 0.0,
+            },
+            start_finish_line: StartFinishLine {
+                a: WorldPoint { x: 0.0, y: 0.0 },
+                b: WorldPoint { x: 1.0, y: 0.0 },
+            },
+            generated_at: environment::now_rfc3339(),
+            source: MapSource::Imported,
+            generation: None,
+        };
+        let folder = std::env::temp_dir().join(format!(
+            "aurorus_decode_tiff_test_{}",
+            std::process::id()
+        ));
+        environment::save(&folder, &info, &raster).unwrap();
+        let bytes = std::fs::read(folder.join("map.tiff")).unwrap();
+        std::fs::remove_dir_all(&folder).ok();
+
+        let (decoded_width, decoded_height, gray) = tiff_to_grayscale(&bytes).unwrap();
+        assert_eq!((decoded_width, decoded_height), (width, height));
+        let expected: Vec<u8> = white.iter().map(|&w| if w { 255 } else { 0 }).collect();
+        assert_eq!(gray, expected);
+    }
+
+    #[test]
+    fn garbage_is_an_error_not_a_panic() {
+        assert!(tiff_to_grayscale(b"not a tiff at all").is_err());
+    }
 }

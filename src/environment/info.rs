@@ -57,13 +57,15 @@ impl StartFinishLine {
 }
 
 /// Whether a map was procedurally generated ([`MapSource::Random`], see
-/// [`MapInfo::generation`]) or recorded from a track by
-/// [`crate::localization::Slam`] ([`MapSource::Real`]).
+/// [`MapInfo::generation`]), recorded from a track by
+/// [`crate::localization::Slam`] ([`MapSource::Real`]), or imported from an
+/// arbitrary image through the web GUI ([`MapSource::Imported`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MapSource {
     Random,
     Real,
+    Imported,
 }
 
 /// How a [`MapSource::Random`] map was generated.

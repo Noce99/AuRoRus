@@ -52,6 +52,7 @@
       <h1>Maps</h1>
       <ul id="map-list"></ul>
       <button id="generate-btn">Generate Map</button>
+      <button id="import-btn">Import Map</button>
     </section>
 
     <section id="panel-layers" class="panel-section" hidden>
@@ -196,6 +197,36 @@
         <div class="modal-actions">
           <button type="button" id="generate-cancel-btn">Cancel</button>
           <button type="submit" id="generate-confirm-btn">Generate</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="import-overlay" class="modal-overlay" hidden>
+    <div id="import-modal" class="modal">
+      <h2>Import Map</h2>
+      <form id="import-form">
+        <div class="field-grid">
+          <label class="field-wide">Image <input type="file" id="import-file" accept="image/*,.pgm,.tif,.tiff" required /></label>
+          <label>Name <input type="text" id="import-name" required /></label>
+          <label>Resolution (m/px) <input type="number" id="import-resolution" step="any" min="0.0001" value="0.05" required /></label>
+          <label>Drivable threshold (0&ndash;255) <input type="number" id="import-threshold" step="1" min="0" max="255" value="206" required /></label>
+          <label class="field-check"><input type="checkbox" id="import-invert" /> Dark pixels are drivable</label>
+        </div>
+        <div id="import-preview-wrap" hidden>
+          <p id="import-hint"></p>
+          <canvas id="import-preview"></canvas>
+          <div class="import-preview-actions">
+            <button type="button" id="import-flip-btn" disabled>Flip direction</button>
+            <button type="button" id="import-clear-btn" disabled>Clear start line</button>
+          </div>
+        </div>
+        <p id="import-error" class="modal-error" hidden></p>
+        <p id="import-success" hidden></p>
+        <div class="modal-actions">
+          <button type="button" id="import-cancel-btn">Cancel</button>
+          <button type="button" id="import-reload-btn" class="modal-primary" hidden>Reload now</button>
+          <button type="submit" id="import-confirm-btn" class="modal-primary" disabled>Import</button>
         </div>
       </form>
     </div>

@@ -275,7 +275,8 @@
   background: none;
 }
 
-#generate-btn {
+#generate-btn,
+#import-btn {
   flex: 0 0 auto;
 }
 
@@ -354,7 +355,8 @@
 
 /* ---------- generate modal ---------- */
 
-#generate-overlay {
+#generate-overlay,
+.modal-overlay {
   position: absolute;
   inset: 0;
   background: rgba(10, 12, 15, 0.35);
@@ -366,11 +368,13 @@
   z-index: 10;
 }
 
-#generate-overlay[hidden] {
+#generate-overlay[hidden],
+.modal-overlay[hidden] {
   display: none;
 }
 
-#generate-modal {
+#generate-modal,
+.modal {
   background: #1b1f24;
   border: 1px solid #303640;
   border-radius: 10px;
@@ -381,7 +385,8 @@
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
-#generate-modal h2 {
+#generate-modal h2,
+.modal h2 {
   margin: 0 0 14px;
   font-size: 16px;
 }
@@ -409,13 +414,15 @@
   font-size: 13px;
 }
 
-#generate-error {
+#generate-error,
+.modal-error {
   color: #ff6b6b;
   font-size: 13px;
   margin: 12px 0 0;
 }
 
-#generate-error[hidden] {
+#generate-error[hidden],
+.modal-error[hidden] {
   display: none;
 }
 
@@ -426,13 +433,66 @@
   gap: 10px;
 }
 
-#generate-confirm-btn {
+#generate-confirm-btn,
+.modal-primary {
   background: #3f6dc9;
   border-color: #3f6dc9;
 }
 
-#generate-confirm-btn:hover {
+#generate-confirm-btn:hover,
+.modal-primary:hover {
   background: #4a7ad9;
+}
+
+/* ---------- import modal ---------- */
+
+.field-grid .field-wide {
+  grid-column: 1 / -1;
+}
+
+.field-grid .field-check {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.field-grid .field-check input {
+  width: auto;
+}
+
+#import-hint {
+  font-size: 13px;
+  color: #9aa4b2;
+  margin: 14px 0 8px;
+}
+
+#import-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 50vh;
+  margin: 0 auto;
+  border: 1px solid #303640;
+  border-radius: 5px;
+  cursor: crosshair;
+  image-rendering: pixelated;
+}
+
+.import-preview-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 10px;
+}
+
+#import-success {
+  color: #6bd68a;
+  font-size: 13px;
+  margin: 12px 0 0;
+}
+
+#import-success[hidden] {
+  display: none;
 }
 
 /* The outcome quotes file paths, which have no spaces to wrap at. */

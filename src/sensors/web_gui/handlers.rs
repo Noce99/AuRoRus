@@ -46,6 +46,8 @@ pub fn handle(
         (Method::Get, "/api/maps") => maps_api::list(maps_root),
         (Method::Get, "/api/generate/defaults") => maps_api::generate_defaults(),
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
+        (Method::Post, "/api/maps/import") => maps_api::import(&mut request, maps_root),
+        (Method::Post, "/api/maps/import/decode_tiff") => maps_api::decode_tiff(&mut request),
         (Method::Get, path) if path.starts_with("/api/maps/") => route_map_get(path, maps_root),
         (Method::Get, "/api/map") => live_api::map(captain),
         (Method::Post, "/api/map_selection") => {
