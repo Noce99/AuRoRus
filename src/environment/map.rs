@@ -1,7 +1,7 @@
 //! [`Map`]: an in-memory, loaded view of a map folder (`map.tiff` +
 //! `info.json`, plus `race_lines/centerline.csv` when the centerline is
-//! known and `race_lines/race_line.csv` once one has been planned - see
-//! [`crate::planning`]), independent of how that folder was produced - by
+//! known - the planned race lines next to it are catalogued by
+//! [`crate::environment::race_lines`]), independent of how that folder was produced - by
 //! [`crate::environment::simulator::generate`] (a
 //! [`crate::environment::MapSource::Random`] map) or by
 //! [`crate::localization::Slam`] (a [`crate::environment::MapSource::Real`]
@@ -20,12 +20,6 @@ pub const MAP_TIFF_FILE_NAME: &str = "map.tiff";
 pub const RACE_LINES_DIR_NAME: &str = "race_lines";
 /// Name of the centerline file inside `race_lines/`.
 pub const CENTERLINE_FILE_NAME: &str = "centerline.csv";
-/// Name of the planned race line file inside `race_lines/` - see
-/// [`crate::planning`].
-pub const RACE_LINE_FILE_NAME: &str = "race_line.csv";
-/// Name of the planned minimum-time race line file inside `race_lines/` -
-/// see [`crate::planning`].
-pub const MIN_TIME_RACE_LINE_FILE_NAME: &str = "race_line_min_time.csv";
 /// Name of the metadata file inside a map folder.
 pub const INFO_FILE_NAME: &str = "info.json";
 
@@ -39,12 +33,6 @@ pub struct Map {
     /// [`crate::localization::Slam`], until [`crate::planning`] computes
     /// one).
     pub centerline: Vec<SpeedPoint>,
-    /// The planned (minimum-curvature) race line - empty until
-    /// [`crate::planning`] has planned one.
-    pub race_line: Vec<SpeedPoint>,
-    /// The planned minimum-time race line - empty until [`crate::planning`]
-    /// has planned one.
-    pub min_time_race_line: Vec<SpeedPoint>,
 }
 
 /// Error returned by [`Map::load`].
@@ -87,9 +75,9 @@ impl From<RaceLineReadError> for MapLoadError {
 
 impl Map {
     /// Reads back a map folder written by any [`crate::environment::MapSource`].
-    /// A missing line file loads as an empty [`Map::centerline`],
-    /// [`Map::race_line`] or [`Map::min_time_race_line`]; a malformed one is
-    /// still an error.
+    /// A missing centerline file loads as an empty [`Map::centerline`]; a
+    /// malformed one is still an error. The planned race lines aren't
+    /// loaded - see [`crate::environment::race_lines`].
     pub fn load(folder: &Path) -> Result<Map, MapLoadError> {
         let info = info::read(&folder.join(INFO_FILE_NAME))?;
         let raster = tiff::read(&folder.join(MAP_TIFF_FILE_NAME))?;
@@ -98,8 +86,6 @@ impl Map {
             info,
             raster,
             centerline: read_line_if_present(folder, CENTERLINE_FILE_NAME)?,
-            race_line: read_line_if_present(folder, RACE_LINE_FILE_NAME)?,
-            min_time_race_line: read_line_if_present(folder, MIN_TIME_RACE_LINE_FILE_NAME)?,
         })
     }
 }
@@ -116,7 +102,7 @@ fn read_line_if_present(folder: &Path, file_name: &str) -> Result<Vec<SpeedPoint
 }
 
 /// Writes `points` as `folder`'s `race_lines/file_name` (e.g.
-/// [`RACE_LINE_FILE_NAME`]), creating `race_lines/` if needed and replacing
+/// [`CENTERLINE_FILE_NAME`]), creating `race_lines/` if needed and replacing
 /// any previous file of that name. Returns the file's path.
 pub fn write_line(
     folder: &Path,

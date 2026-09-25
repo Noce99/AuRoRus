@@ -36,7 +36,9 @@ pub use planning::{
     PlanningObjective, PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState,
     PlanningStatus,
 };
-pub use race_line::{RACE_LINE_TOPIC_NAME, RaceLineKind, SelectedRaceLine};
+pub use race_line::{
+    RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection, SelectedRaceLine,
+};
 pub use slam::{
     SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
     SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,

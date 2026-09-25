@@ -169,6 +169,7 @@ mod tests {
                 height_px: 1,
                 pixels: vec![0u8, 255].into(),
             }],
+            true,
         );
 
         let stripped = without_raster_pixels(drawing);

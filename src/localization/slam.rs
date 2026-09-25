@@ -709,7 +709,7 @@ fn drawing(
         color: DRAWN_COLOR,
     };
     Drawing::default()
-        .element("Map", [world_raster(map, &anchor)])
+        .element("Map", [world_raster(map, &anchor)], true)
         .element(
             "Trajectory",
             [Shape::Polyline {
@@ -718,9 +718,10 @@ fn drawing(
                 width_px: 2.0,
                 color: DRAWN_COLOR,
             }],
+            true,
         )
-        .element("Loop closures", loop_closures)
-        .element("Vehicle", [vehicle])
+        .element("Loop closures", loop_closures, true)
+        .element("Vehicle", [vehicle], true)
         .z_index(DRAWN_Z_INDEX)
 }
 
@@ -741,7 +742,7 @@ fn localized_drawing(pose: Option<Pose2>) -> Drawing {
         color: LOCALIZED_COLOR,
     });
     Drawing::default()
-        .element("Vehicle", vehicle)
+        .element("Vehicle", vehicle, true)
         .z_index(DRAWN_Z_INDEX)
 }
 

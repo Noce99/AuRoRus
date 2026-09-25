@@ -1,6 +1,7 @@
 //! Planning a race line for a map: the minimum-curvature line through its
 //! track, kept a vehicle's half width (plus a margin) from both walls,
-//! with a speed profile - saved as the map's `race_lines/race_line.csv`.
+//! with a speed profile - saved as a new file in the map's `race_lines/` (see
+//! [`crate::environment::race_lines`]).
 //! See documentation/planning.md.
 //!
 //! The pipeline ([`plan`]):

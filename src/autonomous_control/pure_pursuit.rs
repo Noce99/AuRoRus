@@ -549,10 +549,10 @@ impl Control {
             });
         }
         Drawing::default()
-            .element("Nearest point", [nearest])
-            .element("Lookahead point", [lookahead])
-            .element("Chord", [chord])
-            .element("Steering arc", arc)
+            .element("Nearest point", [nearest], true)
+            .element("Lookahead point", [lookahead], true)
+            .element("Chord", [chord], true)
+            .element("Steering arc", arc, true)
     }
 }
 

@@ -31,11 +31,11 @@ pub struct PlanningParameters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanningObjective {
-    /// The lap's squared curvature: saved as `race_line.csv`.
+    /// The lap's squared curvature.
     #[default]
     MinCurvature,
     /// The lap time: the minimum-curvature line first (saved too), then
-    /// the minimum-time line from it, saved as `race_line_min_time.csv`.
+    /// the minimum-time line from it.
     MinTime,
 }
 
@@ -71,7 +71,8 @@ pub struct PlanningOutcome {
     pub objective: PlanningObjective,
     /// The map folder the race line was planned for, if one was selected.
     pub map: Option<String>,
-    /// The race line file written.
+    /// The (minimum-curvature) race line file written, by name inside the
+    /// map's `race_lines/` - see [`crate::environment::race_lines`].
     pub saved_to: Option<String>,
     /// Why no race line was written.
     pub error: Option<String>,
@@ -90,7 +91,7 @@ pub struct PlanningOutcome {
     /// How long planning took, in milliseconds.
     pub elapsed_ms: f64,
     /// For [`PlanningObjective::MinTime`]: the minimum-time line file
-    /// written, if it converged.
+    /// written, by name as `saved_to`, if it converged.
     pub min_time_saved_to: Option<String>,
     /// For [`PlanningObjective::MinTime`]: why no minimum-time line was
     /// written (the minimum-curvature one still was).
@@ -129,7 +130,7 @@ mod tests {
             last_outcome: Some(PlanningOutcome {
                 requested: 3,
                 map: Some("track".to_string()),
-                saved_to: Some("maps/track/race_lines/race_line.csv".to_string()),
+                saved_to: Some("2026_09_25__15_30_12.csv".to_string()),
                 error: None,
                 computed_centerline: true,
                 lap_length_m: 42.0,
@@ -138,7 +139,7 @@ mod tests {
                 reference_max_curvature_per_m: 1.4,
                 elapsed_ms: 250.0,
                 objective: PlanningObjective::MinTime,
-                min_time_saved_to: Some("maps/track/race_lines/race_line_min_time.csv".to_string()),
+                min_time_saved_to: Some("2026_09_25__15_30_14.csv".to_string()),
                 min_time_error: None,
                 min_time_lap_length_m: 41.0,
                 min_time_lap_time_s: 11.9,

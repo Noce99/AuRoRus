@@ -378,6 +378,7 @@ impl Trail {
                     width_px: 2.0,
                     color: DRAWN_COLOR,
                 }],
+                false,
             )
             .element(
                 "Vehicle",
@@ -394,6 +395,7 @@ impl Trail {
                     rear_axle_m: DRAWN_AXLE_M,
                     color: DRAWN_COLOR,
                 }],
+                false,
             )
             .stale_after(Drawing::DEFAULT_STALE_AFTER.max(3 * DRAWING_PERIOD))
             .z_index(DRAWN_Z_INDEX)

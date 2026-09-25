@@ -216,6 +216,7 @@ mod tests {
                 radius_px: 2.0,
                 color: Color::RED,
             }],
+            true,
         )
     }
 

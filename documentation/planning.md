@@ -21,10 +21,11 @@ with pure Rust: OpEn's PANOC and augmented Lagrangian solvers (the
 ```mermaid
 flowchart LR
     W["WebGui"] -- "planning_parameters, planning_request" --> P["Planner"]
+    W -- "race_line_selection" --> M
     P -- "planning_status" --> W
     P -- "planning_status" --> M["MapServer"]
     M -- "map" --> P
-    P -- "race_line.csv, race_line_min_time.csv" --> F[("maps/<map>/race_lines/")]
+    P -- "YYYY_MM_DD__HH_mm_ss.csv (+ .json)" --> F[("maps/<map>/race_lines/")]
     F --> M
     M -- "race_line" --> X["(any consumer)"]
     M -- "draw/MapServer" --> W
@@ -44,10 +45,14 @@ flowchart LR
   the race line and of the centerline, and how long planning took - plus,
   for minimum time, its file and lap numbers or why it failed. The planner
   only writes it when something changes.
-- **`race_line`:** published by `MapServer` for the selected map. It holds
-  the minimum-time line if the map has one, else the minimum-curvature race
-  line, else the centerline, as closed `x,y,speed` points. `MapServer` reloads it when `planning_status`
-  reports a line saved for that map.
+- **`race_line`:** published by `MapServer` for the selected map, as closed
+  `x,y,speed` points plus the file name and method. When a map is loaded it
+  holds the map's newest planned line, or its centerline if it has none.
+  When `planning_status` reports lines saved for that map, `MapServer`
+  switches to the newest one (the one just saved).
+- **`race_line_selection`:** written by `web_gui`'s **Race Lines** panel:
+  a map folder and one of its race line files. `MapServer` switches to it
+  on every new write, if it's for the loaded map.
 - **Drawing:** `MapServer` draws the line over the map, colored by speed
   (blue at the slowest point, green, then red at the fastest). A planned
   race line is drawn thicker than a centerline. While computing, the
@@ -110,15 +115,36 @@ flowchart LR
    - These are exactly the minimum-time optimizer's constraints, so a
      profile from here is a feasible starting point for it.
 
-The race line is saved as the map's `race_lines/race_line.csv`, in the same
-`x,y,speed` format as `centerline.csv` and replacing any previous one.
-`s`, heading and curvature aren't stored: they follow from the points.
+The race line is saved as a new file in the map's `race_lines/`, named
+after the local date and time: `YYYY_MM_DD__HH_mm_ss.csv` (with a `_2`,
+`_3`, ... suffix if that name is taken). It uses the same `x,y,speed`
+format as `centerline.csv`, and never replaces an earlier line. `s`,
+heading and curvature aren't stored: they follow from the points.
+
+Next to it, a `.json` sidecar of the same name records the method
+(`min_curvature` or `min_time`) and when it was saved, in ms since the
+epoch. See `environment/race_lines.rs`.
+
+### Race Lines panel
+
+The **Race Lines** button in the left panel lists every `*.csv` in the
+loaded map's `race_lines/`, newest first. Each entry shows the name, the
+computation method, the estimated lap time (every segment at the mean of
+its two ends' speeds), and the lap length. The one `MapServer` publishes
+is highlighted. Click another one to follow it instead.
+
+Files without a sidecar still list: `centerline.csv` as the centerline,
+the older `race_line.csv` and `race_line_min_time.csv` as minimum
+curvature and minimum time, anything else as an unknown method. They're
+dated by their modification time. By default the newest line is used,
+except that the centerline is only used when there's no other line.
 
 ## Minimum time
 
 `planning/min_time.rs`, run after minimum curvature when the objective is
-**Minimum time**. It saves `race_lines/race_line_min_time.csv` (same format,
-at `min_time_spacing_m`); `race_line.csv` is saved too. On a generated
+**Minimum time**. It saves its line as a new file (same format, at
+`min_time_spacing_m`) right after the minimum-curvature one it started from,
+so it's the newer of the two. On a generated
 track the minimum-time lap is about 12% faster than the minimum-curvature
 one, both timed with the same speed profile, and takes about 12 s to plan.
 The fastest line isn't the flattest: on a ring, minimum curvature runs
@@ -160,10 +186,9 @@ cornering limit a lap of a circle takes `2π·√(R/a_lat)`.
   `min_time_max_duration_s`), the panel says why, no minimum-time file is
   written, and the minimum-curvature line is still saved.
 
-`MapServer` prefers the minimum-time line when a map has one. Planning
-minimum curvature again later leaves an existing `race_line_min_time.csv` in
-place, so that one stays shown and published until you delete it or plan
-minimum time again.
+After planning, `MapServer` follows the newest line: the minimum-time one
+if it converged. Earlier lines stay on disk, and you can switch back to any
+of them from the Race Lines panel.
 
 ### About PANOC here
 

@@ -629,6 +629,7 @@ fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) 
                 rear_axle_m,
                 color: Color::AMBER,
             }],
+            true,
         )
         .stale_after(Drawing::DEFAULT_STALE_AFTER)
         .z_index(10)

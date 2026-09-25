@@ -12,7 +12,9 @@
 //!
 //! A drawing's shapes are grouped into named [`DrawingElement`]s - e.g. the map
 //! server's "Map", "Race line" and "Start/finish line" - which a viewer
-//! lets the user show or hide one by one.
+//! lets the user show or hide one by one. Each element says whether it's
+//! shown until the user says otherwise, so an executor can keep a busy
+//! debugging overlay off unless someone asks for it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,17 +59,21 @@ impl Drawing {
 
     /// Appends `shapes` as one element called `name` - kept even when
     /// `shapes` is empty (e.g. no loop closed yet), so the element stays
-    /// listed in a viewer rather than coming and going.
+    /// listed in a viewer rather than coming and going. `visible_by_default`
+    /// is whether a viewer shows it before the user ticks or unticks it -
+    /// see [`DrawingElement::visible_by_default`].
     pub fn element(
         mut self,
         name: impl Into<String>,
         shapes: impl IntoIterator<Item = Shape>,
+        visible_by_default: bool,
     ) -> Self {
         let before = self.shapes.len();
         self.shapes.extend(shapes);
         self.elements.push(DrawingElement {
             name: name.into(),
             shape_count: u32::try_from(self.shapes.len() - before).unwrap_or(u32::MAX),
+            visible_by_default,
         });
         self
     }
@@ -90,6 +96,11 @@ impl Drawing {
 pub struct DrawingElement {
     pub name: String,
     pub shape_count: u32,
+    /// Whether a viewer shows this element until the user ticks or unticks
+    /// it - `false` for detail only worth seeing on demand. Once the user
+    /// has chosen, their choice wins. If several elements of a drawing
+    /// share a name, the first one's default applies to all of them.
+    pub visible_by_default: bool,
 }
 
 /// An RGBA color, `a = 255` being fully opaque.
@@ -323,8 +334,9 @@ mod tests {
                         pixels: vec![0u8, 255].into(),
                     },
                 ],
+                true,
             )
-            .element("Nothing", [])
+            .element("Nothing", [], false)
             .stale_after(Drawing::DEFAULT_STALE_AFTER)
             .z_index(-3);
 
@@ -346,17 +358,20 @@ mod tests {
         };
 
         let drawing = Drawing::default()
-            .element("Two", [dot(0.0), dot(1.0)])
-            .element("None", [])
-            .element("One", [dot(2.0)]);
+            .element("Two", [dot(0.0), dot(1.0)], true)
+            .element("None", [], false)
+            .element("One", [dot(2.0)], true);
 
         assert_eq!(drawing.shapes, vec![dot(0.0), dot(1.0), dot(2.0)]);
         let runs: Vec<_> = drawing
             .elements
             .iter()
-            .map(|e| (e.name.as_str(), e.shape_count))
+            .map(|e| (e.name.as_str(), e.shape_count, e.visible_by_default))
             .collect();
-        assert_eq!(runs, vec![("Two", 2), ("None", 0), ("One", 1)]);
+        assert_eq!(
+            runs,
+            vec![("Two", 2, true), ("None", 0, false), ("One", 1, true)]
+        );
     }
 
     #[test]

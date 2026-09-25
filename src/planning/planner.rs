@@ -5,9 +5,7 @@
 use super::config::{PlanningConfig, tunable_parameters};
 use super::geometry::Point2;
 use super::pipeline::{PlannedLines, Progress, plan};
-use crate::environment::{
-    CENTERLINE_FILE_NAME, MIN_TIME_RACE_LINE_FILE_NAME, Map, RACE_LINE_FILE_NAME, write_line,
-};
+use crate::environment::{CENTERLINE_FILE_NAME, Map, RaceLineMethod, race_lines, write_line};
 use crate::topics::{
     Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
     PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome, PlanningParameters,
@@ -182,30 +180,34 @@ impl Planner {
     }
 }
 
-/// The files [`save`] wrote.
+/// The race line files [`save`] wrote, by name inside the map's
+/// `race_lines/`.
 struct Saved {
-    /// The (minimum-curvature) race line file.
+    /// The minimum-curvature line file.
     race_line: String,
     /// The minimum-time line file, or why it couldn't be written - `None`
     /// when there's no minimum-time line to write.
     min_time: Option<Result<String, String>>,
 }
 
-/// Writes `planned`'s race line - and its computed centerline, if the map
-/// had none, and its minimum-time line, if there is one - into `map`'s
-/// folder.
+/// Writes `planned`'s minimum-curvature line - and its computed
+/// centerline, if the map had none, and its minimum-time line, if there is
+/// one, saved last so it's the newest - into `map`'s folder, each line as a
+/// new file (see [`race_lines::save_new`]).
 fn save(map: &Map, planned: &PlannedLines) -> Result<Saved, String> {
     if let Some(centerline) = &planned.computed_centerline {
         write_line(&map.folder, CENTERLINE_FILE_NAME, centerline)
             .map_err(|err| format!("failed to save the centerline: {err}"))?;
     }
-    let race_line = write_line(&map.folder, RACE_LINE_FILE_NAME, &planned.race_line)
-        .map(|path| path.display().to_string())
-        .map_err(|err| format!("failed to save the race line: {err}"))?;
+    let race_line = race_lines::save_new(
+        &map.folder,
+        RaceLineMethod::MinCurvature,
+        &planned.race_line,
+    )
+    .map_err(|err| format!("failed to save the race line: {err}"))?;
     let min_time = match &planned.min_time {
         Some(Ok(line)) => Some(
-            write_line(&map.folder, MIN_TIME_RACE_LINE_FILE_NAME, &line.race_line)
-                .map(|path| path.display().to_string())
+            race_lines::save_new(&map.folder, RaceLineMethod::MinTime, &line.race_line)
                 .map_err(|err| format!("failed to save the minimum-time line: {err}")),
         ),
         _ => None,
@@ -229,8 +231,9 @@ fn progress_drawing(reference: &[Point2], solution: &[Point2], color: Color) -> 
         .element(
             "Reference line",
             [polyline(reference, 1.0, Color::WHITE.with_alpha(120))],
+            true,
         )
-        .element("Solution", [polyline(solution, 2.0, color)])
+        .element("Solution", [polyline(solution, 2.0, color)], true)
         .z_index(PROGRESS_Z_INDEX)
 }
 

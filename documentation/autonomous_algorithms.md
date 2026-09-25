@@ -277,9 +277,9 @@ sequenceDiagram
 
 ## Pure pursuit
 
-`pure_pursuit.rs` follows the selected map's `race_line`. That is the
-min-time line if the map has one, otherwise the min-curvature line, otherwise
-the centerline (see `planning.md`). Its parameters live in
+`pure_pursuit.rs` follows the selected map's `race_line`. That is the line
+picked in the Race Lines panel. By default it is the map's newest planned
+line, or its centerline if it has none (see `planning.md`). Its parameters live in
 `config/autonomous_control/pure_pursuit.toml`.
 
 Each tick it does the following:

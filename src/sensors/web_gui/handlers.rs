@@ -6,6 +6,7 @@ use super::assets;
 use super::draw_api;
 use super::live_api;
 use super::maps_api;
+use super::race_lines_api;
 use super::topics_api;
 use crate::Captain;
 use crate::web::{not_found, respond_and_close};
@@ -110,6 +111,10 @@ pub fn handle(
         }
         (Method::Post, "/api/planning_start") => {
             live_api::planning_start(&mut request, captain, writer_id)
+        }
+        (Method::Get, "/api/race_lines") => race_lines_api::list(captain),
+        (Method::Post, "/api/race_line_selection") => {
+            race_lines_api::select(&mut request, captain, writer_id)
         }
         _ => not_found(),
     };

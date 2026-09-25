@@ -1,5 +1,6 @@
 //! The environment: map metadata/format ([`info`], [`raster`], [`tiff`],
-//! [`race_line`]), the loadable [`Map`] type ([`map`]), and the vehicle
+//! [`race_line`]), the catalog of a map's race lines ([`race_lines`]), the
+//! loadable [`Map`] type ([`map`]), and the vehicle
 //! simulator ([`simulator`]) - one way to *produce* a map
 //! ([`MapSource::Random`]) plus vehicle dynamics models, for exercising
 //! algorithms without real hardware. [`crate::localization::Slam`] saves
@@ -9,6 +10,7 @@
 mod info;
 mod map;
 mod race_line;
+pub mod race_lines;
 mod raster;
 pub mod simulator;
 mod tiff;
@@ -17,9 +19,9 @@ pub use info::{
     GenerationInfo, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint, now_rfc3339,
 };
 pub use map::{
-    CENTERLINE_FILE_NAME, MIN_TIME_RACE_LINE_FILE_NAME, Map, MapLoadError, MapSaveError,
-    RACE_LINE_FILE_NAME, map_folder, read_info, save, write_line,
+    CENTERLINE_FILE_NAME, Map, MapLoadError, MapSaveError, map_folder, read_info, save, write_line,
 };
 pub use race_line::{RaceLineWriteError, SpeedPoint};
+pub use race_lines::{RaceLineEntry, RaceLineMethod};
 pub use raster::Raster;
 pub use simulator::{GeneratedMap, GenerationConfig, MapGenerationError, generate, random_seed};

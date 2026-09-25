@@ -146,6 +146,7 @@ impl Executor for SimulatedLidar {
                                 radius_px: 2.5,
                                 color: Color::RED,
                             }],
+                            true,
                         )
                         .stale_after(stale_after)
                         .z_index(5),

@@ -20,7 +20,7 @@ seed = 0
 
 # Master knob: multiplies every standard deviation *and* bias below, so 0.0
 # gives a perfect sensor and 2.0 doubles every error.
-noise_scale = 0.0
+noise_scale = 0.2
 
 # White noise on the measured wheel speed, standard deviation in m/s.
 speed_std_mps = 0.05

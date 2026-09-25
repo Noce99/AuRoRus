@@ -2,15 +2,17 @@
 //! folder and keeps [`MAP_TOPIC_NAME`], [`START_STATE_TOPIC_NAME`] and
 //! [`RACE_LINE_TOPIC_NAME`] in sync with it, loading from disk only when the
 //! selection actually changes - or, for the race line, when
-//! [`crate::planning::Planner`] saves a new one for it - and draws the
-//! loaded map and its race line on its own drawing topic (see
+//! [`RACE_LINE_SELECTION_TOPIC_NAME`] picks another one or
+//! [`crate::planning::Planner`] saves a new one - and draws the loaded map
+//! and its race line on its own drawing topic (see
 //! [`crate::topics::Drawing`]).
 
-use crate::environment::{Map, SpeedPoint};
+use crate::environment::{Map, RaceLineMethod, SpeedPoint, race_lines};
 use crate::topics::{
     Color, Drawing, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
-    PLANNING_STATUS_TOPIC_NAME, PlanningStatus, RACE_LINE_TOPIC_NAME, RaceLineKind,
-    START_STATE_TOPIC_NAME, SelectedMap, SelectedRaceLine, Shape, StartState,
+    PLANNING_STATUS_TOPIC_NAME, PlanningStatus, RACE_LINE_SELECTION_TOPIC_NAME,
+    RACE_LINE_TOPIC_NAME, RaceLineSelection, START_STATE_TOPIC_NAME, SelectedMap, SelectedRaceLine,
+    Shape, StartState,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -55,11 +57,10 @@ fn load(path: &Path) -> Option<Loaded> {
                 pixels: map.raster.to_bytes().into(),
                 info: Some(map.info.clone()),
             };
-            let start_state = start_state(&map);
             Some(Loaded {
                 map: selected,
-                start_state,
-                race_line: race_line(map),
+                start_state: start_state(&map),
+                race_line: default_race_line(path),
             })
         }
         Err(err) => {
@@ -69,22 +70,32 @@ fn load(path: &Path) -> Option<Loaded> {
     }
 }
 
-/// The line to follow on `map`: its planned minimum-time line if it has
-/// one, else its planned race line, else its centerline.
-fn race_line(map: Map) -> SelectedRaceLine {
-    let (kind, points) = if !map.min_time_race_line.is_empty() {
-        (RaceLineKind::MinTime, map.min_time_race_line)
-    } else if !map.race_line.is_empty() {
-        (RaceLineKind::RaceLine, map.race_line)
-    } else if !map.centerline.is_empty() {
-        (RaceLineKind::Centerline, map.centerline)
-    } else {
-        (RaceLineKind::None, Vec::new())
-    };
-    SelectedRaceLine {
-        map: Some(map.folder),
-        kind,
-        points,
+/// The line to follow on the map in `folder` when nobody picked one - see
+/// [`race_lines::default_line`] - or no line at all if it has none.
+fn default_race_line(folder: &Path) -> SelectedRaceLine {
+    let entries = race_lines::list(folder);
+    race_lines::default_line(&entries)
+        .and_then(|entry| race_line(folder, &entry.file))
+        .unwrap_or_else(|| SelectedRaceLine {
+            map: Some(folder.to_path_buf()),
+            ..SelectedRaceLine::default()
+        })
+}
+
+/// The map in `folder`'s race line `file`, or `None` (with a warning) if it
+/// can't be read.
+fn race_line(folder: &Path, file: &str) -> Option<SelectedRaceLine> {
+    match race_lines::read(folder, file) {
+        Ok(points) => Some(SelectedRaceLine {
+            map: Some(folder.to_path_buf()),
+            file: Some(file.to_string()),
+            method: race_lines::meta(folder, file).method,
+            points,
+        }),
+        Err(err) => {
+            eprintln!("map_server: failed to load race line {file:?} of {folder:?}: {err}");
+            None
+        }
     }
 }
 
@@ -119,9 +130,9 @@ fn drawing(map: &SelectedMap, race_line: &SelectedRaceLine) -> Drawing {
         color: Color::RED,
     };
     Drawing::default()
-        .element("Map", [raster])
-        .element("Race line", race_line_shapes(race_line))
-        .element("Start/finish line", [start_finish_line])
+        .element("Map", [raster], true)
+        .element("Race line", race_line_shapes(race_line), true)
+        .element("Start/finish line", [start_finish_line], true)
         .z_index(-100)
 }
 
@@ -134,9 +145,9 @@ fn race_line_shapes(race_line: &SelectedRaceLine) -> Vec<Shape> {
     if points.len() < 2 {
         return Vec::new();
     }
-    let width_px = match race_line.kind {
-        RaceLineKind::RaceLine | RaceLineKind::MinTime => 3.0,
-        _ => 1.5,
+    let width_px = match race_line.method {
+        RaceLineMethod::Centerline => 1.5,
+        _ => 3.0,
     };
     let (slowest, fastest) = points.iter().fold((f64::INFINITY, 0.0f64), |(lo, hi), p| {
         (lo.min(p.speed_mps), hi.max(p.speed_mps))
@@ -204,9 +215,10 @@ fn start_state(map: &Map) -> StartState {
 /// [`RACE_LINE_TOPIC_NAME`] and republishes them whenever
 /// [`MAP_SELECTION_TOPIC_NAME`]'s wanted path no longer matches the
 /// currently published one - loading the new map from disk, or clearing to
-/// their `Default`s if the selection was cleared. Also reloads the race line
-/// whenever [`PLANNING_STATUS_TOPIC_NAME`] reports one saved for the
-/// published map.
+/// their `Default`s if the selection was cleared. Also switches the race
+/// line whenever [`RACE_LINE_SELECTION_TOPIC_NAME`] picks one of the
+/// published map's, and to the newest one whenever
+/// [`PLANNING_STATUS_TOPIC_NAME`] reports one saved for it.
 pub struct MapServer {
     id: u8,
     name: String,
@@ -263,6 +275,22 @@ impl Executor for MapServer {
                 .and_then(|topic| topic.read().into_value().last_outcome)
         };
         let mut seen_planned = planned_request().map(|outcome| outcome.requested);
+        // Likewise the race line selections already accounted for, by write
+        // count: every new write is acted on, even of an unchanged value.
+        let race_line_selection_writes = || {
+            captain
+                .try_topic::<RaceLineSelection>(RACE_LINE_SELECTION_TOPIC_NAME)
+                .map(|topic| topic.meta().write_count)
+        };
+        let mut seen_selection = race_line_selection_writes();
+        let publish_race_line = |map: &SelectedMap, line: SelectedRaceLine| {
+            drawing_topic
+                .write(self.id, drawing(map, &line))
+                .expect("lost writer authorization for the map's drawing topic");
+            race_line_topic
+                .write(self.id, line)
+                .expect("lost writer authorization for the race_line topic");
+        };
 
         while captain.is_running(self.id) {
             let wanted = selection_topic.read();
@@ -296,7 +324,26 @@ impl Executor for MapServer {
                 }
             }
 
-            // A race line newly saved for the published map: reload its lines.
+            // A race line picked for the published map: switch to it. One
+            // picked for another map (e.g. just before switching maps) is
+            // dropped - the new map starts on its default line.
+            let selection_writes = race_line_selection_writes();
+            if selection_writes != seen_selection {
+                seen_selection = selection_writes;
+                let selection = captain
+                    .topic::<RaceLineSelection>(RACE_LINE_SELECTION_TOPIC_NAME)
+                    .read()
+                    .into_value();
+                if let Some(path) = &published.path
+                    && selection.map.as_ref() == Some(path)
+                    && let Some(line) = race_line(path, &selection.file)
+                {
+                    publish_race_line(&published, line);
+                }
+            }
+
+            // A race line newly saved for the published map: switch to the
+            // newest one - the one just saved.
             if let Some(outcome) = planned_request()
                 && seen_planned != Some(outcome.requested)
             {
@@ -306,20 +353,7 @@ impl Executor for MapServer {
                 });
                 if outcome.saved_to.is_some() && for_published {
                     let path = published.path.clone().expect("checked just above");
-                    match Map::load(&path) {
-                        Ok(map) => {
-                            let reloaded = race_line(map);
-                            drawing_topic
-                                .write(self.id, drawing(&published, &reloaded))
-                                .expect("lost writer authorization for the map's drawing topic");
-                            race_line_topic
-                                .write(self.id, reloaded)
-                                .expect("lost writer authorization for the race_line topic");
-                        }
-                        Err(err) => {
-                            eprintln!("map_server: failed to reload map {path:?}: {err}")
-                        }
-                    }
+                    publish_race_line(&published, default_race_line(&path));
                 }
             }
 
@@ -367,8 +401,6 @@ mod tests {
             },
             raster: Raster::new(10, 10, vec![true; 100]),
             centerline: Vec::new(),
-            race_line: Vec::new(),
-            min_time_race_line: Vec::new(),
         }
     }
 
@@ -397,34 +429,24 @@ mod tests {
     }
 
     #[test]
-    fn the_fastest_planned_line_wins() {
-        let line = StartFinishLine {
-            a: WorldPoint { x: 0.0, y: 1.0 },
-            b: WorldPoint { x: 0.0, y: -1.0 },
-        };
-        let mut map = test_map(line);
-        assert_eq!(race_line(test_map(line)).kind, RaceLineKind::None);
+    fn a_map_s_default_race_line_is_its_newest_planned_one() {
+        let folder =
+            std::env::temp_dir().join(format!("aurorus_map_server_{}", std::process::id()));
+        std::fs::remove_dir_all(&folder).ok();
+        assert_eq!(default_race_line(&folder).file, None);
 
-        map.centerline = vec![point(0.0, 1.0), point(1.0, 1.0)];
-        let centerline_only = race_line(Map {
-            centerline: map.centerline.clone(),
-            ..test_map(line)
-        });
-        assert_eq!(centerline_only.kind, RaceLineKind::Centerline);
+        let line = vec![point(0.0, 1.0), point(1.0, 1.0), point(1.0, 2.0)];
+        let older = race_lines::save_new(&folder, RaceLineMethod::MinCurvature, &line).unwrap();
+        let newer = race_lines::save_new(&folder, RaceLineMethod::MinTime, &line).unwrap();
 
-        map.race_line = vec![point(0.0, 2.0), point(1.0, 3.0), point(2.0, 4.0)];
-        let planned = race_line(Map {
-            centerline: map.centerline.clone(),
-            race_line: map.race_line.clone(),
-            ..test_map(line)
-        });
-        assert_eq!(planned.kind, RaceLineKind::RaceLine);
-        assert_eq!(planned.points.len(), 3);
+        let default = default_race_line(&folder);
+        let picked = race_line(&folder, &older).unwrap();
+        std::fs::remove_dir_all(&folder).ok();
 
-        map.min_time_race_line = vec![point(0.0, 5.0), point(1.0, 5.0)];
-        let fastest = race_line(map);
-        assert_eq!(fastest.kind, RaceLineKind::MinTime);
-        assert_eq!(fastest.points.len(), 2);
+        assert_eq!(default.file.as_deref(), Some(newer.as_str()));
+        assert_eq!(default.method, RaceLineMethod::MinTime);
+        assert_eq!(default.points.len(), 3);
+        assert_eq!(picked.method, RaceLineMethod::MinCurvature);
     }
 
     #[test]
@@ -433,7 +455,8 @@ mod tests {
         // run's first point, the last one wrapping back to the first point.
         let line = SelectedRaceLine {
             map: None,
-            kind: RaceLineKind::RaceLine,
+            file: None,
+            method: RaceLineMethod::MinCurvature,
             points: vec![
                 point(0.0, 1.0),
                 point(1.0, 1.0),

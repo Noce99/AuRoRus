@@ -33,25 +33,31 @@ window.DrawLayers = (() => {
   /** What shapes the ones no element covers are listed as. */
   const UNNAMED_ELEMENT = "Other";
 
-  /** `drawing`'s elements as `{name, start, count}` - `start` the index of
-   *  their first shape - with any shapes left over after the last one
-   *  gathered into an `UNNAMED_ELEMENT`. */
+  /** `drawing`'s elements as `{name, start, count, visibleByDefault}` -
+   *  `start` the index of their first shape - with any shapes left over
+   *  after the last one gathered into a shown-by-default
+   *  `UNNAMED_ELEMENT`. */
   function elementsOf(drawing) {
     const elements = [];
     let start = 0;
-    for (const { name, shape_count: count } of drawing.elements ?? []) {
-      elements.push({ name, start, count });
+    for (const { name, shape_count: count, visible_by_default: visibleByDefault } of drawing.elements ?? []) {
+      elements.push({ name, start, count, visibleByDefault: visibleByDefault ?? true });
       start += count;
     }
     if (start < drawing.shapes.length) {
-      elements.push({ name: UNNAMED_ELEMENT, start, count: drawing.shapes.length - start });
+      elements.push({ name: UNNAMED_ELEMENT, start, count: drawing.shapes.length - start, visibleByDefault: true });
     }
     return elements;
   }
 
-  /** `drawing`'s distinct element names, in order. */
-  function elementNames(drawing) {
-    return [...new Set(elementsOf(drawing).map((element) => element.name))];
+  /** `drawing`'s distinct elements as `{name, visibleByDefault}`, in order
+   *  - the first element of each name setting its default. */
+  function distinctElements(drawing) {
+    const byName = new Map();
+    for (const { name, visibleByDefault } of elementsOf(drawing)) {
+      if (!byName.has(name)) byName.set(name, { name, visibleByDefault });
+    }
+    return [...byName.values()];
   }
 
   function elementKey(topic, name) {
@@ -99,12 +105,17 @@ window.DrawLayers = (() => {
      *  across an epoch change. */
     const hidden = new Set();
 
-    /** Elements the user unticked, by `elementKey` - kept by name too, so
-     *  an element stays hidden across rewrites of its drawing, even ones it
-     *  is missing from for a while. Independent of `hidden`: unticking a
-     *  whole layer and ticking it back keeps which of its elements were
-     *  hidden. */
-    const hiddenElements = new Set();
+    /** Whether the user ticked (`true`) or unticked (`false`) an element,
+     *  by `elementKey` - elements missing here show as their drawing's
+     *  `visible_by_default` says. Kept by name too, so a choice survives
+     *  rewrites of the drawing, even ones the element is missing from for a
+     *  while. Independent of `hidden`: unticking a whole layer and ticking
+     *  it back keeps which of its elements were shown. */
+    const elementChoices = new Map();
+
+    function isElementShown(topic, name, visibleByDefault) {
+      return elementChoices.get(elementKey(topic, name)) ?? visibleByDefault;
+    }
 
     /** Topics whose entry in the list is open. */
     const openTopics = new Set();
@@ -147,8 +158,10 @@ window.DrawLayers = (() => {
      *  `{shape, index}` - `index` into `layer.drawing.shapes`. */
     function visibleShapes(layer) {
       const visible = [];
+      // Elements sharing a name follow the first one's default.
+      const defaults = new Map(distinctElements(layer.drawing).map((e) => [e.name, e.visibleByDefault]));
       for (const { name, start, count } of elementsOf(layer.drawing)) {
-        if (hiddenElements.has(elementKey(layer.topic, name))) continue;
+        if (!isElementShown(layer.topic, name, defaults.get(name))) continue;
         for (let index = start; index < start + count; index++) {
           visible.push({ shape: layer.drawing.shapes[index], index });
         }
@@ -368,11 +381,16 @@ window.DrawLayers = (() => {
     // Layer list
     // -----------------------------------------------------------------
 
-    /** What the list shows - every layer and its element names - so it's
-     *  only rebuilt when that changes, not on every poll. */
+    /** What the list shows - every layer and its elements - so it's only
+     *  rebuilt when that changes, not on every poll. */
     function listSignature() {
       return [...layers.values()]
-        .map((layer) => [layer.topic, ...(layer.drawing ? elementNames(layer.drawing) : [])].join("\n"))
+        .map((layer) =>
+          [
+            layer.topic,
+            ...(layer.drawing ? distinctElements(layer.drawing) : []).map((e) => `${e.name}\t${e.visibleByDefault}`),
+          ].join("\n"),
+        )
         .join("\n\n");
     }
 
@@ -426,14 +444,14 @@ window.DrawLayers = (() => {
 
         const elements = document.createElement("ul");
         elements.className = "layer-elements";
-        const names = layer.drawing ? elementNames(layer.drawing) : [];
-        if (names.length === 0) {
+        const drawnElements = layer.drawing ? distinctElements(layer.drawing) : [];
+        if (drawnElements.length === 0) {
           const empty = document.createElement("li");
           empty.className = "empty";
           empty.textContent = "Nothing drawn";
           elements.appendChild(empty);
         }
-        for (const elementName of names) {
+        for (const { name: elementName, visibleByDefault } of drawnElements) {
           const key = elementKey(topic, elementName);
           const item = document.createElement("li");
           const label = document.createElement("label");
@@ -441,9 +459,8 @@ window.DrawLayers = (() => {
           text.className = "layer-name";
           text.textContent = elementName;
           label.append(
-            checkbox(!hiddenElements.has(key), (checked) => {
-              if (checked) hiddenElements.delete(key);
-              else hiddenElements.add(key);
+            checkbox(isElementShown(topic, elementName, visibleByDefault), (checked) => {
+              elementChoices.set(key, checked);
             }),
             text,
           );

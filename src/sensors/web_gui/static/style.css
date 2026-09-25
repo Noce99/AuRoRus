@@ -68,6 +68,17 @@
   color: #e8e8e8;
 }
 
+#topic-writer {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #b48cff;
+}
+
+#topic-writer:empty {
+  display: none;
+}
+
 #topic-freshness {
   margin: 0;
   font-size: 13px;
@@ -266,6 +277,61 @@
 
 #generate-btn {
   flex: 0 0 auto;
+}
+
+#race-line-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#race-line-list li {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  background: #22272e;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#race-line-list li:hover {
+  background: #2b323b;
+}
+
+#race-line-list li.selected {
+  background: #3f6dc9;
+  color: #fff;
+}
+
+#race-line-list .race-line-name {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#race-line-list .race-line-stats {
+  color: #9aa4b2;
+  font-variant-numeric: tabular-nums;
+}
+
+#race-line-list li.selected .race-line-stats {
+  color: #dce6ff;
+}
+
+#race-line-list .empty {
+  color: #6b7280;
+  font-style: italic;
+  cursor: default;
+}
+
+#race-line-list .empty:hover {
+  background: none;
 }
 
 #vehicle-model-select,

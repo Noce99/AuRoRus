@@ -816,11 +816,100 @@ async function pollPlanning() {
 }
 
 // ---------------------------------------------------------------------
+// Race Lines panel - every race line of the loaded map, newest first (from
+// `/api/race_lines`, read off its folder), with the one `MapServer`
+// publishes on `race_line` highlighted. Clicking one writes
+// `race_line_selection`; `MapServer` switches to it on its next poll.
+// ---------------------------------------------------------------------
+
+const raceLineListEl = document.getElementById("race-line-list");
+const raceLinesDetailsEl = document.getElementById("race-lines-details");
+
+const RACE_LINE_METHOD_LABELS = {
+  centerline: "Centerline",
+  min_curvature: "Minimum curvature",
+  min_time: "Minimum time",
+  unknown: "Unknown method",
+};
+
+/** What the list last showed, so it's only rebuilt when that changes. */
+let raceLinesSignature = null;
+
+function raceLinesPanelVisible() {
+  return !document.getElementById("panel-race-lines").hidden;
+}
+
+function formatLapTime(seconds) {
+  return Number.isFinite(seconds) ? `${seconds.toFixed(2)} s` : "∞ s";
+}
+
+async function selectRaceLine(file) {
+  await fetchJSON("/api/race_line_selection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file }),
+  });
+}
+
+function renderRaceLines(response, selected) {
+  raceLineListEl.innerHTML = "";
+  raceLinesDetailsEl.textContent =
+    response.map === null
+      ? "Select a map to see its race lines."
+      : `Race lines of ${response.map}, newest first. Click one to follow it.`;
+  if (response.map !== null && response.lines.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No race lines yet - plan one in the Planning panel";
+    raceLineListEl.appendChild(li);
+  }
+  for (const line of response.lines) {
+    const li = document.createElement("li");
+    if (line.file === selected) li.classList.add("selected");
+    const name = document.createElement("span");
+    name.className = "race-line-name";
+    name.textContent = line.file.replace(/\.csv$/, "");
+    const stats = document.createElement("span");
+    stats.className = "race-line-stats";
+    stats.textContent = [
+      RACE_LINE_METHOD_LABELS[line.method] ?? line.method,
+      formatLapTime(line.lap_time_s),
+      `${line.lap_length_m.toFixed(1)} m`,
+    ].join(" · ");
+    li.title = `${line.file}, ${line.num_points} points`;
+    li.append(name, stats);
+    li.addEventListener("click", () => {
+      renderRaceLines(response, line.file); // optimistic highlight; the next poll confirms it
+      selectRaceLine(line.file).catch((err) => console.error(err));
+    });
+    raceLineListEl.appendChild(li);
+  }
+}
+
+// Reads the list off disk, so only while the panel is visible.
+async function pollRaceLines() {
+  if (!raceLinesPanelVisible()) return;
+  const response = await fetchJSON("/api/race_lines");
+  const signature = JSON.stringify(response);
+  if (signature === raceLinesSignature) return;
+  raceLinesSignature = signature;
+  renderRaceLines(response, response.selected);
+}
+
+// Show it right away when the panel is opened, not a poll later - once
+// `MapView`'s own click handler has unhidden the panel.
+document.querySelector('.panel-nav-btn[data-panel="race-lines"]').addEventListener("click", () => {
+  raceLinesSignature = null;
+  setTimeout(() => pollRaceLines().catch((err) => console.error(err)), 0);
+});
+
+// ---------------------------------------------------------------------
 // Topics panel - inspects any registered topic, generically: the list
 // comes from `/api/topics`, the picked topic's value from `/api/topic`.
 // ---------------------------------------------------------------------
 
 const topicSelectEl = document.getElementById("topic-select");
+const topicWriterEl = document.getElementById("topic-writer");
 const topicFreshnessEl = document.getElementById("topic-freshness");
 const topicRateEl = document.getElementById("topic-rate");
 const topicContentEl = document.getElementById("topic-content");
@@ -911,6 +1000,7 @@ async function pollSelectedTopic() {
 function renderTopicContent() {
   const snapshot = topicSelectEl.value ? topicSnapshot : null;
   if (!snapshot) {
+    topicWriterEl.textContent = "";
     topicFreshnessEl.textContent = "";
     topicFreshnessEl.classList.remove("stale");
     topicRateEl.textContent = "";
@@ -920,14 +1010,14 @@ function renderTopicContent() {
   const rateHz = meanWriteRateHz();
   topicRateEl.textContent =
     rateHz === null ? "measuring write rate…" : `${rateHz.toFixed(1)} Hz mean over the last ${TOPIC_RATE_WINDOW_MS / 1000} s`;
-  const writer = snapshot.writer ? ` by ${snapshot.writer}` : "";
+  topicWriterEl.textContent = snapshot.writer ?? "";
   if (snapshot.age_ms === null) {
-    topicFreshnessEl.textContent = `never written (initial value)${snapshot.writer ? ` · writer: ${snapshot.writer}` : ""}`;
+    topicFreshnessEl.textContent = "never written (initial value)";
     topicFreshnessEl.classList.add("stale");
   } else {
     // The server measured age_ms when it answered; add how long ago that was.
     const ageMs = snapshot.age_ms + (performance.now() - snapshot.receivedAtMs);
-    topicFreshnessEl.textContent = `written ${formatAge(ageMs)} ago${writer} · write #${snapshot.write_count}`;
+    topicFreshnessEl.textContent = `written ${formatAge(ageMs)} ago · write #${snapshot.write_count}`;
     topicFreshnessEl.classList.toggle("stale", ageMs > TOPIC_STALE_AFTER_MS);
   }
   const { value, too_large, receivedAtMs, name, writer: _, ...meta } = snapshot;
@@ -1181,6 +1271,7 @@ startPolling(pollVehicleModel, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
+startPolling(pollRaceLines, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

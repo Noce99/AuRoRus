@@ -23,6 +23,7 @@
       <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
       <button class="panel-nav-btn" data-panel="localization">Localization</button>
       <button class="panel-nav-btn" data-panel="planning">Planning</button>
+      <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
     </nav>
   </aside>
 
@@ -93,6 +94,7 @@
         <input type="range" id="poll-rate" step="1" />
         <span id="poll-rate-value"></span>
       </div>
+      <p id="topic-writer"></p>
       <p id="topic-freshness"></p>
       <p id="topic-rate"></p>
       <pre id="topic-content"></pre>
@@ -162,6 +164,12 @@
         <button type="button" id="planning-load-btn" class="parameter-load-btn" title="Use the values in the planner's config file again, dropping unsaved changes">Load from file</button>
         <p id="planning-save-status"></p>
       </div>
+    </section>
+
+    <section id="panel-race-lines" class="panel-section" hidden>
+      <h1>Race lines</h1>
+      <p id="race-lines-details" class="parameter-description"></p>
+      <ul id="race-line-list"></ul>
     </section>
   </aside>
 

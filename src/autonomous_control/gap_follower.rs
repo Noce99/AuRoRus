@@ -255,8 +255,8 @@ impl Executor for GapFollower {
             drawing_topic.write(
                 self.id,
                 Drawing::default()
-                    .element("Closest obstacle", obstacle_shapes)
-                    .element("Gaps", gap_shapes)
+                    .element("Closest obstacle", obstacle_shapes, false)
+                    .element("Gaps", gap_shapes, false)
                     .stale_after(stale_after),
             ).expect("lost writer authorization for the gap follower drawing topic");
             ticker.wait();
