@@ -4,8 +4,8 @@
 # Rate at which [`GapFollower`] publishes a new control, in Hz.
 rate_hz = 50.0
 # Threshold for identifying a far away lidar point, in meters.
-t_m = 5.0
+t_m = 2.2
 # Minimum number of far away point to create a gap, pure number,
 n = 4
 # Bubble radius, pure number.
-b_radius = 100
+b_radius = 80

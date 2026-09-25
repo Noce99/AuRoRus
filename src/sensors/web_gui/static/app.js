@@ -191,36 +191,54 @@ async function pollVehicleModel() {
 // ---------------------------------------------------------------------
 // Autonomous algorithm selection - the list of algorithms comes entirely
 // from the `autonomous_algorithm_status` topic, so a new algorithm shows up
-// here without this page knowing anything about it.
+// here without this page knowing anything about it. The dropdown picks the
+// algorithm; Start and Pause hand control to it and take it back.
 // ---------------------------------------------------------------------
 
 const algorithmSelectEl = document.getElementById("algorithm-select");
 const algorithmDescriptionEl = document.getElementById("algorithm-description");
 const algorithmStatusEl = document.getElementById("algorithm-status");
+const algorithmStartBtn = document.getElementById("algorithm-start-btn");
+const algorithmPauseBtn = document.getElementById("algorithm-pause-btn");
 
-/** `<select>` value standing for "no algorithm" (`name: null` server-side). */
-const NO_ALGORITHM = "";
-
-/** Algorithm the `autonomous_algorithm_status` topic last reported active
- *  (`NO_ALGORITHM` for none), or null before the first poll - tracked
- *  separately from the `<select>`'s own value for the same reason as
- *  `liveVehicleModelKind`. */
+/** Algorithm the `autonomous_algorithm_status` topic last reported selected,
+ *  or null before the first poll - tracked separately from the `<select>`'s
+ *  own value for the same reason as `liveVehicleModelKind`. */
 let liveAlgorithm = null;
+
+/** Whether the selected algorithm was last reported running (not paused). */
+let algorithmRunning = false;
 
 /** `{name, label, description, parameters}` of every algorithm last reported available. */
 let algorithmOptions = [];
 
-async function selectAlgorithm(value) {
+async function selectAlgorithm(name, running) {
   await fetchJSON("/api/autonomous_algorithm_selection", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: value === NO_ALGORITHM ? null : value }),
+    body: JSON.stringify({ name: name || null, running }),
   });
 }
 
 function updateAlgorithmDescription(value) {
   const option = algorithmOptions.find((o) => o.name === value);
-  algorithmDescriptionEl.textContent = option ? option.description : "Human driving only (WASD).";
+  algorithmDescriptionEl.textContent = option ? option.description : "No autonomous algorithm available.";
+}
+
+/** Reflects `algorithmRunning` on the Start/Pause buttons. */
+function updateAlgorithmButtons() {
+  algorithmStartBtn.disabled = algorithmRunning || !algorithmSelectEl.value;
+  algorithmPauseBtn.disabled = !algorithmRunning;
+}
+
+for (const [button, running] of [[algorithmStartBtn, true], [algorithmPauseBtn, false]]) {
+  button.addEventListener("click", () => {
+    algorithmRunning = running; // optimistic; pollAlgorithms confirms it
+    updateAlgorithmButtons();
+    selectAlgorithm(algorithmSelectEl.value, running)
+      .then(() => pollAlgorithms())
+      .catch((err) => console.error(err));
+  });
 }
 
 /** Rebuilds the `<option>`s, but only when the available algorithms actually
@@ -233,10 +251,6 @@ function syncAlgorithmOptions(available) {
   algorithmOptions = available;
   if (unchanged) return;
   algorithmSelectEl.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = NO_ALGORITHM;
-  none.textContent = "None (manual)";
-  algorithmSelectEl.appendChild(none);
   for (const option of available) {
     const el = document.createElement("option");
     el.value = option.name;
@@ -247,42 +261,53 @@ function syncAlgorithmOptions(available) {
   liveAlgorithm = null;
 }
 
+// Switching algorithm keeps the current state: a running one hands control
+// straight to the new pick, a paused one stays paused.
 algorithmSelectEl.addEventListener("change", () => {
   liveAlgorithm = algorithmSelectEl.value; // optimistic; pollAlgorithms confirms it
   updateAlgorithmDescription(algorithmSelectEl.value);
-  selectAlgorithm(algorithmSelectEl.value).catch((err) => console.error(err));
+  selectAlgorithm(algorithmSelectEl.value, algorithmRunning).catch((err) => console.error(err));
 });
 
 // Polls the `autonomous_algorithm_status` topic (via
-// `/api/autonomous_algorithms`): the available algorithms, the one in
-// control (this tab's pick, or another client's), and whether its command
-// is fresh.
+// `/api/autonomous_algorithms`): the available algorithms, the one selected
+// (this tab's pick, or another client's), whether it's running, and whether
+// its command is fresh.
 async function pollAlgorithms() {
   const status = (await fetchJSON("/api/autonomous_algorithms")).value;
   syncAlgorithmOptions(status.available);
 
-  const active = status.active ?? NO_ALGORITHM;
-  if (active !== liveAlgorithm || algorithmSelectEl.value !== active) {
-    liveAlgorithm = active;
-    algorithmSelectEl.value = active;
-    updateAlgorithmDescription(active);
+  // Nothing picked yet (e.g. right after a restart): pick what the dropdown
+  // shows, paused, so there's an algorithm to tune and start.
+  if (status.selected === null && algorithmSelectEl.value) {
+    await selectAlgorithm(algorithmSelectEl.value, false);
+    return;
   }
 
-  const stale = active !== NO_ALGORITHM && !status.command_fresh;
+  const selected = status.selected ?? "";
+  if (selected !== liveAlgorithm || algorithmSelectEl.value !== selected) {
+    liveAlgorithm = selected;
+    algorithmSelectEl.value = selected;
+    updateAlgorithmDescription(selected);
+  }
+  algorithmRunning = status.active !== null;
+  updateAlgorithmButtons();
+
+  const stale = algorithmRunning && !status.command_fresh;
   algorithmStatusEl.classList.toggle("stale", stale);
-  if (active === NO_ALGORITHM) {
-    algorithmStatusEl.textContent = "No algorithm in control.";
+  if (!algorithmRunning) {
+    algorithmStatusEl.textContent = "Paused - only a human drives (WASD).";
   } else if (stale) {
     algorithmStatusEl.textContent = "No recent command from this algorithm - vehicle held stopped.";
   } else {
     algorithmStatusEl.textContent = "In control. Any WASD key overrides it.";
   }
 
-  syncAlgorithmParameters(active);
+  syncAlgorithmParameters(status.selected);
 }
 
 // ---------------------------------------------------------------------
-// Live tuning of the algorithm in control - one slider per parameter it
+// Live tuning of the selected algorithm, running or paused - one slider per parameter it
 // declares in its `AutonomousAlgorithmInfo`. A slider sends the wanted value
 // to `autonomous_parameters`; what it then shows comes back from the
 // algorithm itself (via `autonomous_algorithm_status`), so it always
@@ -290,6 +315,12 @@ async function pollAlgorithms() {
 // ---------------------------------------------------------------------
 
 const algorithmParametersEl = document.getElementById("algorithm-parameters");
+const algorithmSaveEl = document.getElementById("algorithm-save");
+const algorithmSaveBtn = document.getElementById("algorithm-save-btn");
+const algorithmSaveStatusEl = document.getElementById("algorithm-save-status");
+
+/** Algorithm the sliders (and the Save button) are for, or null for none. */
+let parameterRowsAlgorithm = null;
 
 /** After a slider was last moved, polls leave it alone this long - long
  *  enough for the value to reach the algorithm and come back. */
@@ -297,7 +328,7 @@ const PARAMETER_EDIT_GRACE_MS = 1000;
 /** Minimum time between two sends while a slider is being dragged. */
 const PARAMETER_SEND_INTERVAL_MS = 100;
 
-/** What the rendered sliders were built for - the active algorithm and its
+/** What the rendered sliders were built for - the selected algorithm and its
  *  parameters' declarations, without their values - so they're only rebuilt
  *  (losing a drag in progress) when that changes. */
 let parameterRowsKey = null;
@@ -381,16 +412,19 @@ function buildParameterRow(algorithm, parameter) {
   return rowEl;
 }
 
-/** Shows sliders for `active`'s parameters (none if nothing is in control),
+/** Shows sliders for `selected`'s parameters (none if nothing is selected),
  *  refreshing their values from the last poll unless one is being edited. */
-function syncAlgorithmParameters(active) {
-  const parameters = algorithmOptions.find((o) => o.name === active)?.parameters ?? [];
-  const key = JSON.stringify([active, parameters.map(({ value, ...declaration }) => declaration)]);
+function syncAlgorithmParameters(selected) {
+  const parameters = algorithmOptions.find((o) => o.name === selected)?.parameters ?? [];
+  const key = JSON.stringify([selected, parameters.map(({ value, ...declaration }) => declaration)]);
   if (key !== parameterRowsKey) {
     parameterRowsKey = key;
+    parameterRowsAlgorithm = selected;
     parameterRows = new Map();
-    algorithmParametersEl.replaceChildren(...parameters.map((p) => buildParameterRow(active, p)));
+    algorithmParametersEl.replaceChildren(...parameters.map((p) => buildParameterRow(selected, p)));
     algorithmParametersEl.hidden = parameters.length === 0;
+    algorithmSaveEl.hidden = parameters.length === 0;
+    algorithmSaveStatusEl.textContent = "";
   }
 
   const now = performance.now();
@@ -401,6 +435,26 @@ function syncAlgorithmParameters(active) {
     row.valueEl.textContent = formatParameterValue(parameter, parameter.value);
   }
 }
+
+// Saves the values the algorithm currently runs with - what the sliders
+// show once a move has come back - into its config file.
+algorithmSaveBtn.addEventListener("click", async () => {
+  algorithmSaveBtn.disabled = true;
+  algorithmSaveStatusEl.classList.remove("error");
+  try {
+    const { path } = await fetchJSON("/api/autonomous_parameters_save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ algorithm: parameterRowsAlgorithm }),
+    });
+    algorithmSaveStatusEl.textContent = `Saved to ${path} - used from the next restart (R).`;
+  } catch (err) {
+    algorithmSaveStatusEl.classList.add("error");
+    algorithmSaveStatusEl.textContent = `Not saved: ${err.message}`;
+  } finally {
+    algorithmSaveBtn.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------------
 // Mapping panel - drives SLAM through the `slam_command` topic (Play:

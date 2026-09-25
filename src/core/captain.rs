@@ -387,11 +387,14 @@ impl Captain {
     }
 
     /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
-    /// selected to drive - for a computationally heavy algorithm to idle while it isn't. `false` if
-    /// nothing publishes a selection at all.
+    /// selected to drive, and not paused - for a computationally heavy algorithm to idle while it
+    /// isn't. `false` if nothing publishes a selection at all.
     pub fn is_selected_algorithm(&self, name: &str) -> bool {
         self.try_topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
-            .is_some_and(|topic| topic.read().name.as_deref() == Some(name))
+            .is_some_and(|topic| {
+                let selection = topic.read();
+                selection.running && selection.name.as_deref() == Some(name)
+            })
     }
 
     /// Looks up `name`, or registers it - seeded by calling `initial` - the first

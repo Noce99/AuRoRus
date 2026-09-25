@@ -84,10 +84,18 @@
 
     <section id="panel-algorithms" class="panel-section" hidden>
       <h1>Autonomous algorithms</h1>
+      <div id="algorithm-controls">
+        <button type="button" id="algorithm-start-btn" title="Hand control to the selected algorithm">&#9654; Start</button>
+        <button type="button" id="algorithm-pause-btn" title="Take control back - only a human drives">&#10074;&#10074; Pause</button>
+      </div>
       <select id="algorithm-select"></select>
       <p id="algorithm-description"></p>
       <p id="algorithm-status"></p>
       <div id="algorithm-parameters" hidden></div>
+      <div id="algorithm-save" hidden>
+        <button type="button" id="algorithm-save-btn" title="Write these values into the algorithm's config file">Save parameters</button>
+        <p id="algorithm-save-status"></p>
+      </div>
     </section>
 
     <section id="panel-mapping" class="panel-section" hidden>

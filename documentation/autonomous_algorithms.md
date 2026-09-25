@@ -39,15 +39,21 @@ flowchart LR
 - **`AutonomousControlsHandler`** (`src/autonomous_control.rs`) is the only
   writer of `autonomous_vesc_command`. It ticks at 100 Hz. Every tick it:
   1. finds every algorithm by its `autonomous_control_info/` topic;
-  2. reads which one `autonomous_algorithm_selection` names;
+  2. reads which one `autonomous_algorithm_selection` names, and whether
+     it's running or paused;
   3. forwards that algorithm's latest command, or `(0, 0)` (stationary,
-     centered) if nothing is selected or the command is missing or stale;
+     centered) if nothing is selected, it's paused, or the command is
+     missing or stale;
   4. reports what it did on `autonomous_algorithm_status`.
 - **`WebGui`** only knows the generic selection and status topics. Its
   "Autonomous Algos" panel builds the dropdown from
   `autonomous_algorithm_status`, so a new algorithm appears there
-  automatically. The same goes for the sliders of the algorithm in
-  control's parameters (see [Live parameter tuning](#live-parameter-tuning)).
+  automatically. The same goes for the sliders of the selected algorithm's
+  parameters (see [Live parameter tuning](#live-parameter-tuning)). The
+  dropdown only picks the algorithm: **Start** hands control to it and
+  **Pause** takes control back. Switching algorithms while running hands
+  control straight to the new one, and switching while paused keeps it
+  paused.
 - **`build.rs`** scans `src/autonomous_control/*.rs` at compile time. It
   generates one `mod` per file plus `autonomous_control::all()`, which returns
   one executor per file. `web_gui`'s `main.rs` adds everything `all()`
@@ -57,7 +63,7 @@ flowchart LR
 
 | Situation | What the vehicle does |
 |---|---|
-| No algorithm selected ("None (manual)") | Autonomous command is `(0, 0)`: only a human drives |
+| Paused, or no algorithm selected | Autonomous command is `(0, 0)`: only a human drives |
 | Selected algorithm never wrote a command | `(0, 0)` |
 | Selected algorithm's command older than **1 s** (`VESC_COMMAND_TIMEOUT`) | `(0, 0)`; the UI shows a warning |
 | A WASD key is held (human command fresh and non-zero) | **The human always overrides** the autonomous command |
@@ -66,7 +72,7 @@ flowchart LR
 The human override is decided in `SimulatedVehicle` (`select_command`). The
 page re-sends `(0, 0)` every 250 ms even when no key is held, so "the human is
 driving" means that a fresh, non-zero command is coming in. To stop the car
-for good, select "None (manual)".
+for good, press **Pause**.
 
 ## Topics
 
@@ -75,8 +81,8 @@ for good, select "None (manual)".
 | `autonomous_control/<name>` | `VescCommand` | the algorithm | What the algorithm wants |
 | `autonomous_control_info/<name>` | `AutonomousAlgorithmInfo` | the algorithm | Label, description, and tunable parameters with their current values |
 | `autonomous_parameters` | `AutonomousParameters` | `WebGui` | Wanted parameter values, per algorithm |
-| `autonomous_algorithm_selection` | `AutonomousAlgorithmSelection` | `WebGui` | Which algorithm should drive (`null` for none) |
-| `autonomous_algorithm_status` | `AutonomousAlgorithmStatus` | handler | Available algorithms, the active one, whether its command is fresh |
+| `autonomous_algorithm_selection` | `AutonomousAlgorithmSelection` | `WebGui` | Which algorithm is picked (`null` for none), and whether it's running or paused |
+| `autonomous_algorithm_status` | `AutonomousAlgorithmStatus` | handler | Available algorithms, the selected one, the active one (selected and running), whether its command is fresh |
 | `autonomous_vesc_command` | `VescCommand` | handler | The autonomous command the vehicle follows |
 | `vehicle_limits` | `ActuatorLimits` | `SimulatedVehicle` | Max steering angle and rate, max speed, accel and decel |
 
@@ -191,8 +197,8 @@ Open the UI, go to **Autonomous Algos**, and pick the new algorithm.
 ## Live parameter tuning
 
 An algorithm can let `web_gui` tune its parameters while it runs. When it's
-the algorithm in control, the "Autonomous Algos" panel shows one slider per
-parameter.
+the selected algorithm (running or paused), the "Autonomous Algos" panel
+shows one slider per parameter, plus a **Save parameters** button.
 
 ```mermaid
 sequenceDiagram
@@ -243,13 +249,23 @@ sequenceDiagram
   well above 1 Hz, or every command is stale (`VESC_COMMAND_TIMEOUT`).
 - **The UI shows what's in effect.** Sliders follow the values the
   algorithm reports, not what was sent, so a clamped value snaps back.
-- **Only the algorithm in control can be tuned.** `WebGui` rejects anything
-  else.
+- **Only the selected algorithm can be tuned,** whether it's running or
+  paused. Pausing it makes tuning safe: the car stays stopped while you
+  change values. `WebGui` rejects any other algorithm.
 - **`autonomous_parameters` holds the whole wanted state,** not single
   changes. Topics keep only their latest value, so two slider moves between
   two algorithm ticks would otherwise overwrite each other.
-- **A restart (R) resets every parameter** to its TOML value. A `--debug`
-  recording captures every change, since both topics are recorded.
+- **Save parameters writes the values in effect into the TOML file**
+  (`config/autonomous_control/<name>.toml`, relative to the working
+  directory, see `autonomous_control::save_parameters`). Only the tuned
+  keys' values change: comments, other keys, and layout stay as they were.
+  Load the config with `autonomous_control::load_config(name)` in `new()`,
+  as `gap_follower.rs` does. The file is then read at runtime, so a saved
+  value applies from the next restart (R). If the file can't be read, the
+  compiled-in `Default` is used.
+- **A restart (R) resets every unsaved parameter** to its TOML value. A
+  `--debug` recording captures every change, since both topics are
+  recorded.
 
 ## Conventions and pitfalls
 
@@ -281,6 +297,6 @@ sequenceDiagram
 | `src/autonomous_control/*.rs` | One algorithm per file |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
 | `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
-| `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes |
-| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter` |
+| `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `load_config`/`save_parameters` |
+| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter`, `POST /api/autonomous_parameters_save` |
 | `src/bin/web_gui/main.rs` | Adds the handler and every algorithm from `all()` |

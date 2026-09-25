@@ -69,6 +69,9 @@ pub fn handle(
         (Method::Post, "/api/autonomous_parameter") => {
             live_api::set_autonomous_parameter(&mut request, captain, writer_id)
         }
+        (Method::Post, "/api/autonomous_parameters_save") => {
+            live_api::save_autonomous_parameters(&mut request, captain)
+        }
         (Method::Post, "/api/restart") => live_api::restart(captain),
         (Method::Post, "/api/place_at_start") => live_api::place_at_start(captain, writer_id),
         (Method::Get, "/api/slam") => live_api::slam(captain),

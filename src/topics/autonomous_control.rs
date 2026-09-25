@@ -188,12 +188,16 @@ pub struct AutonomousParameters {
     pub values: BTreeMap<String, BTreeMap<String, f64>>,
 }
 
-/// Which algorithm a driver of the selection (e.g. `web_gui`) wants in
-/// control, by its name (the part of its topics' names after the prefix) -
-/// or `None` for no autonomous control at all, only a human driver.
+/// Which algorithm a driver of the selection (e.g. `web_gui`) has picked,
+/// by its name (the part of its topics' names after the prefix), and
+/// whether it should actually drive - paused, or with nothing picked,
+/// there's no autonomous control at all, only a human driver.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AutonomousAlgorithmSelection {
+    /// The algorithm picked, or `None` if none is yet.
     pub name: Option<String>,
+    /// Whether `name` is in control (started) rather than paused.
+    pub running: bool,
 }
 
 /// One algorithm [`crate::autonomous_control::AutonomousControlsHandler`]
@@ -211,8 +215,11 @@ pub struct AvailableAlgorithm {
 /// currently doing, so a driver of the selection can reflect it.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AutonomousAlgorithmStatus {
-    /// The algorithm whose command is being forwarded, or `None` if nothing
-    /// is selected (or the selection names no known algorithm).
+    /// The algorithm picked, running or paused, or `None` if nothing is
+    /// picked (or the selection names no known algorithm).
+    pub selected: Option<String>,
+    /// The algorithm whose command is being forwarded: `selected` while it's
+    /// running, `None` while it's paused.
     pub active: Option<String>,
     /// Every algorithm found, sorted by name.
     pub available: Vec<AvailableAlgorithm>,

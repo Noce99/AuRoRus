@@ -133,6 +133,28 @@
   accent-color: #3f6dc9;
 }
 
+#algorithm-save {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#algorithm-save[hidden] {
+  display: none;
+}
+
+#algorithm-save-status {
+  margin: 0;
+  font-size: 12px;
+  color: #9aa4b2;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+#algorithm-save-status.error {
+  color: #f59e0b;
+}
+
 .parameter-description {
   margin: 0;
   font-size: 12px;
@@ -159,12 +181,14 @@
   color: #f59e0b;
 }
 
-#slam-controls {
+#slam-controls,
+#algorithm-controls {
   display: flex;
   gap: 8px;
 }
 
-#slam-controls button {
+#slam-controls button,
+#algorithm-controls button {
   flex: 1 1 0;
 }
 

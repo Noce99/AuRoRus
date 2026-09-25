@@ -11,16 +11,17 @@
 
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
+use crate::autonomous_control;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
-    AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME,
-    MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SLAM_COMMAND_TOPIC_NAME,
-    SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamState, SlamStatus,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
-    VehicleModelSelection, VehicleModelStatus, VescCommand,
+    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmSelection,
+    AutonomousAlgorithmStatus, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
+    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand,
+    SlamState, SlamStatus, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
-use crate::web::{bad_request, json_response, read_json};
+use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, WriteMeta};
 use std::path::Path;
 use std::sync::Mutex;
@@ -258,13 +259,16 @@ pub fn autonomous_algorithms(captain: &Captain) -> ResponseBox {
 #[derive(serde::Deserialize)]
 struct SelectAutonomousAlgorithmBody {
     name: Option<String>,
+    running: bool,
 }
 
-/// `POST /api/autonomous_algorithm_selection` - body `{"name": "..."}`, or
-/// `{"name": null}` for none - writes the wanted algorithm to
+/// `POST /api/autonomous_algorithm_selection` - body `{"name": "...",
+/// "running": true}` (`false` to pause it; `"name": null` for none) - writes
+/// the wanted algorithm, and whether it should drive, to
 /// `autonomous_algorithm_selection`, for
 /// [`crate::autonomous_control::AutonomousControlsHandler`] to pick up.
-/// Rejects a name the handler hasn't listed as available.
+/// Rejects a name the handler hasn't listed as available, and running with
+/// no algorithm.
 pub fn select_autonomous_algorithm(
     request: &mut Request,
     captain: &Captain,
@@ -275,6 +279,9 @@ pub fn select_autonomous_algorithm(
         Err(response) => return response,
     };
 
+    if body.running && body.name.is_none() {
+        return bad_request("can't run without an algorithm");
+    }
     if let Some(name) = &body.name {
         let known = captain
             .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
@@ -292,7 +299,13 @@ pub fn select_autonomous_algorithm(
 
     captain
         .topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
-        .write(writer_id, AutonomousAlgorithmSelection { name: body.name })
+        .write(
+            writer_id,
+            AutonomousAlgorithmSelection {
+                name: body.name,
+                running: body.running,
+            },
+        )
         .expect("lost writer authorization for the autonomous_algorithm_selection topic");
     json_response(&(), 200)
 }
@@ -314,7 +327,8 @@ static AUTONOMOUS_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
 /// `autonomous_parameters`, for that algorithm to apply (see
 /// [`crate::autonomous_control::ParameterTuner`]), which reports the value
 /// it actually runs with in `autonomous_algorithm_status`. Only the
-/// algorithm in control can be tuned, and only by a parameter it declared.
+/// selected algorithm (running or paused) can be tuned, and only by a
+/// parameter it declared.
 pub fn set_autonomous_parameter(
     request: &mut Request,
     captain: &Captain,
@@ -328,25 +342,14 @@ pub fn set_autonomous_parameter(
         return bad_request("value must be a finite number");
     }
 
-    let Some(status) = captain
-        .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
-        .map(|topic| topic.read().into_value())
-    else {
-        return bad_request("no autonomous algorithms are running");
+    let parameters = match selected_parameters(captain, &body.algorithm) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
     };
-    if status.active.as_ref() != Some(&body.algorithm) {
-        return bad_request(&format!(
-            "{:?} isn't the algorithm in control - only that one can be tuned",
-            body.algorithm
-        ));
-    }
-    let declared = status
-        .available
+    if !parameters
         .iter()
-        .filter(|algorithm| algorithm.name == body.algorithm)
-        .flat_map(|algorithm| &algorithm.parameters)
-        .any(|parameter| parameter.name == body.name);
-    if !declared {
+        .any(|parameter| parameter.name == body.name)
+    {
         return bad_request(&format!(
             "{:?} has no tunable parameter {:?}",
             body.algorithm, body.name
@@ -367,6 +370,69 @@ pub fn set_autonomous_parameter(
         .write(writer_id, parameters)
         .expect("lost writer authorization for the autonomous_parameters topic");
     json_response(&(), 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SaveAutonomousParametersBody {
+    algorithm: String,
+}
+
+#[derive(serde::Serialize)]
+struct SavedParameters {
+    path: String,
+}
+
+/// `POST /api/autonomous_parameters_save` - body `{"algorithm": "..."}` -
+/// writes the parameter values the selected algorithm currently runs with
+/// (as reported in `autonomous_algorithm_status`) into its config file,
+/// keeping the file's comments - see
+/// [`crate::autonomous_control::save_parameters`]. They're used from the
+/// next restart on. Responds with the file's path.
+pub fn save_autonomous_parameters(request: &mut Request, captain: &Captain) -> ResponseBox {
+    let body: SaveAutonomousParametersBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let parameters = match selected_parameters(captain, &body.algorithm) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
+    };
+    if parameters.is_empty() {
+        return bad_request(&format!("{:?} has no tunable parameters", body.algorithm));
+    }
+    match autonomous_control::save_parameters(&body.algorithm, &parameters) {
+        Ok(path) => json_response(
+            &SavedParameters {
+                path: path.display().to_string(),
+            },
+            200,
+        ),
+        Err(err) => error_response(500, &err),
+    }
+}
+
+/// `algorithm`'s tunable parameters, with the values it currently runs
+/// with - or a `400` response if it isn't the selected algorithm (running
+/// or paused), the only one that can be tuned or saved.
+fn selected_parameters(
+    captain: &Captain,
+    algorithm: &str,
+) -> Result<Vec<AlgorithmParameter>, ResponseBox> {
+    let status = captain
+        .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
+        .map(|topic| topic.read().into_value())
+        .unwrap_or_default();
+    if status.selected.as_deref() != Some(algorithm) {
+        return Err(bad_request(&format!(
+            "{algorithm:?} isn't the selected algorithm - only that one can be tuned"
+        )));
+    }
+    Ok(status
+        .available
+        .into_iter()
+        .find(|available| available.name == algorithm)
+        .map(|available| available.parameters)
+        .unwrap_or_default())
 }
 
 /// `POST /api/restart` - asks the runner to kill every executor and bring

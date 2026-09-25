@@ -43,13 +43,15 @@ use crate::topics::{
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter,
     AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
-    AutonomousParameters, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
+    AutonomousParameters, AvailableAlgorithm, ParameterKind, VESC_COMMAND_TIMEOUT, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 include!(concat!(env!("OUT_DIR"), "/autonomous_algorithms.rs"));
 
@@ -193,6 +195,107 @@ impl ParameterTuner {
     }
 }
 
+/// Where the algorithm called `name` keeps its config:
+/// `config/autonomous_control/<name>.toml`, relative to the working
+/// directory - read by [`load_config`], rewritten by [`save_parameters`].
+pub fn config_path(name: &str) -> PathBuf {
+    Path::new(crate::config::DEFAULT_CONFIG_ROOT)
+        .join("autonomous_control")
+        .join(format!("{name}.toml"))
+}
+
+/// The algorithm called `name`'s config, read from [`config_path`] when the
+/// algorithm is built - so values saved from the UI apply on the next
+/// restart - or `C::default()` if it can't be read (e.g. when run from
+/// another directory).
+pub fn load_config<C: DeserializeOwned + Default>(name: &str) -> C {
+    crate::config::load(&config_path(name)).unwrap_or_else(|err| {
+        eprintln!("{name}: {err} - using the built-in defaults");
+        C::default()
+    })
+}
+
+/// Writes `parameters`' values into the algorithm called `name`'s config
+/// file ([`config_path`]), leaving everything else in it - comments, other
+/// keys, layout - untouched. Returns the file's path.
+pub fn save_parameters(name: &str, parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
+    let path = config_path(name);
+    let text =
+        fs::read_to_string(&path).map_err(|err| format!("failed to read {path:?}: {err}"))?;
+    let values: Vec<(&str, String)> = parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), toml_value(parameter)))
+        .collect();
+    let updated = set_toml_values(&text, &values).map_err(|err| format!("{path:?}: {err}"))?;
+    updated
+        .parse::<toml::Table>()
+        .map_err(|err| format!("{path:?} would no longer parse, not saved: {err}"))?;
+    // Written aside then renamed over, so a failure never leaves it half-written.
+    let temporary = path.with_extension("toml.tmp");
+    fs::write(&temporary, updated)
+        .and_then(|()| fs::rename(&temporary, &path))
+        .map_err(|err| format!("failed to write {path:?}: {err}"))?;
+    Ok(path)
+}
+
+/// `parameter`'s value as TOML: an integer for an [`ParameterKind::Int`],
+/// otherwise a float with as many decimals as its step has (at least one,
+/// so it stays a TOML float) - `3.3`, not the `3.299999952316284` an `f32`
+/// field reads back as.
+fn toml_value(parameter: &AlgorithmParameter) -> String {
+    match parameter.kind {
+        ParameterKind::Int { .. } => format!("{}", parameter.value.round() as i64),
+        ParameterKind::Float { step, .. } => {
+            let decimals = (0..9)
+                .find(|&decimals| {
+                    let scaled = step * 10f64.powi(decimals);
+                    (scaled - scaled.round()).abs() < 1e-6
+                })
+                .unwrap_or(9)
+                .max(1) as usize;
+            format!("{:.*}", decimals, parameter.value)
+        }
+    }
+}
+
+/// `text` (a TOML file) with the value of each top-level `key = value` line
+/// named in `values` replaced, keeping its indentation, trailing comment,
+/// and line ending. Only flat numeric values are expected - every
+/// algorithm config is a flat list of them. Fails if a key isn't found.
+fn set_toml_values(text: &str, values: &[(&str, String)]) -> Result<String, String> {
+    let mut missing: Vec<&str> = values.iter().map(|&(key, _)| key).collect();
+    let mut in_table = false;
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        in_table |= line.trim_start().starts_with('[');
+        match replace_value(line, values).filter(|_| !in_table) {
+            Some((key, replaced)) => {
+                missing.retain(|&missing_key| missing_key != key);
+                out.push_str(&replaced);
+            }
+            None => out.push_str(line),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!("no top-level `{}` to set", missing.join("`, `")));
+    }
+    Ok(out)
+}
+
+/// `line` with its value replaced, if it's a `key = value` line for one of
+/// `values` - see [`set_toml_values`].
+fn replace_value<'a>(line: &str, values: &[(&'a str, String)]) -> Option<(&'a str, String)> {
+    let (lhs, rhs) = line.split_once('=')?;
+    let (key, value) = values.iter().find(|(key, _)| *key == lhs.trim())?;
+    // A number holds no '#', so one after the '=' starts a trailing comment.
+    let value_end = rhs
+        .find('#')
+        .unwrap_or_else(|| rhs.trim_end_matches(['\n', '\r']).len());
+    let (old, rest) = rhs.split_at(value_end);
+    let spacing = &old[old.trim_end().len()..];
+    Some((key, format!("{lhs}= {value}{spacing}{rest}")))
+}
+
 /// Sets every field of `config` named in both `parameters` and `wanted` to
 /// its wanted value, sanitized - see [`ParameterTuner::update`]. Returns
 /// whether anything changed.
@@ -267,13 +370,16 @@ impl Executor for AutonomousControlsHandler {
             let available = discover(captain);
             // Nothing may publish a selection at all (e.g. a binary without
             // `web_gui`) - then nothing is ever selected.
-            let selected = captain
+            let selection = captain
                 .try_topic::<AutonomousAlgorithmSelection>(
                     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,
                 )
-                .and_then(|topic| topic.read().into_value().name);
-            let active =
-                selected.filter(|name| available.iter().any(|algorithm| &algorithm.name == name));
+                .map(|topic| topic.read().into_value())
+                .unwrap_or_default();
+            let selected = selection
+                .name
+                .filter(|name| available.iter().any(|algorithm| &algorithm.name == name));
+            let active = selected.clone().filter(|_| selection.running);
             let command = active.as_ref().and_then(|name| {
                 captain
                     .try_topic::<VescCommand>(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"))
@@ -286,6 +392,7 @@ impl Executor for AutonomousControlsHandler {
                 .expect("lost writer authorization for the autonomous_vesc_command topic");
 
             let status = AutonomousAlgorithmStatus {
+                selected,
                 active,
                 available,
                 command_fresh,
@@ -410,6 +517,44 @@ mod tests {
             &wanted(&[("rate_hz", 50.0), ("radius", 10.0)])
         ));
         assert_eq!(config, self::config());
+    }
+
+    #[test]
+    fn saved_values_keep_the_rest_of_the_file() {
+        let text =
+            "# Header\n\n# Rate, in Hz.\nrate_hz = 50.0\nradius=100  # points\r\nother = 1\n";
+        let values = [
+            ("rate_hz", "20.0".to_string()),
+            ("radius", "30".to_string()),
+        ];
+        assert_eq!(
+            set_toml_values(text, &values).unwrap(),
+            "# Header\n\n# Rate, in Hz.\nrate_hz = 20.0\nradius= 30  # points\r\nother = 1\n"
+        );
+    }
+
+    #[test]
+    fn saving_fails_on_a_missing_or_nested_key() {
+        let text = "rate_hz = 50.0\n[table]\nradius = 3\n";
+        let values = [("rate_hz", "1.0".to_string()), ("radius", "4".to_string())];
+        assert_eq!(
+            set_toml_values(text, &values),
+            Err("no top-level `radius` to set".to_string())
+        );
+    }
+
+    #[test]
+    fn saved_values_are_formatted_by_kind() {
+        let value =
+            |parameter: AlgorithmParameter, value| AlgorithmParameter { value, ..parameter };
+        let float = AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1);
+        assert_eq!(toml_value(&value(float, 3.299999952316284)), "3.3");
+        let whole = AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0);
+        assert_eq!(toml_value(&value(whole, 50.0)), "50.0");
+        let fine = AlgorithmParameter::float("k", 0.0, 1.0, 0.025);
+        assert_eq!(toml_value(&value(fine, 0.125)), "0.125");
+        let int = AlgorithmParameter::int("radius", 0, 100, 1);
+        assert_eq!(toml_value(&value(int, 43.0)), "43");
     }
 
     #[test]

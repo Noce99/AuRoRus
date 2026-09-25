@@ -1,7 +1,7 @@
 //! This file implement the Gap Follower algorithm as presented in the
 //! f1tenth documentation: https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html
 
-use crate::autonomous_control::ParameterTuner;
+use crate::autonomous_control::{ParameterTuner, load_config};
 use crate::topics::{AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, Shape, Color, VescCommand};
 // use crate::topics::{VEHICLE_LIMITS_TOPIC_NAME, ActuatorLimits};
 use crate::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
@@ -15,13 +15,13 @@ pub fn new(name: &str) -> Box<dyn Executor> {
     Box::new(GapFollower {
         id: 0,
         name: name.to_string(),
-        config: GapFollowerConfig::default(),
+        config: load_config(name),
     })
 }
 
 /// Every tunable parameter [`GapFollower`] needs - loaded from
-/// `config/autonomous_control/gap_follower.toml` (see [`Default`]) or from an arbitrary
-/// path via [`crate::config::load`]. Every field can also be tuned live - see
+/// `config/autonomous_control/gap_follower.toml` at runtime (see [`load_config`]), falling back
+/// to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GapFollowerConfig {
