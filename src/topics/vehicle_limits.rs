@@ -1,7 +1,10 @@
 //! The [`ActuatorLimits`] topic: the physical limits of the vehicle's
 //! actuators, published by whatever drives them (e.g.
 //! [`crate::actuators::SimulatedVehicle`]) so an autonomous algorithm can
-//! command, say, full steering lock without hardcoding what that is.
+//! command, say, full steering lock without hardcoding what that is. They
+//! can be tuned live, so a reader should reread it rather than cache it.
+
+use super::AlgorithmParameter;
 
 /// Name of the topic [`ActuatorLimits`] is published on.
 pub const VEHICLE_LIMITS_TOPIC_NAME: &str = "vehicle_limits";
@@ -30,6 +33,28 @@ pub struct ActuatorLimits {
 }
 
 impl ActuatorLimits {
+    /// The live-tunable limits, one per field - see
+    /// [`crate::actuators::SimulatedVehicle`].
+    pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+        vec![
+            AlgorithmParameter::float("max_steering_angle_rad", 0.05, 1.0, 0.01)
+                .unit("rad")
+                .description("Largest steering angle the servo can hold, either way."),
+            AlgorithmParameter::float("max_steering_rate_rad_s", 0.5, 20.0, 0.1)
+                .unit("rad/s")
+                .description("Fastest the steering angle can change."),
+            AlgorithmParameter::float("max_speed_mps", 0.5, 20.0, 0.1)
+                .unit("m/s")
+                .description("Largest speed the vehicle can be commanded to, reverse included."),
+            AlgorithmParameter::float("max_accel_mps2", 0.5, 30.0, 0.1)
+                .unit("m/s²")
+                .description("Largest forward acceleration the motor can produce."),
+            AlgorithmParameter::float("max_decel_mps2", 0.5, 30.0, 0.1)
+                .unit("m/s²")
+                .description("Largest deceleration (braking) the motor can produce."),
+        ]
+    }
+
     /// Basic sanity checks on the limit values.
     pub fn validate(&self) -> Result<(), String> {
         if self.max_steering_angle_rad <= 0.0 {

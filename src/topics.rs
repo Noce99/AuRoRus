@@ -36,7 +36,8 @@ pub use slam::{
 pub use start_state::{START_STATE_TOPIC_NAME, StartState};
 pub use vehicle_limits::{ActuatorLimits, VEHICLE_LIMITS_TOPIC_NAME};
 pub use vehicle_model::{
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
     VehicleModelSelection, VehicleModelStatus,
 };
 pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};

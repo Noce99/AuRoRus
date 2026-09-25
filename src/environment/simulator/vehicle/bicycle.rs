@@ -7,6 +7,9 @@
 //! implementation. [`step`] is the entry point a simulation environment's
 //! tick loop is expected to call once per tick.
 
+use super::tunable;
+use crate::topics::AlgorithmParameter;
+
 /// Kinematic state of the bicycle model at one instant: position of the
 /// vehicle's center of gravity (CG), heading, and forward speed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,7 +34,7 @@ pub struct BicycleState {
 /// `lf_m`/`lr_m` describe a specific vehicle's real geometry - silently
 /// defaulting them would silently produce a physically wrong trajectory
 /// with no signal that anything is off. Callers must state them explicitly.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BicycleParams {
     /// Distance from the CG to the front axle, in meters.
     pub lf_m: f64,
@@ -40,6 +43,12 @@ pub struct BicycleParams {
 }
 
 impl BicycleParams {
+    /// The live-tunable parameters, one per field - see
+    /// [`crate::actuators::SimulatedVehicle`].
+    pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+        vec![tunable::lf_m(), tunable::lr_m()]
+    }
+
     /// Basic sanity checks on the parameter values.
     pub fn validate(&self) -> Result<(), String> {
         if self.lf_m <= 0.0 {

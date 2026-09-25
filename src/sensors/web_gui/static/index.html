@@ -65,6 +65,20 @@
       <h1>Vehicle model</h1>
       <select id="vehicle-model-select"></select>
       <p id="vehicle-model-description"></p>
+      <div id="vehicle-model-parameters" class="parameter-list" hidden></div>
+      <div id="vehicle-model-save" class="parameter-save" hidden>
+        <button type="button" id="vehicle-model-save-btn" class="parameter-save-btn" title="Write these values into the vehicle's config file">Save parameters</button>
+        <button type="button" id="vehicle-model-load-btn" class="parameter-load-btn" title="Run with the values in the vehicle's config file again, dropping unsaved changes">Load from file</button>
+        <p id="vehicle-model-save-status"></p>
+      </div>
+      <h2 class="parameter-group-title">Actuator limits</h2>
+      <p class="parameter-description">Shared by every vehicle model.</p>
+      <div id="vehicle-limits-parameters" class="parameter-list" hidden></div>
+      <div id="vehicle-limits-save" class="parameter-save" hidden>
+        <button type="button" id="vehicle-limits-save-btn" class="parameter-save-btn" title="Write these limits into the vehicle's config file">Save limits</button>
+        <button type="button" id="vehicle-limits-load-btn" class="parameter-load-btn" title="Run with the limits in the vehicle's config file again, dropping unsaved changes">Load from file</button>
+        <p id="vehicle-limits-save-status"></p>
+      </div>
     </section>
 
     <section id="panel-topics" class="panel-section" hidden>
@@ -91,9 +105,10 @@
       <select id="algorithm-select"></select>
       <p id="algorithm-description"></p>
       <p id="algorithm-status"></p>
-      <div id="algorithm-parameters" hidden></div>
-      <div id="algorithm-save" hidden>
-        <button type="button" id="algorithm-save-btn" title="Write these values into the algorithm's config file">Save parameters</button>
+      <div id="algorithm-parameters" class="parameter-list" hidden></div>
+      <div id="algorithm-save" class="parameter-save" hidden>
+        <button type="button" id="algorithm-save-btn" class="parameter-save-btn" title="Write these values into the algorithm's config file">Save parameters</button>
+        <button type="button" id="algorithm-load-btn" class="parameter-load-btn" title="Run with the values in the algorithm's config file again, dropping unsaved changes">Load from file</button>
         <p id="algorithm-save-status"></p>
       </div>
     </section>

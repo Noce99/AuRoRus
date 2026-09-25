@@ -6,8 +6,9 @@
 //! [`VEHICLE_LIMITS_TOPIC_NAME`]. Also watches
 //! [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a live model switch (e.g. from
 //! `web_gui`), publishing the currently running model on
-//! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`], and draws the vehicle on its own
-//! drawing topic (see [`crate::topics::Drawing`]).
+//! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`] (along with its live-tunable
+//! parameters, applied from [`VEHICLE_MODEL_PARAMETERS_TOPIC_NAME`]), and
+//! draws the vehicle on its own drawing topic (see [`crate::topics::Drawing`]).
 
 use crate::environment::simulator::vehicle::{
     BicycleParams, BicycleState, DynamicParams, DynamicState, NonlinearBicycleState,
@@ -16,14 +17,18 @@ use crate::environment::simulator::vehicle::{
 };
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, Color, Drawing, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, Shape, StartState,
-    VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelSelection,
-    VehicleModelStatus, VehicleStatus, VescCommand,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
+    START_STATE_TOPIC_NAME, Shape, StartState, VEHICLE_LIMITS_TOPIC_NAME,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
+    VehicleModelKind, VehicleModelParameters, VehicleModelSelection, VehicleModelStatus,
+    VehicleStatus, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// Which vehicle model [`SimulatedVehicle`] should run, and the geometry and
 /// actuator limits it needs to do so. A plain `enum` (rather than a trait)
@@ -244,6 +249,129 @@ pub fn default_model(kind: VehicleModelKind, config: &SimulatedVehicleConfig) ->
             limits: config.limits,
         },
     }
+}
+
+/// Where [`SimulatedVehicle`]'s config lives:
+/// `config/actuators/simulated_vehicle.toml`, relative to the working
+/// directory - rewritten by [`save_parameters`], and reread on a restart.
+pub fn config_path() -> PathBuf {
+    Path::new(crate::config::DEFAULT_CONFIG_ROOT)
+        .join("actuators")
+        .join("simulated_vehicle.toml")
+}
+
+/// `kind`'s live-tunable parameters, with the values `config` holds for it.
+fn tunable_parameters(
+    kind: VehicleModelKind,
+    config: &SimulatedVehicleConfig,
+) -> Vec<AlgorithmParameter> {
+    fn with_values(
+        mut parameters: Vec<AlgorithmParameter>,
+        params: &impl serde::Serialize,
+    ) -> Vec<AlgorithmParameter> {
+        crate::config::refresh_parameter_values(&mut parameters, params);
+        parameters
+    }
+    match kind {
+        VehicleModelKind::Bicycle => {
+            with_values(BicycleParams::tunable_parameters(), &config.bicycle)
+        }
+        VehicleModelKind::DynamicBicycle => {
+            with_values(DynamicParams::tunable_parameters(), &config.dynamic_bicycle)
+        }
+        VehicleModelKind::NonlinearBicycle => {
+            with_values(NonlinearTireParams::tunable_parameters(), &config.nonlinear_bicycle)
+        }
+        VehicleModelKind::PacejkaBicycle => {
+            with_values(PacejkaTireParams::tunable_parameters(), &config.pacejka_bicycle)
+        }
+        VehicleModelKind::TwoTrack => {
+            with_values(TwoTrackParams::tunable_parameters(), &config.two_track)
+        }
+    }
+}
+
+/// Applies `wanted` to `kind`'s parameters in `config`, each sanitized (see
+/// [`crate::config::apply_parameters`]). Returns whether anything changed.
+fn apply_wanted(
+    kind: VehicleModelKind,
+    config: &mut SimulatedVehicleConfig,
+    wanted: &BTreeMap<String, f64>,
+) -> bool {
+    use crate::config::apply_parameters as apply;
+    let parameters = tunable_parameters(kind, config);
+    match kind {
+        VehicleModelKind::Bicycle => apply(&mut config.bicycle, &parameters, wanted),
+        VehicleModelKind::DynamicBicycle => apply(&mut config.dynamic_bicycle, &parameters, wanted),
+        VehicleModelKind::NonlinearBicycle => {
+            apply(&mut config.nonlinear_bicycle, &parameters, wanted)
+        }
+        VehicleModelKind::PacejkaBicycle => apply(&mut config.pacejka_bicycle, &parameters, wanted),
+        VehicleModelKind::TwoTrack => apply(&mut config.two_track, &parameters, wanted),
+    }
+}
+
+/// What [`SimulatedVehicle`] publishes on [`VEHICLE_MODEL_STATUS_TOPIC_NAME`]
+/// while running `kind` with `config`.
+fn model_status(kind: VehicleModelKind, config: &SimulatedVehicleConfig) -> VehicleModelStatus {
+    let mut limits = ActuatorLimits::tunable_parameters();
+    crate::config::refresh_parameter_values(&mut limits, &config.limits);
+    VehicleModelStatus {
+        kind,
+        parameters: tunable_parameters(kind, config),
+        limits,
+    }
+}
+
+/// Writes `parameters`' values into `kind`'s `[<kind>]` table of
+/// [`config_path`], leaving everything else in the file - comments, other
+/// tables, layout - untouched. Returns the file's path.
+pub fn save_parameters(
+    kind: VehicleModelKind,
+    parameters: &[AlgorithmParameter],
+) -> Result<PathBuf, String> {
+    save_table(kind.api_str(), parameters)
+}
+
+/// Like [`save_parameters`], for the actuator limits' `[limits]` table.
+pub fn save_limits(parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
+    save_table("limits", parameters)
+}
+
+/// The values `kind`'s `[<kind>]` table of [`config_path`] holds for
+/// `parameters`, by name, and the file's path - e.g. to go back to what was
+/// last saved.
+pub fn saved_values(
+    kind: VehicleModelKind,
+    parameters: &[AlgorithmParameter],
+) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
+    saved_table_values(kind.api_str(), parameters)
+}
+
+/// Like [`saved_values`], for the actuator limits' `[limits]` table.
+pub fn saved_limits(
+    parameters: &[AlgorithmParameter],
+) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
+    saved_table_values("limits", parameters)
+}
+
+fn saved_table_values(
+    table: &str,
+    parameters: &[AlgorithmParameter],
+) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
+    let path = config_path();
+    let names: Vec<&str> = parameters.iter().map(|parameter| parameter.name.as_str()).collect();
+    Ok((crate::config::load_toml_values(&path, Some(table), &names)?, path))
+}
+
+fn save_table(table: &str, parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
+    let path = config_path();
+    let values: Vec<(&str, String)> = parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), crate::config::parameter_toml_value(parameter)))
+        .collect();
+    crate::config::save_toml_values(&path, Some(table), &values)?;
+    Ok(path)
 }
 
 /// Builds a [`VehicleState`] of `kind` from `start`'s shared fields (position,
@@ -565,8 +693,8 @@ impl Executor for SimulatedVehicle {
             self.id,
             VehicleModelStatus::default,
         );
-        // Every model kind shares `config.limits`, so this never changes
-        // after being seeded - nothing needs to write it again.
+        // Every model kind shares `config.limits`, so a model switch never
+        // changes it - only live tuning does, which rewrites it.
         let limits = self.config.limits;
         captain.claim_writer::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME, self.id, move || limits);
         captain.claim_drawing(self.id);
@@ -582,11 +710,23 @@ impl Executor for SimulatedVehicle {
             captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+        // Nothing may publish parameter requests at all (e.g. a binary
+        // without `web_gui`) - then the config stays as loaded.
+        let parameters_topic =
+            captain.try_topic::<VehicleModelParameters>(VEHICLE_MODEL_PARAMETERS_TOPIC_NAME);
+        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
+
+        // Tuned live, so kept apart from `self.config`: a restart rereads the
+        // file (see `fresh`) rather than keeping unsaved values.
+        let mut config = self.config.clone();
+        // `write_count` of the last `VehicleModelParameters` looked at, so an
+        // unchanged request costs one counter read per tick.
+        let mut seen_parameters_write_count = 0;
 
         let mut applied_kind = kind_of(&self.model);
         model_status_topic
-            .write(self.id, VehicleModelStatus { kind: applied_kind })
+            .write(self.id, model_status(applied_kind, &config))
             .expect("lost writer authorization for the vehicle_model_status topic");
 
         let mut applied_start = start_state_topic.read().into_value();
@@ -609,13 +749,42 @@ impl Executor for SimulatedVehicle {
         while captain.is_running(self.id) {
             let wanted_kind = model_selection_topic.read().kind;
             if wanted_kind != applied_kind {
-                self.model = default_model(wanted_kind, &self.config);
+                self.model = default_model(wanted_kind, &config);
                 state = carry_over_state(state, wanted_kind);
                 applied_kind = wanted_kind;
                 previous_body_velocity = None;
                 model_status_topic
-                    .write(self.id, VehicleModelStatus { kind: applied_kind })
+                    .write(self.id, model_status(applied_kind, &config))
                     .expect("lost writer authorization for the vehicle_model_status topic");
+            }
+
+            if let Some(topic) = &parameters_topic
+                && topic.meta().write_count != seen_parameters_write_count
+            {
+                let requests = topic.read();
+                seen_parameters_write_count = requests.meta.write_count;
+                let model_changed = requests
+                    .value
+                    .values
+                    .get(applied_kind.api_str())
+                    .is_some_and(|wanted| apply_wanted(applied_kind, &mut config, wanted));
+                let limits_changed = crate::config::apply_parameters(
+                    &mut config.limits,
+                    &ActuatorLimits::tunable_parameters(),
+                    &requests.value.limits,
+                );
+                if limits_changed {
+                    limits_topic
+                        .write(self.id, config.limits)
+                        .expect("lost writer authorization for the vehicle_limits topic");
+                }
+                if model_changed || limits_changed {
+                    // Same kind, so the state carries over untouched.
+                    self.model = default_model(applied_kind, &config);
+                    model_status_topic
+                        .write(self.id, model_status(applied_kind, &config))
+                        .expect("lost writer authorization for the vehicle_model_status topic");
+                }
             }
 
             let wanted_start = start_state_topic.read().into_value();
@@ -688,11 +857,16 @@ impl Executor for SimulatedVehicle {
         // so a restart resets the vehicle's simulated state (position, velocity,
         // ...) even if the model kind was switched mid-run via
         // `VEHICLE_MODEL_SELECTION_TOPIC_NAME` - only the *kind* carries over.
+        // The config is reread, so parameters saved from the UI apply now.
         let kind = kind_of(&self.model);
+        let config = crate::config::load(&config_path()).unwrap_or_else(|err| {
+            eprintln!("{}: {err} - keeping the config it started with", self.name);
+            self.config.clone()
+        });
         Box::new(SimulatedVehicle::new(
             self.name.clone(),
-            default_model(kind, &self.config),
-            self.config.clone(),
+            default_model(kind, &config),
+            config,
         ))
     }
 }
@@ -862,6 +1036,73 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every kind declares one tunable parameter per field of its params
+    /// (a mismatched name panics in `tunable_parameters`), each starting
+    /// from the checked-in config's value and within its own range - so
+    /// saving untouched values never changes the file.
+    #[test]
+    fn every_kind_declares_a_parameter_per_field_within_range() {
+        let config = SimulatedVehicleConfig::default();
+        for (kind, ..) in VehicleModelKind::ALL {
+            let parameters = tunable_parameters(*kind, &config);
+            let json = match kind {
+                VehicleModelKind::Bicycle => serde_json::to_value(config.bicycle),
+                VehicleModelKind::DynamicBicycle => serde_json::to_value(config.dynamic_bicycle),
+                VehicleModelKind::NonlinearBicycle => {
+                    serde_json::to_value(config.nonlinear_bicycle)
+                }
+                VehicleModelKind::PacejkaBicycle => serde_json::to_value(config.pacejka_bicycle),
+                VehicleModelKind::TwoTrack => serde_json::to_value(config.two_track),
+            }
+            .unwrap();
+            assert_eq!(
+                parameters.len(),
+                json.as_object().unwrap().len(),
+                "{kind:?} doesn't declare every field"
+            );
+            for parameter in &parameters {
+                assert_eq!(
+                    parameter.kind.sanitize(parameter.value),
+                    Some(parameter.value),
+                    "{kind:?}'s {} default is outside its range",
+                    parameter.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn limits_declare_a_parameter_per_field_within_range() {
+        let config = SimulatedVehicleConfig::default();
+        let limits = model_status(VehicleModelKind::Bicycle, &config).limits;
+        let json = serde_json::to_value(config.limits).unwrap();
+        assert_eq!(limits.len(), json.as_object().unwrap().len());
+        for parameter in &limits {
+            assert_eq!(
+                parameter.kind.sanitize(parameter.value),
+                Some(parameter.value),
+                "{}'s default is outside its range",
+                parameter.name
+            );
+        }
+    }
+
+    #[test]
+    fn wanted_values_apply_to_the_running_kind_only() {
+        let mut config = SimulatedVehicleConfig::default();
+        let wanted = BTreeMap::from([("lf_m".to_string(), 0.3), ("mass_kg".to_string(), 99.0)]);
+        assert!(apply_wanted(VehicleModelKind::DynamicBicycle, &mut config, &wanted));
+        assert_eq!(config.dynamic_bicycle.lf_m, 0.3);
+        // Clamped to its range.
+        assert_eq!(config.dynamic_bicycle.mass_kg, 15.0);
+        assert_eq!(config.bicycle, SimulatedVehicleConfig::default().bicycle);
+        assert!(!apply_wanted(VehicleModelKind::DynamicBicycle, &mut config, &wanted));
+
+        let status = model_status(VehicleModelKind::DynamicBicycle, &config);
+        let lf = status.parameters.iter().find(|p| p.name == "lf_m").unwrap();
+        assert_eq!(lf.value, 0.3);
     }
 
     #[test]

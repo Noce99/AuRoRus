@@ -8,6 +8,9 @@
 //! entry point a simulation environment's tick loop is expected to call once
 //! per tick.
 
+use super::tunable;
+use crate::topics::AlgorithmParameter;
+
 /// Dynamic state of the bicycle model at one instant: position of the
 /// vehicle's center of gravity (CG), heading, and body-frame velocity.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +40,7 @@ pub struct DynamicState {
 /// a specific vehicle's real physical properties, and silently defaulting
 /// them would silently produce a physically wrong trajectory with no signal
 /// that anything is off.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DynamicParams {
     /// Vehicle mass, in kilograms.
     pub mass_kg: f64,
@@ -57,6 +60,24 @@ pub struct DynamicParams {
 }
 
 impl DynamicParams {
+    /// The live-tunable parameters, one per field - see
+    /// [`crate::actuators::SimulatedVehicle`].
+    pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+        let cornering_stiffness = |name: &str, axle: &str| {
+            AlgorithmParameter::float(name, 5.0, 300.0, 1.0)
+                .unit("N/rad")
+                .description(format!("{axle} tire cornering stiffness."))
+        };
+        vec![
+            tunable::mass_kg(),
+            tunable::yaw_inertia_kgm2(),
+            tunable::lf_m(),
+            tunable::lr_m(),
+            cornering_stiffness("cf_n_per_rad", "Front"),
+            cornering_stiffness("cr_n_per_rad", "Rear"),
+        ]
+    }
+
     /// Basic sanity checks on the parameter values.
     pub fn validate(&self) -> Result<(), String> {
         if self.mass_kg <= 0.0 {

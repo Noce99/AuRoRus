@@ -19,6 +19,9 @@
 //! the entry point a simulation environment's tick loop is expected to call
 //! once per tick.
 
+use super::tunable;
+use crate::topics::AlgorithmParameter;
+
 /// Standard gravity, in meters/second^2 - used to compute each axle's static
 /// share of the vehicle's weight before any load transfer is applied.
 const GRAVITY_MPS2: f64 = 9.81;
@@ -45,7 +48,7 @@ pub struct TwoTrackState {
 /// describe a specific vehicle's real physical properties, and silently
 /// defaulting them would silently produce a physically wrong trajectory
 /// with no signal that anything is off.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TwoTrackParams {
     /// Vehicle mass, in kilograms.
     pub mass_kg: f64,
@@ -96,6 +99,26 @@ pub struct TwoTrackParams {
 }
 
 impl TwoTrackParams {
+    /// The live-tunable parameters, one per field - see
+    /// [`crate::actuators::SimulatedVehicle`].
+    pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+        let mut parameters = vec![
+            tunable::mass_kg(),
+            tunable::yaw_inertia_kgm2(),
+            tunable::lf_m(),
+            tunable::lr_m(),
+            tunable::cg_height_m(),
+            AlgorithmParameter::float("track_width_m", 0.05, 0.6, 0.01)
+                .unit("m")
+                .description("Distance between the left and right wheels."),
+        ];
+        parameters.extend(tunable::magic_formula("front"));
+        parameters.extend(tunable::magic_formula("rear"));
+        parameters.extend(tunable::combined_slip());
+        parameters.push(tunable::front_drive_fraction());
+        parameters
+    }
+
     /// Basic sanity checks on the parameter values. `front_e`/`rear_e` are
     /// curvature factors meaningful at any real value, so they're left
     /// unconstrained.

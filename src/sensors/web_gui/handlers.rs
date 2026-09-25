@@ -62,6 +62,22 @@ pub fn handle(
         (Method::Post, "/api/vehicle_model_selection") => {
             live_api::select_vehicle_model(&mut request, captain, writer_id)
         }
+        (Method::Post, "/api/vehicle_model_parameter") => {
+            live_api::set_vehicle_model_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/vehicle_model_parameters_save") => {
+            live_api::save_vehicle_model_parameters(&mut request, captain)
+        }
+        (Method::Post, "/api/vehicle_limit") => {
+            live_api::set_vehicle_limit(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/vehicle_limits_save") => live_api::save_vehicle_limits(captain),
+        (Method::Post, "/api/vehicle_model_parameters_load") => {
+            live_api::load_vehicle_model_parameters(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/vehicle_limits_load") => {
+            live_api::load_vehicle_limits(captain, writer_id)
+        }
         (Method::Get, "/api/autonomous_algorithms") => live_api::autonomous_algorithms(captain),
         (Method::Post, "/api/autonomous_algorithm_selection") => {
             live_api::select_autonomous_algorithm(&mut request, captain, writer_id)
@@ -71,6 +87,9 @@ pub fn handle(
         }
         (Method::Post, "/api/autonomous_parameters_save") => {
             live_api::save_autonomous_parameters(&mut request, captain)
+        }
+        (Method::Post, "/api/autonomous_parameters_load") => {
+            live_api::load_autonomous_parameters(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/restart") => live_api::restart(captain),
         (Method::Post, "/api/place_at_start") => live_api::place_at_start(captain, writer_id),

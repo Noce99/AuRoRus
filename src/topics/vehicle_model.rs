@@ -4,11 +4,21 @@
 //! driver of the wanted selection (e.g. `web_gui`) agree on the live model
 //! without either one needing to know how the other decides its defaults.
 //! Mirrors [`crate::topics::MapSelection`]/[`crate::topics::SelectedMap`].
+//!
+//! The running model can also be tuned live, like an autonomous algorithm:
+//! [`VehicleModelStatus`] lists its tunable [`AlgorithmParameter`]s with the
+//! values in effect, and [`crate::actuators::SimulatedVehicle`] applies
+//! whatever [`VehicleModelParameters`] asks for.
+
+use super::AlgorithmParameter;
+use std::collections::BTreeMap;
 
 /// Name of the topic [`VehicleModelSelection`] is published on.
 pub const VEHICLE_MODEL_SELECTION_TOPIC_NAME: &str = "vehicle_model_selection";
 /// Name of the topic [`VehicleModelStatus`] is published on.
 pub const VEHICLE_MODEL_STATUS_TOPIC_NAME: &str = "vehicle_model_status";
+/// Name of the topic [`VehicleModelParameters`] is published on.
+pub const VEHICLE_MODEL_PARAMETERS_TOPIC_NAME: &str = "vehicle_model_parameters";
 
 /// Which vehicle physics model is wanted/running. The concrete model
 /// parameters and actuator limits for each kind live in
@@ -129,9 +139,31 @@ pub struct VehicleModelSelection {
 /// [`crate::actuators::SimulatedVehicle`] so a driver of the selection can
 /// tell what's actually active - e.g. to reflect it in a dropdown on
 /// startup, or after another client changes it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VehicleModelStatus {
     pub kind: VehicleModelKind,
+    /// Every parameter of `kind` that can be tuned while it runs, with the
+    /// value it's currently running with.
+    pub parameters: Vec<AlgorithmParameter>,
+    /// Every actuator limit (see [`crate::topics::ActuatorLimits`]), shared
+    /// by all kinds, with the value currently in effect.
+    pub limits: Vec<AlgorithmParameter>,
+}
+
+/// The parameter values a driver of the selection (e.g. `web_gui`) wants
+/// each vehicle model kind to run with: kind (its
+/// [`VehicleModelKind::api_str`]) -> parameter name -> value. Always the
+/// *whole* wanted state, like [`crate::topics::AutonomousParameters`], so
+/// two changes landing between two reads can't overwrite one another.
+/// [`crate::actuators::SimulatedVehicle`] applies the running kind's entry
+/// (sanitized, see [`crate::topics::ParameterKind::sanitize`]) and reports
+/// the result in [`VehicleModelStatus`].
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VehicleModelParameters {
+    pub values: BTreeMap<String, BTreeMap<String, f64>>,
+    /// Wanted actuator limits, by name - shared by every kind, so applied
+    /// whichever one is running.
+    pub limits: BTreeMap<String, f64>,
 }
 
 #[cfg(test)]

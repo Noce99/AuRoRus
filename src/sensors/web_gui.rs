@@ -27,8 +27,9 @@ use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
     AutonomousAlgorithmSelection, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
     MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
-    SLAM_COMMAND_TOPIC_NAME, SlamCommand, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VehicleModelSelection, VescCommand,
+    SLAM_COMMAND_TOPIC_NAME, SlamCommand, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection,
+    VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
@@ -114,6 +115,11 @@ impl Executor for WebGui {
             VEHICLE_MODEL_SELECTION_TOPIC_NAME,
             self.id,
             VehicleModelSelection::default,
+        );
+        captain.claim_writer::<VehicleModelParameters>(
+            VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+            self.id,
+            VehicleModelParameters::default,
         );
         captain.claim_writer::<AutonomousAlgorithmSelection>(
             AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,

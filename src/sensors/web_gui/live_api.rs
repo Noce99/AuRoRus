@@ -2,24 +2,26 @@
 //! autonomous algorithm are currently selected (the `map`,
 //! `vehicle_model_status`, and `autonomous_algorithm_status` topics), and the
 //! write endpoints a driver uses to steer the vehicle, pick its map, model,
-//! and autonomous algorithm, tune that algorithm, place it at the start
-//! line, and drive SLAM (`map_selection`, `human_vesc_command`,
-//! `vehicle_model_selection`, `autonomous_algorithm_selection`,
-//! `autonomous_parameters`, `place_at_start`, `slam_command`) - as
+//! and autonomous algorithm, tune that model and algorithm, place it at the
+//! start line, and drive SLAM (`map_selection`, `human_vesc_command`,
+//! `vehicle_model_selection`, `vehicle_model_parameters`,
+//! `autonomous_algorithm_selection`, `autonomous_parameters`,
+//! `place_at_start`, `slam_command`) - as
 //! opposed to [`super::maps_api`], which lists/generates map folders on
 //! disk, and [`super::draw_api`], which serves what's drawn on the map.
 
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
-use crate::autonomous_control;
+use crate::{actuators, autonomous_control};
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, ActuatorLimits, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmSelection,
     AutonomousAlgorithmStatus, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
     MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
     PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand,
-    SlamState, SlamStatus, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VescCommand,
+    SlamState, SlamStatus, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
+    VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
 use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, WriteMeta};
@@ -197,10 +199,13 @@ pub fn vehicle_models() -> ResponseBox {
 #[derive(serde::Serialize)]
 struct LiveVehicleModel {
     kind: &'static str,
+    parameters: Vec<AlgorithmParameter>,
+    limits: Vec<AlgorithmParameter>,
 }
 
-/// `GET /api/vehicle_model` - the vehicle model kind currently running, read
-/// from the `vehicle_model_status` topic, as a [`StampedBody`].
+/// `GET /api/vehicle_model` - the vehicle model kind currently running, its
+/// tunable parameters, and the actuator limits, with the values in effect,
+/// read from the `vehicle_model_status` topic, as a [`StampedBody`].
 pub fn vehicle_model(captain: &Captain) -> ResponseBox {
     let status = captain
         .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
@@ -208,6 +213,8 @@ pub fn vehicle_model(captain: &Captain) -> ResponseBox {
     stamped_json(
         &LiveVehicleModel {
             kind: status.kind.api_str(),
+            parameters: status.value.parameters,
+            limits: status.value.limits,
         },
         status.meta,
     )
@@ -240,6 +247,228 @@ pub fn select_vehicle_model(
         .write(writer_id, VehicleModelSelection { kind })
         .expect("lost writer authorization for the vehicle_model_selection topic");
     json_response(&(), 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SetVehicleModelParameterBody {
+    kind: String,
+    name: String,
+    value: f64,
+}
+
+/// Serializes [`set_vehicle_model_parameter`]'s read-modify-write of
+/// `vehicle_model_parameters`, like [`AUTONOMOUS_PARAMETERS_LOCK`].
+static VEHICLE_MODEL_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
+
+/// `POST /api/vehicle_model_parameter` - body `{"kind": "...", "name":
+/// "...", "value": ...}` - sets one parameter's wanted value in
+/// `vehicle_model_parameters`, for [`crate::actuators::SimulatedVehicle`]
+/// to apply, which reports the value it actually runs with in
+/// `vehicle_model_status`. Only the running model can be tuned, and only
+/// by a parameter it declared.
+pub fn set_vehicle_model_parameter(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
+    let body: SetVehicleModelParameterBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    if !body.value.is_finite() {
+        return bad_request("value must be a finite number");
+    }
+
+    let (_, parameters) = match running_model_parameters(captain, &body.kind) {
+        Ok(running) => running,
+        Err(response) => return response,
+    };
+    if !parameters
+        .iter()
+        .any(|parameter| parameter.name == body.name)
+    {
+        return bad_request(&format!(
+            "{:?} has no tunable parameter {:?}",
+            body.kind, body.name
+        ));
+    }
+
+    write_vehicle_parameters(captain, writer_id, |wanted| {
+        wanted
+            .values
+            .entry(body.kind)
+            .or_default()
+            .insert(body.name, body.value);
+    });
+    json_response(&(), 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SaveVehicleModelParametersBody {
+    kind: String,
+}
+
+/// `POST /api/vehicle_model_parameters_save` - body `{"kind": "..."}` -
+/// writes the parameter values the running model currently runs with (as
+/// reported in `vehicle_model_status`) into its `[<kind>]` table of the
+/// vehicle's config file, keeping the rest of the file - see
+/// [`actuators::save_vehicle_model_parameters`]. They're used from the next
+/// restart on. Responds with the file's path.
+pub fn save_vehicle_model_parameters(request: &mut Request, captain: &Captain) -> ResponseBox {
+    let body: SaveVehicleModelParametersBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let (kind, parameters) = match running_model_parameters(captain, &body.kind) {
+        Ok(running) => running,
+        Err(response) => return response,
+    };
+    if parameters.is_empty() {
+        return bad_request(&format!("{:?} has no tunable parameters", body.kind));
+    }
+    match actuators::save_vehicle_model_parameters(kind, &parameters) {
+        Ok(path) => json_response(
+            &SavedParameters {
+                path: path.display().to_string(),
+            },
+            200,
+        ),
+        Err(err) => error_response(500, &err),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SetVehicleLimitBody {
+    name: String,
+    value: f64,
+}
+
+/// `POST /api/vehicle_limit` - body `{"name": "...", "value": ...}` - sets
+/// one actuator limit's wanted value in `vehicle_model_parameters`, for
+/// [`crate::actuators::SimulatedVehicle`] to apply whichever model is
+/// running, which reports the value in effect in `vehicle_model_status` and
+/// republishes `vehicle_limits`.
+pub fn set_vehicle_limit(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+    let body: SetVehicleLimitBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    if !body.value.is_finite() {
+        return bad_request("value must be a finite number");
+    }
+    if !ActuatorLimits::tunable_parameters()
+        .iter()
+        .any(|parameter| parameter.name == body.name)
+    {
+        return bad_request(&format!("no tunable actuator limit {:?}", body.name));
+    }
+
+    write_vehicle_parameters(captain, writer_id, |wanted| {
+        wanted.limits.insert(body.name, body.value);
+    });
+    json_response(&(), 200)
+}
+
+/// `POST /api/vehicle_limits_save` - writes the actuator limits currently in
+/// effect (as reported in `vehicle_model_status`) into the `[limits]` table
+/// of the vehicle's config file, keeping the rest of the file - see
+/// [`actuators::save_vehicle_limits`]. Responds with the file's path.
+pub fn save_vehicle_limits(captain: &Captain) -> ResponseBox {
+    let limits = captain
+        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
+        .read()
+        .into_value()
+        .limits;
+    if limits.is_empty() {
+        return bad_request("no actuator limits reported yet");
+    }
+    match actuators::save_vehicle_limits(&limits) {
+        Ok(path) => json_response(
+            &SavedParameters {
+                path: path.display().to_string(),
+            },
+            200,
+        ),
+        Err(err) => error_response(500, &err),
+    }
+}
+
+/// `POST /api/vehicle_model_parameters_load` - body `{"kind": "..."}` - asks
+/// the running model to run with the values its `[<kind>]` table of the
+/// vehicle's config file holds again, undoing any unsaved tuning, by
+/// writing them to `vehicle_model_parameters` like a slider would. Responds
+/// with the file's path.
+pub fn load_vehicle_model_parameters(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
+    let body: SaveVehicleModelParametersBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let (kind, parameters) = match running_model_parameters(captain, &body.kind) {
+        Ok(running) => running,
+        Err(response) => return response,
+    };
+    let (values, path) = match actuators::saved_vehicle_model_values(kind, &parameters) {
+        Ok(saved) => saved,
+        Err(err) => return error_response(500, &err),
+    };
+    write_vehicle_parameters(captain, writer_id, |wanted| {
+        wanted.values.entry(body.kind).or_default().extend(values);
+    });
+    loaded(&path)
+}
+
+/// `POST /api/vehicle_limits_load` - asks the vehicle to run with the
+/// actuator limits the `[limits]` table of its config file holds again,
+/// undoing any unsaved tuning. Responds with the file's path.
+pub fn load_vehicle_limits(captain: &Captain, writer_id: u8) -> ResponseBox {
+    let (values, path) = match actuators::saved_vehicle_limits(&ActuatorLimits::tunable_parameters())
+    {
+        Ok(saved) => saved,
+        Err(err) => return error_response(500, &err),
+    };
+    write_vehicle_parameters(captain, writer_id, |wanted| wanted.limits.extend(values));
+    loaded(&path)
+}
+
+/// Read-modify-writes `vehicle_model_parameters` with `change`, under
+/// [`VEHICLE_MODEL_PARAMETERS_LOCK`].
+fn write_vehicle_parameters(
+    captain: &Captain,
+    writer_id: u8,
+    change: impl FnOnce(&mut VehicleModelParameters),
+) {
+    let _guard = VEHICLE_MODEL_PARAMETERS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let topic = captain.topic::<VehicleModelParameters>(VEHICLE_MODEL_PARAMETERS_TOPIC_NAME);
+    let mut wanted = topic.read().into_value();
+    change(&mut wanted);
+    topic
+        .write(writer_id, wanted)
+        .expect("lost writer authorization for the vehicle_model_parameters topic");
+}
+
+/// The running vehicle model's kind and tunable parameters, with the values
+/// it currently runs with - or a `400` response if `kind` isn't the running
+/// model, the only one that can be tuned or saved.
+fn running_model_parameters(
+    captain: &Captain,
+    kind: &str,
+) -> Result<(VehicleModelKind, Vec<AlgorithmParameter>), ResponseBox> {
+    let status = captain
+        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
+        .read()
+        .into_value();
+    if status.kind.api_str() != kind {
+        return Err(bad_request(&format!(
+            "{kind:?} isn't the running vehicle model - only that one can be tuned"
+        )));
+    }
+    Ok((status.kind, status.parameters))
 }
 
 /// `GET /api/autonomous_algorithms` - every autonomous algorithm found, the
@@ -409,6 +638,58 @@ pub fn save_autonomous_parameters(request: &mut Request, captain: &Captain) -> R
         ),
         Err(err) => error_response(500, &err),
     }
+}
+
+/// `POST /api/autonomous_parameters_load` - body `{"algorithm": "..."}` -
+/// asks the selected algorithm to run with the values its config file holds
+/// again (see [`autonomous_control::saved_values`]), undoing any unsaved
+/// tuning, by writing them to `autonomous_parameters` like a slider would.
+/// Responds with the file's path.
+pub fn load_autonomous_parameters(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
+    let body: SaveAutonomousParametersBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let parameters = match selected_parameters(captain, &body.algorithm) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
+    };
+    if parameters.is_empty() {
+        return bad_request(&format!("{:?} has no tunable parameters", body.algorithm));
+    }
+    let (values, path) = match autonomous_control::saved_values(&body.algorithm, &parameters) {
+        Ok(saved) => saved,
+        Err(err) => return error_response(500, &err),
+    };
+
+    let _guard = AUTONOMOUS_PARAMETERS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let topic = captain.topic::<AutonomousParameters>(AUTONOMOUS_PARAMETERS_TOPIC_NAME);
+    let mut parameters = topic.read().into_value();
+    parameters
+        .values
+        .entry(body.algorithm)
+        .or_default()
+        .extend(values);
+    topic
+        .write(writer_id, parameters)
+        .expect("lost writer authorization for the autonomous_parameters topic");
+    loaded(&path)
+}
+
+/// The response to a successful load from the config file at `path`.
+fn loaded(path: &Path) -> ResponseBox {
+    json_response(
+        &SavedParameters {
+            path: path.display().to_string(),
+        },
+        200,
+    )
 }
 
 /// `algorithm`'s tunable parameters, with the values it currently runs

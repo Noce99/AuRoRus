@@ -76,20 +76,7 @@ impl AutonomousAlgorithmInfo {
     /// Re-reads every parameter's `value` from the field of the same name in
     /// `config`. Panics like [`with_parameters`](Self::with_parameters).
     pub fn refresh_values<C: serde::Serialize>(&mut self, config: &C) {
-        let json = serde_json::to_value(config)
-            .expect("an algorithm's config must serialize to JSON to be tunable");
-        for parameter in &mut self.parameters {
-            parameter.value = json
-                .get(&parameter.name)
-                .and_then(serde_json::Value::as_f64)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "tunable parameter {:?} has no numeric field of the same name in the \
-                         algorithm's config",
-                        parameter.name
-                    )
-                });
-        }
+        crate::config::refresh_parameter_values(&mut self.parameters, config);
     }
 }
 
