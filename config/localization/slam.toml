@@ -75,3 +75,37 @@ resolution_m = 0.05
 min_pass_through = 2
 # Hit/pass ratio above which a cell is occupied rather than free.
 occupancy_threshold = 0.1
+
+# --- Loop closure -----------------------------------------------------------
+
+# Whether to link scans to earlier passes over the same place and close loops,
+# optimizing every pose when one closes. false keeps only the chain of
+# sequential matches (phase 1's behavior).
+do_loop_closing = true
+# A scan is linked to a nearby, already linked chain only if it matches it
+# better than this (0 to 1).
+link_match_minimum_response_fine = 0.1
+# Farthest two scans may be apart to be linked, in meters.
+link_scan_maximum_distance_m = 1.5
+# Older scans closer than this to the new one are candidates for a loop
+# closure, in meters.
+loop_search_maximum_distance_m = 3.0
+# Fewest consecutive scans a chain needs to be matched against (for loop
+# closures and for links to nearby chains).
+loop_match_minimum_chain_size = 10
+# A coarse loop match is only trusted if both its position variances are below
+# this, in square meters.
+loop_match_maximum_variance_coarse = 3.0
+# Coarse response a loop match must beat to be refined (0 to 1).
+loop_match_minimum_response_coarse = 0.35
+# Fine response a refined loop match must reach to close the loop (0 to 1).
+loop_match_minimum_response_fine = 0.45
+# Side of the square window a loop closure is searched in, in meters - how far
+# off the drifted pose may be when coming back to a known place.
+loop_search_space_dimension_m = 8.0
+# Resolution of that search, in meters.
+loop_search_space_resolution_m = 0.05
+# How much reference points are blurred for that search, in meters.
+loop_search_space_smear_deviation_m = 0.03
+# Most Levenberg-Marquardt iterations one pose graph optimization may take.
+optimizer_max_iterations = 20

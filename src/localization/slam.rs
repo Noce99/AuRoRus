@@ -12,9 +12,12 @@
 
 mod correlation_grid;
 mod mapper;
+mod matrix3;
 mod occupancy_grid;
 mod odometry_buffer;
+mod optimizer;
 mod pose;
+mod pose_graph;
 mod scan;
 mod scan_matcher;
 
@@ -94,6 +97,35 @@ pub struct SlamConfig {
     pub min_pass_through: u32,
     /// Hit/pass ratio above which a cell is occupied.
     pub occupancy_threshold: f64,
+
+    /// Whether to link scans to older passes over the same place and close
+    /// loops - `false` keeps only the chain of sequential matches.
+    pub do_loop_closing: bool,
+    /// A scan is linked to a nearby chain only if it matches it better than
+    /// this.
+    pub link_match_minimum_response_fine: f64,
+    /// Farthest two scans may be apart to be linked, in meters.
+    pub link_scan_maximum_distance_m: f64,
+    /// Older scans closer than this are candidates for a loop closure, in
+    /// meters.
+    pub loop_search_maximum_distance_m: f64,
+    /// Fewest consecutive scans a chain needs to be matched against.
+    pub loop_match_minimum_chain_size: usize,
+    /// A coarse loop match is only trusted if both its position variances
+    /// are below this, in square meters.
+    pub loop_match_maximum_variance_coarse: f64,
+    /// Coarse response a loop match must beat to be refined.
+    pub loop_match_minimum_response_coarse: f64,
+    /// Fine response a loop match must reach to close the loop.
+    pub loop_match_minimum_response_fine: f64,
+    /// Side of the square window a loop closure is searched in, in meters.
+    pub loop_search_space_dimension_m: f64,
+    /// Resolution of that search, in meters.
+    pub loop_search_space_resolution_m: f64,
+    /// How much reference points are blurred for that search, in meters.
+    pub loop_search_space_smear_deviation_m: f64,
+    /// Most Levenberg-Marquardt iterations one optimization may take.
+    pub optimizer_max_iterations: usize,
 }
 
 impl Default for SlamConfig {
@@ -119,6 +151,18 @@ impl SlamConfig {
             resolution_m: self.resolution_m,
             min_pass_through: self.min_pass_through,
             occupancy_threshold: self.occupancy_threshold,
+            do_loop_closing: self.do_loop_closing,
+            link_match_minimum_response_fine: self.link_match_minimum_response_fine,
+            link_scan_maximum_distance_m: self.link_scan_maximum_distance_m,
+            loop_search_maximum_distance_m: self.loop_search_maximum_distance_m,
+            loop_match_minimum_chain_size: self.loop_match_minimum_chain_size,
+            loop_match_maximum_variance_coarse: self.loop_match_maximum_variance_coarse,
+            loop_match_minimum_response_coarse: self.loop_match_minimum_response_coarse,
+            loop_match_minimum_response_fine: self.loop_match_minimum_response_fine,
+            loop_search_space_dimension_m: self.loop_search_space_dimension_m,
+            loop_search_space_resolution_m: self.loop_search_space_resolution_m,
+            loop_search_space_smear_deviation_m: self.loop_search_space_smear_deviation_m,
+            optimizer_max_iterations: self.optimizer_max_iterations,
             matching: MatchParams {
                 coarse_search_angle_offset_rad: self.coarse_search_angle_offset_rad,
                 coarse_angle_resolution_rad: self.coarse_angle_resolution_rad,
@@ -140,6 +184,10 @@ const DRAWN_BODY_WIDTH_M: f64 = 0.25;
 const DRAWN_AXLE_M: f64 = 0.16;
 /// Translucent, so the true vehicle stays visible where they overlap.
 const DRAWN_COLOR: Color = Color::GREEN.with_alpha(170);
+/// Loop-closure edges stand out from the trajectory.
+const LOOP_EDGE_COLOR: Color = Color::AMBER;
+/// Radius of the circle marking where a loop was closed, in meters.
+const LOOP_MARKER_RADIUS_M: f64 = 0.75;
 /// Above [`crate::sensors::MapServer`]'s map (`-100`), below everything
 /// else - the raster would otherwise hide the lidar hits and vehicles.
 const DRAWN_Z_INDEX: i32 = -50;
@@ -252,7 +300,12 @@ impl Executor for Slam {
                     drawing_topic
                         .write(
                             self.id,
-                            drawing(&map, state.mapper.pose(), &start_state_topic.read()),
+                            drawing(
+                                &map,
+                                state.mapper.pose(),
+                                &state.mapper.loop_edges(),
+                                &start_state_topic.read(),
+                            ),
                         )
                         .expect("lost writer authorization for SLAM's drawing topic");
                 }
@@ -346,7 +399,7 @@ impl State {
         match processed {
             Processed::Skipped => return,
             Processed::First => self.last_match_response = None,
-            Processed::Matched(result) => self.last_match_response = Some(result.response),
+            Processed::Matched { result, .. } => self.last_match_response = Some(result.response),
         }
         self.last_process_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
         self.map_reset_count = self.odometry.reset_count();
@@ -367,6 +420,8 @@ impl State {
                 .unwrap_or(0),
             last_match_response: self.last_match_response,
             last_process_ms: self.last_process_ms,
+            loop_closures: self.mapper.loop_closures(),
+            last_optimization_ms: self.mapper.last_optimization_ms(),
         }
     }
 }
@@ -375,7 +430,12 @@ impl State {
 /// with SLAM's frame placed at `anchor` - where dead reckoning (whose
 /// `odom` frame SLAM's frame is) was last reset - so it all overlays the
 /// true map. Empty when the map is.
-fn drawing(map: &SlamMap, pose: Option<Pose2>, anchor: &StartState) -> Drawing {
+fn drawing(
+    map: &SlamMap,
+    pose: Option<Pose2>,
+    loop_edges: &[(Pose2, Pose2)],
+    anchor: &StartState,
+) -> Drawing {
     let empty = Drawing::default().z_index(DRAWN_Z_INDEX);
     let Some(pose) = pose else {
         return empty;
@@ -394,7 +454,7 @@ fn drawing(map: &SlamMap, pose: Option<Pose2>, anchor: &StartState) -> Drawing {
         })
         .collect();
 
-    Drawing::new(vec![
+    let mut shapes = vec![
         world_raster(map, &anchor),
         Shape::Polyline {
             points: trajectory,
@@ -402,22 +462,44 @@ fn drawing(map: &SlamMap, pose: Option<Pose2>, anchor: &StartState) -> Drawing {
             width_px: 2.0,
             color: DRAWN_COLOR,
         },
-        Shape::Vehicle {
-            x_m: vehicle.x_m,
-            y_m: vehicle.y_m,
-            heading_rad: vehicle.heading_rad,
-            // Only redrawn every `map_publish_period_s`: don't let a viewer
-            // extrapolate it forward in between.
-            speed_mps: 0.0,
-            steering_rad: 0.0,
-            length_m: DRAWN_BODY_LENGTH_M,
-            width_m: DRAWN_BODY_WIDTH_M,
-            front_axle_m: DRAWN_AXLE_M,
-            rear_axle_m: DRAWN_AXLE_M,
-            color: DRAWN_COLOR,
-        },
-    ])
-    .z_index(DRAWN_Z_INDEX)
+    ];
+    for (from, to) in loop_edges {
+        let world = |pose: &Pose2| {
+            let (x, y) = anchor.transform_point(pose.x_m, pose.y_m);
+            [x as f32, y as f32]
+        };
+        // Once optimized, the two ends of a loop edge are usually only
+        // centimeters apart: the circle is what makes the closure visible.
+        let [x, y] = world(to);
+        shapes.push(Shape::Circle {
+            x_m: f64::from(x),
+            y_m: f64::from(y),
+            radius_m: LOOP_MARKER_RADIUS_M,
+            filled: false,
+            color: LOOP_EDGE_COLOR,
+        });
+        shapes.push(Shape::Polyline {
+            points: vec![world(from), world(to)],
+            closed: false,
+            width_px: 3.0,
+            color: LOOP_EDGE_COLOR,
+        });
+    }
+    shapes.push(Shape::Vehicle {
+        x_m: vehicle.x_m,
+        y_m: vehicle.y_m,
+        heading_rad: vehicle.heading_rad,
+        // Only redrawn every `map_publish_period_s`: don't let a viewer
+        // extrapolate it forward in between.
+        speed_mps: 0.0,
+        steering_rad: 0.0,
+        length_m: DRAWN_BODY_LENGTH_M,
+        width_m: DRAWN_BODY_WIDTH_M,
+        front_axle_m: DRAWN_AXLE_M,
+        rear_axle_m: DRAWN_AXLE_M,
+        color: DRAWN_COLOR,
+    });
+    Drawing::new(shapes).z_index(DRAWN_Z_INDEX)
 }
 
 /// `map` resampled into the world frame, with SLAM's frame placed at
@@ -542,8 +624,36 @@ mod tests {
 
     #[test]
     fn nothing_is_drawn_before_the_first_scan() {
-        let drawing = drawing(&SlamMap::default(), None, &StartState::default());
+        let drawing = drawing(&SlamMap::default(), None, &[], &StartState::default());
         assert!(drawing.shapes.is_empty());
+    }
+
+    #[test]
+    fn loop_edges_are_drawn_through_the_anchor() {
+        let anchor = StartState {
+            x_m: 10.0,
+            y_m: 5.0,
+            heading_rad: FRAC_PI_2,
+            speed_mps: 0.0,
+        };
+        let edge = (Pose2::new(0.0, 0.0, 0.0), Pose2::new(1.0, 0.0, 0.0));
+        let drawing = drawing(&tiny_map(), Some(Pose2::default()), &[edge], &anchor);
+        let segment = drawing
+            .shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Polyline { points, color, .. } if *color == LOOP_EDGE_COLOR => {
+                    Some(points.clone())
+                }
+                _ => None,
+            })
+            .expect("the drawing must include the loop edge");
+        assert_eq!(segment, vec![[10.0, 5.0], [10.0, 6.0]]);
+        let marked = drawing.shapes.iter().any(|shape| {
+            matches!(shape, Shape::Circle { x_m, y_m, color, .. }
+                if *color == LOOP_EDGE_COLOR && (*x_m - 10.0).abs() < 1e-6 && (*y_m - 6.0).abs() < 1e-6)
+        });
+        assert!(marked, "the closure must be marked with a circle");
     }
 
     #[test]
@@ -554,7 +664,7 @@ mod tests {
             heading_rad: FRAC_PI_2,
             speed_mps: 0.0,
         };
-        let drawing = drawing(&tiny_map(), Some(Pose2::new(1.0, 0.0, 0.2)), &anchor);
+        let drawing = drawing(&tiny_map(), Some(Pose2::new(1.0, 0.0, 0.2)), &[], &anchor);
         let vehicle = drawing
             .shapes
             .iter()

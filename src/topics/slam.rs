@@ -78,8 +78,14 @@ pub struct SlamStatus {
     /// all) to `1` (perfect) - `None` before the second scan, the first
     /// one having nothing to match against.
     pub last_match_response: Option<f64>,
-    /// How long processing the latest scan took, in milliseconds.
+    /// How long processing the latest scan took, in milliseconds -
+    /// including any loop closure it triggered.
     pub last_process_ms: Option<f64>,
+    /// How many loops have been closed since the map was last cleared.
+    pub loop_closures: usize,
+    /// How long the latest pose graph optimization took, in milliseconds -
+    /// `None` until a loop is closed.
+    pub last_optimization_ms: Option<f64>,
 }
 
 /// The occupancy map built so far, in SLAM's own frame: the `odom` frame of

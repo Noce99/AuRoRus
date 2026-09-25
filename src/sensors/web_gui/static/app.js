@@ -327,7 +327,11 @@ async function pollSlam() {
   if (status.last_process_ms !== null) {
     parts.push(`in ${status.last_process_ms.toFixed(1)} ms.`);
   }
-  slamDetailsEl.textContent = parts.join(" ");
+  parts.push(`${status.loop_closures} loop closure${status.loop_closures === 1 ? "" : "s"}`);
+  if (status.last_optimization_ms !== null) {
+    parts.push(`(last optimized in ${status.last_optimization_ms.toFixed(1)} ms)`);
+  }
+  slamDetailsEl.textContent = parts.join(" ") + ".";
 }
 
 // ---------------------------------------------------------------------

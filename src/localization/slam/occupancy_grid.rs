@@ -3,9 +3,10 @@
 //! unknown map - Karto's `OccupancyGrid` (`Karto.h`).
 //!
 //! Karto rebuilds its grid from every scan each time the map is asked for,
-//! since loop closure can move any of them. Without loop closure a scan's
-//! pose never changes once added, so this one is incremental instead: each
-//! scan is traced once, and the grid grows as the vehicle explores.
+//! since loop closure can move any of them. This one is incremental
+//! instead - each new scan is traced once, and the grid grows as the
+//! vehicle explores - and only [`rebuild`](OccupancyGrid::rebuild)s from
+//! every scan when a loop closure actually moved them.
 
 use super::scan::LocalizedScan;
 use crate::topics::SlamMap;
@@ -60,6 +61,16 @@ impl OccupancyGrid {
             self.min_pass_through,
             self.occupancy_threshold,
         );
+    }
+
+    /// Throws every count away and traces every scan of `scans` again, from
+    /// their current corrected poses - Karto's
+    /// `OccupancyGrid::CreateFromScans`.
+    pub fn rebuild(&mut self, scans: &[LocalizedScan]) {
+        self.clear();
+        for scan in scans {
+            self.add_scan(scan);
+        }
     }
 
     /// Traces every reading of `scan`, from its corrected pose - Karto's
@@ -280,6 +291,29 @@ mod tests {
         let map = grid_with(3, &one_ray(9.0), Pose2::default()).to_map(Vec::new());
         assert_eq!(pixel_at(&map, 7.5, 0.0), SlamMap::FREE);
         assert!(!map.pixels.contains(&SlamMap::OCCUPIED));
+    }
+
+    #[test]
+    fn rebuilding_traces_scans_at_their_new_poses() {
+        let ray = one_ray(2.0);
+        let mut scans: Vec<LocalizedScan> = (0..3)
+            .map(|_| LocalizedScan::new(&ray, Instant::now(), Pose2::default(), 8.0))
+            .collect();
+        let mut grid = OccupancyGrid::new(0.1, 2, 0.1);
+        grid.rebuild(&scans);
+        assert_eq!(
+            pixel_at(&grid.to_map(Vec::new()), 2.0, 0.0),
+            SlamMap::OCCUPIED
+        );
+
+        // Every scan moved 1 m up: the wall follows.
+        for scan in &mut scans {
+            scan.set_corrected_pose(Pose2::new(0.0, 1.0, 0.0));
+        }
+        grid.rebuild(&scans);
+        let map = grid.to_map(Vec::new());
+        assert_eq!(pixel_at(&map, 2.0, 1.0), SlamMap::OCCUPIED);
+        assert_eq!(pixel_at(&map, 2.0, 0.0), SlamMap::UNKNOWN);
     }
 
     #[test]

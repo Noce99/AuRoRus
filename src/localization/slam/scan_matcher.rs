@@ -5,6 +5,7 @@
 //! winner.
 
 use super::correlation_grid::{CorrelationGrid, OCCUPIED};
+use super::matrix3::{Matrix3, diagonal, identity};
 use super::pose::{Pose2, wrap_to_pi};
 use super::scan::LocalizedScan;
 
@@ -24,7 +25,7 @@ const TOLERANCE: f64 = 1e-6;
 const MIN_VALID_POINT_SPACING_M: f64 = 0.1;
 
 /// A 3x3 covariance of `(x_m, y_m, heading_rad)`, row-major.
-pub type Covariance = [[f64; 3]; 3];
+pub type Covariance = Matrix3;
 
 /// The search's tunable knobs - see `config/localization/slam.toml`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +69,8 @@ pub struct ScanMatcher {
     lookup: Vec<Vec<isize>>,
     /// Every candidate of the current pass and its response.
     candidates: Vec<(f64, Pose2)>,
+    /// Whether the current match penalizes candidates far from the prior.
+    penalize: bool,
     params: MatchParams,
 }
 
@@ -94,15 +97,24 @@ impl ScanMatcher {
             search_probs_offset: (0.0, 0.0),
             lookup: Vec::new(),
             candidates: Vec::new(),
+            penalize: true,
             params,
         }
     }
 
     /// Where `scan` - starting from its corrected pose - best overlaps
-    /// `base`. Karto's `ScanMatcher::MatchScan`, always penalizing distance
-    /// from the prior and always refining.
-    pub fn match_scan(&mut self, scan: &LocalizedScan, base: &[&LocalizedScan]) -> MatchResult {
+    /// `base`. Karto's `ScanMatcher::MatchScan`: `penalize` makes candidates
+    /// far from the prior score lower (trusting odometry), `refine` adds the
+    /// fine pass after the coarse one.
+    pub fn match_scan(
+        &mut self,
+        scan: &LocalizedScan,
+        base: &[&LocalizedScan],
+        penalize: bool,
+        refine: bool,
+    ) -> MatchResult {
         let prior = scan.corrected_pose();
+        self.penalize = penalize;
         if scan.world_points().is_empty() {
             return MatchResult {
                 pose: prior,
@@ -157,6 +169,14 @@ impl ScanMatcher {
                     break;
                 }
             }
+        }
+
+        if !refine {
+            return MatchResult {
+                pose,
+                response,
+                covariance,
+            };
         }
 
         // Karto passes `fine_search_angle_offset` as the fine pass's angular
@@ -233,7 +253,7 @@ impl ScanMatcher {
                 for angle_index in 0..n_angles {
                     let angle_rad = start_angle_rad + angle_index as f64 * angle_resolution_rad;
                     let mut response = self.response(angle_index, grid_index);
-                    if response != 0.0 {
+                    if self.penalize && response != 0.0 {
                         // An approximate Gaussian around the prior, so
                         // odometry still counts for something.
                         let distance_penalty = (1.0
@@ -484,14 +504,6 @@ fn valid_points(points: &[(f64, f64)], viewpoint: (f64, f64)) -> Vec<(f64, f64)>
     valid
 }
 
-fn identity() -> Covariance {
-    diagonal(1.0, 1.0, 1.0)
-}
-
-fn diagonal(xx: f64, yy: f64, thth: f64) -> Covariance {
-    [[xx, 0.0, 0.0], [0.0, yy, 0.0], [0.0, 0.0, thth]]
-}
-
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -566,7 +578,7 @@ pub(super) mod tests {
         let scan = LocalizedScan::new(&room_scan(truth, 360), Instant::now(), prior, 12.0);
 
         let mut matcher = ScanMatcher::new(0.5, 0.01, 0.03, 12.0, params());
-        let result = matcher.match_scan(&scan, &[&reference]);
+        let result = matcher.match_scan(&scan, &[&reference], true, true);
 
         assert!(
             result.pose.squared_distance(&truth).sqrt() < 0.02,
@@ -584,11 +596,36 @@ pub(super) mod tests {
         let scan = LocalizedScan::new(&room_scan(pose, 360), Instant::now(), pose, 12.0);
 
         let mut matcher = ScanMatcher::new(0.5, 0.01, 0.03, 12.0, params());
-        let result = matcher.match_scan(&scan, &[&reference]);
+        let result = matcher.match_scan(&scan, &[&reference], true, true);
 
         assert!(result.pose.squared_distance(&pose).sqrt() < 0.01);
         assert!(result.response > 0.9, "response {}", result.response);
         assert!(result.covariance[0][0] < 0.01 && result.covariance[1][1] < 0.01);
+    }
+
+    #[test]
+    fn a_coarse_only_unpenalized_match_lands_within_a_coarse_step() {
+        let truth = Pose2::new(0.3, 0.2, 0.1);
+        let reference = LocalizedScan::new(
+            &room_scan(Pose2::default(), 360),
+            Instant::now(),
+            Pose2::default(),
+            12.0,
+        );
+        // A prior 2 m off: far outside the sequential window, well inside a
+        // loop-closure one.
+        let prior = Pose2::new(truth.x_m + 1.5, truth.y_m - 1.3, truth.heading_rad + 0.1);
+        let scan = LocalizedScan::new(&room_scan(truth, 360), Instant::now(), prior, 12.0);
+
+        let mut matcher = ScanMatcher::new(8.0, 0.05, 0.03, 12.0, params());
+        let result = matcher.match_scan(&scan, &[&reference], false, false);
+
+        assert!(
+            result.pose.squared_distance(&truth).sqrt() < 0.1,
+            "matched {:?}, truth {truth:?}",
+            result.pose
+        );
+        assert!(result.response > 0.35, "response {}", result.response);
     }
 
     #[test]
@@ -598,7 +635,7 @@ pub(super) mod tests {
         let scan = LocalizedScan::new(&empty, Instant::now(), prior, 12.0);
 
         let mut matcher = ScanMatcher::new(0.5, 0.01, 0.03, 12.0, params());
-        let result = matcher.match_scan(&scan, &[]);
+        let result = matcher.match_scan(&scan, &[], true, true);
 
         assert_eq!(result.pose, prior);
         assert_eq!(result.covariance[0][0], MAX_VARIANCE);
