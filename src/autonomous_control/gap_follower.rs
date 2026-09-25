@@ -33,6 +33,8 @@ pub struct GapFollowerConfig {
     pub n: usize,
     /// Bubble radius, pure number.
     pub b_radius: usize,
+    /// Speed
+    pub speed: f32,
 }
 
 impl Default for GapFollowerConfig {
@@ -44,7 +46,7 @@ impl Default for GapFollowerConfig {
 
 /// The live-tunable parameters, one per [`GapFollowerConfig`] field - see
 /// [`ParameterTuner`].
-fn parameters() -> [AlgorithmParameter; 4] {
+fn parameters() -> [AlgorithmParameter; 5] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
         // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
@@ -60,6 +62,9 @@ fn parameters() -> [AlgorithmParameter; 4] {
         AlgorithmParameter::int("b_radius", 0, 180, 1)
             .unit("points")
             .description("Bubble radius around the closest point, where no gap can start."),
+        AlgorithmParameter::float("speed", 0.6, 10.0, 0.2)
+            .unit("m/s")
+            .description("Speed, in m/s."),
     ]
 }
 
@@ -241,7 +246,7 @@ impl Executor for GapFollower {
 
             let command = VescCommand::new(
                 steering as f64 /* steering, rad */,
-                1.0 /* speed, m/s */
+                self.config.speed as f64/* speed, m/s */
             );
             command_topic
                 .write(self.id, command)

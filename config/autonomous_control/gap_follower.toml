@@ -9,3 +9,5 @@ t_m = 2.2
 n = 4
 # Bubble radius, pure number.
 b_radius = 80
+# Speed, in m/s.
+speed = 3.0
