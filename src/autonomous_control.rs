@@ -32,18 +32,24 @@
 //! - reads whatever else it needs, e.g. the actuator limits on
 //!   [`crate::topics::VEHICLE_LIMITS_TOPIC_NAME`];
 //! - if it's expensive to run, can idle while
-//!   [`Captain::is_selected_algorithm`] says it isn't selected.
+//!   [`Captain::is_selected_algorithm`] says it isn't selected;
+//! - optionally, lets its parameters be tuned live - see [`ParameterTuner`].
 //!
-//! See `always_left.rs` for the smallest possible example.
+//! See `always_left.rs` for the smallest possible example, and
+//! `gap_follower.rs` for one with tunable parameters.
 
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection,
-    AutonomousAlgorithmStatus, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
+    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter,
+    AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
+    AutonomousParameters, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::any::Any;
+use std::collections::BTreeMap;
 
 include!(concat!(env!("OUT_DIR"), "/autonomous_algorithms.rs"));
 
@@ -92,11 +98,130 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
                 name,
                 label: info.label,
                 description: info.description,
+                parameters: info.parameters,
             })
         })
         .collect();
     available.sort_by(|a, b| a.name.cmp(&b.name));
     available
+}
+
+/// Applies live parameter changes to an algorithm's config: whatever
+/// [`AUTONOMOUS_PARAMETERS_TOPIC_NAME`] (written by e.g. `web_gui`) wants
+/// for it, reported back - as the values actually applied - in its
+/// [`AutonomousAlgorithmInfo`], which is where the UI reads them from.
+///
+/// An algorithm declares its tunable parameters once, in
+/// [`Executor::claim_writing_topics`], each named after the field of its
+/// config it sets:
+///
+/// ```ignore
+/// captain.claim_autonomous_control(
+///     self.id,
+///     AutonomousAlgorithmInfo::new("Gap follower", "...").with_parameters(
+///         &self.config,
+///         [AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1).unit("m").description("...")],
+///     ),
+/// );
+/// ```
+///
+/// then calls [`update`](Self::update) once per tick in [`Executor::run`].
+/// The config must be [`Serialize`] + [`DeserializeOwned`] - a value is set
+/// by patching its JSON form - so no per-parameter code is needed. Anything
+/// the algorithm derives from its config (e.g. a [`Ticker`] built from a
+/// rate) must be rebuilt whenever `update` returns `true`.
+pub struct ParameterTuner {
+    executor_id: u8,
+    name: String,
+    /// [`crate::WriteMeta::write_count`] of the last [`AutonomousParameters`]
+    /// looked at, so an unchanged request costs one counter read per tick.
+    seen_write_count: u64,
+}
+
+impl ParameterTuner {
+    /// A tuner for the algorithm running as `executor_id`, which must have
+    /// claimed its topics via [`Captain::claim_autonomous_control`].
+    pub fn new(captain: &Captain, executor_id: u8) -> Self {
+        Self {
+            executor_id,
+            name: captain.name_of(executor_id),
+            seen_write_count: 0,
+        }
+    }
+
+    /// Applies any newly requested parameter values to `config`, each
+    /// sanitized (see [`crate::topics::ParameterKind::sanitize`]), and
+    /// republishes the algorithm's info with the values now in effect.
+    /// Returns whether `config` changed. Requests for parameters the
+    /// algorithm didn't declare are ignored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a patched config no longer deserializes - a parameter
+    /// declared with a kind its field can't hold, e.g. a float for a `usize`.
+    pub fn update<C: Serialize + DeserializeOwned>(
+        &mut self,
+        captain: &Captain,
+        config: &mut C,
+    ) -> bool {
+        // Nothing may publish requests at all (e.g. a binary without
+        // `web_gui`) - then the config stays as loaded.
+        let Some(requests) =
+            captain.try_topic::<AutonomousParameters>(AUTONOMOUS_PARAMETERS_TOPIC_NAME)
+        else {
+            return false;
+        };
+        let write_count = requests.meta().write_count;
+        if write_count == self.seen_write_count {
+            return false;
+        }
+        self.seen_write_count = write_count;
+        let Some(wanted) = requests.read().into_value().values.remove(&self.name) else {
+            return false;
+        };
+
+        let info_topic = captain.autonomous_control_info(self.executor_id);
+        let mut info = info_topic.read().into_value();
+        if !apply(config, &info.parameters, &wanted) {
+            return false;
+        }
+        info.refresh_values(config);
+        info_topic
+            .write(self.executor_id, info)
+            .expect("lost writer authorization for this algorithm's info topic");
+        true
+    }
+}
+
+/// Sets every field of `config` named in both `parameters` and `wanted` to
+/// its wanted value, sanitized - see [`ParameterTuner::update`]. Returns
+/// whether anything changed.
+fn apply<C: Serialize + DeserializeOwned>(
+    config: &mut C,
+    parameters: &[AlgorithmParameter],
+    wanted: &BTreeMap<String, f64>,
+) -> bool {
+    let before = serde_json::to_value(&*config)
+        .expect("an algorithm's config must serialize to JSON to be tunable");
+    let mut after = before.clone();
+    let fields = after
+        .as_object_mut()
+        .expect("a tunable algorithm's config must be a struct");
+    for parameter in parameters {
+        if let Some(value) = wanted
+            .get(&parameter.name)
+            .and_then(|&value| parameter.kind.sanitize(value))
+        {
+            fields.insert(parameter.name.clone(), parameter.kind.to_json(value));
+        }
+    }
+    if after == before {
+        return false;
+    }
+    *config = serde_json::from_value(after).unwrap_or_else(|err| {
+        panic!("a tunable parameter's value doesn't fit its config field: {err}")
+    });
+    true
 }
 
 /// The command to forward, given the `selected` algorithm's latest
@@ -194,6 +319,106 @@ mod tests {
     use super::*;
     use crate::WriteMeta;
     use std::time::{Duration, Instant};
+
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Config {
+        rate_hz: f32,
+        radius: usize,
+        untouched: f32,
+    }
+
+    fn config() -> Config {
+        Config {
+            rate_hz: 50.0,
+            radius: 10,
+            untouched: 1.0,
+        }
+    }
+
+    fn parameters() -> Vec<AlgorithmParameter> {
+        vec![
+            AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0),
+            AlgorithmParameter::int("radius", 0, 100, 1),
+        ]
+    }
+
+    fn wanted(values: &[(&str, f64)]) -> BTreeMap<String, f64> {
+        values
+            .iter()
+            .map(|&(name, value)| (name.to_string(), value))
+            .collect()
+    }
+
+    #[test]
+    fn wanted_values_are_applied_to_their_fields() {
+        let mut config = config();
+        assert!(apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("rate_hz", 20.0), ("radius", 30.0)])
+        ));
+        assert_eq!(
+            config,
+            Config {
+                rate_hz: 20.0,
+                radius: 30,
+                untouched: 1.0
+            }
+        );
+    }
+
+    #[test]
+    fn wanted_values_are_sanitized() {
+        let mut config = config();
+        assert!(apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("rate_hz", 0.0), ("radius", 12.6)])
+        ));
+        assert_eq!(
+            config,
+            Config {
+                rate_hz: 5.0,
+                radius: 13,
+                untouched: 1.0
+            }
+        );
+        assert!(apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("radius", -4.0)])
+        ));
+        assert_eq!(config.radius, 0);
+        assert!(!apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("rate_hz", f64::NAN)])
+        ));
+    }
+
+    #[test]
+    fn undeclared_or_unchanged_values_change_nothing() {
+        let mut config = config();
+        assert!(!apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("untouched", 7.0), ("nope", 1.0)])
+        ));
+        assert!(!apply(
+            &mut config,
+            &parameters(),
+            &wanted(&[("rate_hz", 50.0), ("radius", 10.0)])
+        ));
+        assert_eq!(config, self::config());
+    }
+
+    #[test]
+    fn info_reports_the_values_in_effect() {
+        let info =
+            AutonomousAlgorithmInfo::new("Test", "").with_parameters(&config(), parameters());
+        let values: Vec<f64> = info.parameters.iter().map(|p| p.value).collect();
+        assert_eq!(values, vec![50.0, 10.0]);
+    }
 
     fn written_at(at: Instant) -> Stamped<VescCommand> {
         Stamped {

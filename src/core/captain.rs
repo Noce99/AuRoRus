@@ -372,6 +372,20 @@ impl Captain {
         ))
     }
 
+    /// `executor_id`'s own [`AutonomousAlgorithmInfo`] topic, previously claimed via
+    /// [`claim_autonomous_control`](Self::claim_autonomous_control) - for rewriting its parameters'
+    /// values (see [`crate::autonomous_control::ParameterTuner`]). Terminates the program, like
+    /// [`topic`](Self::topic), if it wasn't.
+    pub fn autonomous_control_info(
+        &self,
+        executor_id: u8,
+    ) -> Arc<RwLockTopic<AutonomousAlgorithmInfo>> {
+        self.topic::<AutonomousAlgorithmInfo>(&format!(
+            "{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{}",
+            self.name_of(executor_id)
+        ))
+    }
+
     /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
     /// selected to drive - for a computationally heavy algorithm to idle while it isn't. `false` if
     /// nothing publishes a selection at all.

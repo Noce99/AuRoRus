@@ -1,7 +1,8 @@
 //! This file implement the Gap Follower algorithm as presented in the
 //! f1tenth documentation: https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html
 
-use crate::topics::{AutonomousAlgorithmInfo, Drawing, Shape, Color, VescCommand};
+use crate::autonomous_control::ParameterTuner;
+use crate::topics::{AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, Shape, Color, VescCommand};
 // use crate::topics::{VEHICLE_LIMITS_TOPIC_NAME, ActuatorLimits};
 use crate::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 use crate::topics::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
@@ -20,8 +21,9 @@ pub fn new(name: &str) -> Box<dyn Executor> {
 
 /// Every tunable parameter [`GapFollower`] needs - loaded from
 /// `config/autonomous_control/gap_follower.toml` (see [`Default`]) or from an arbitrary
-/// path via [`crate::config::load`].
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+/// path via [`crate::config::load`]. Every field can also be tuned live - see
+/// [`parameters`].
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GapFollowerConfig {
     /// Rate at which [`GapFollower`] publishes a new control, in Hz.
     pub rate_hz: f32,
@@ -40,6 +42,27 @@ impl Default for GapFollowerConfig {
     }
 }
 
+/// The live-tunable parameters, one per [`GapFollowerConfig`] field - see
+/// [`ParameterTuner`].
+fn parameters() -> [AlgorithmParameter; 4] {
+    [
+        // At least a few Hz: below 1 Hz every command would be stale on arrival
+        // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
+        AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0)
+            .unit("Hz")
+            .description("Rate at which a new control is published."),
+        AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1)
+            .unit("m")
+            .description("Threshold for identifying a far away lidar point."),
+        AlgorithmParameter::int("n", 0, 100, 1)
+            .unit("points")
+            .description("Minimum number of far away points to create a gap."),
+        AlgorithmParameter::int("b_radius", 0, 180, 1)
+            .unit("points")
+            .description("Bubble radius around the closest point, where no gap can start."),
+    ]
+}
+
 struct GapFollower {
     id: u8,
     name: String,
@@ -54,7 +77,8 @@ impl Executor for GapFollower {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
-            AutonomousAlgorithmInfo::new("Gap follower", "The simplest reactive algorithm"),
+            AutonomousAlgorithmInfo::new("Gap follower", "The simplest reactive algorithm")
+                .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
@@ -65,14 +89,20 @@ impl Executor for GapFollower {
         let scan_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
         let vehicle_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
+        let mut tuner = ParameterTuner::new(captain, self.id);
 
+        // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
-
-        let stale_after = Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz as f64));
+        let mut stale_after = drawing_stale_after(&self.config);
 
         let mut steering:f32 = 0.0;
 
         while captain.is_running(self.id) {
+            if tuner.update(captain, &mut self.config) {
+                ticker = Ticker::new(self.config.rate_hz as f64);
+                stale_after = drawing_stale_after(&self.config);
+            }
+
             // Optional, only for computationally heavy algorithms
             // if !captain.is_selected_algorithm(&self.name) { ticker.wait(); continue; }
 
@@ -235,6 +265,12 @@ impl Executor for GapFollower {
     fn fresh(&self) -> Box<dyn Executor> {
         new(&self.name)
     }
+}
+
+/// How long the drawing stays valid: a few publishing periods, but never
+/// less than the default.
+fn drawing_stale_after(config: &GapFollowerConfig) -> Duration {
+    Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
 struct Gap{

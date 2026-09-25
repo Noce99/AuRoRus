@@ -18,8 +18,10 @@ mod vesc_command;
 
 pub use autonomous_control::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX, AutonomousAlgorithmInfo,
-    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AvailableAlgorithm,
+    AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
+    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmInfo,
+    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
+    AvailableAlgorithm, ParameterKind,
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, Shape};
 pub use imu::{IMU_TOPIC_NAME, ImuReading};

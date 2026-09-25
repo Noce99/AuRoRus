@@ -2,9 +2,10 @@
 //! autonomous algorithm are currently selected (the `map`,
 //! `vehicle_model_status`, and `autonomous_algorithm_status` topics), and the
 //! write endpoints a driver uses to steer the vehicle, pick its map, model,
-//! and autonomous algorithm, place it at the start line, and drive SLAM
-//! (`map_selection`, `human_vesc_command`, `vehicle_model_selection`,
-//! `autonomous_algorithm_selection`, `place_at_start`, `slam_command`) - as
+//! and autonomous algorithm, tune that algorithm, place it at the start
+//! line, and drive SLAM (`map_selection`, `human_vesc_command`,
+//! `vehicle_model_selection`, `autonomous_algorithm_selection`,
+//! `autonomous_parameters`, `place_at_start`, `slam_command`) - as
 //! opposed to [`super::maps_api`], which lists/generates map folders on
 //! disk, and [`super::draw_api`], which serves what's drawn on the map.
 
@@ -12,15 +13,17 @@ use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
-    PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand,
-    SlamState, SlamStatus, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VescCommand,
+    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
+    AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME,
+    MapSelection, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SLAM_COMMAND_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamState, SlamStatus,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
 use crate::web::{bad_request, json_response, read_json};
 use crate::{Captain, WriteMeta};
 use std::path::Path;
+use std::sync::Mutex;
 use tiny_http::{Request, ResponseBox};
 
 /// The subset of [`WebGuiConfig`] the frontend needs, as served by
@@ -291,6 +294,78 @@ pub fn select_autonomous_algorithm(
         .topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
         .write(writer_id, AutonomousAlgorithmSelection { name: body.name })
         .expect("lost writer authorization for the autonomous_algorithm_selection topic");
+    json_response(&(), 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SetAutonomousParameterBody {
+    algorithm: String,
+    name: String,
+    value: f64,
+}
+
+/// Serializes [`set_autonomous_parameter`]'s read-modify-write of
+/// `autonomous_parameters` across `WebGui`'s worker threads - two sliders
+/// moved at once would otherwise each write a copy missing the other's value.
+static AUTONOMOUS_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
+
+/// `POST /api/autonomous_parameter` - body `{"algorithm": "...", "name":
+/// "...", "value": ...}` - sets one parameter's wanted value in
+/// `autonomous_parameters`, for that algorithm to apply (see
+/// [`crate::autonomous_control::ParameterTuner`]), which reports the value
+/// it actually runs with in `autonomous_algorithm_status`. Only the
+/// algorithm in control can be tuned, and only by a parameter it declared.
+pub fn set_autonomous_parameter(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u8,
+) -> ResponseBox {
+    let body: SetAutonomousParameterBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    if !body.value.is_finite() {
+        return bad_request("value must be a finite number");
+    }
+
+    let Some(status) = captain
+        .try_topic::<AutonomousAlgorithmStatus>(AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME)
+        .map(|topic| topic.read().into_value())
+    else {
+        return bad_request("no autonomous algorithms are running");
+    };
+    if status.active.as_ref() != Some(&body.algorithm) {
+        return bad_request(&format!(
+            "{:?} isn't the algorithm in control - only that one can be tuned",
+            body.algorithm
+        ));
+    }
+    let declared = status
+        .available
+        .iter()
+        .filter(|algorithm| algorithm.name == body.algorithm)
+        .flat_map(|algorithm| &algorithm.parameters)
+        .any(|parameter| parameter.name == body.name);
+    if !declared {
+        return bad_request(&format!(
+            "{:?} has no tunable parameter {:?}",
+            body.algorithm, body.name
+        ));
+    }
+
+    let _guard = AUTONOMOUS_PARAMETERS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let topic = captain.topic::<AutonomousParameters>(AUTONOMOUS_PARAMETERS_TOPIC_NAME);
+    let mut parameters = topic.read().into_value();
+    parameters
+        .values
+        .entry(body.algorithm)
+        .or_default()
+        .insert(body.name, body.value);
+    topic
+        .write(writer_id, parameters)
+        .expect("lost writer authorization for the autonomous_parameters topic");
     json_response(&(), 200)
 }
 

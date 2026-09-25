@@ -1,7 +1,7 @@
 # Autonomous algorithms
 
-How autonomous driving algorithms are structured, how one is selected live
-from `web_gui`, and how to add a new one.
+How autonomous driving algorithms are structured, how one is selected and
+tuned live from `web_gui`, and how to add a new one.
 
 The goal: **adding an algorithm means adding one file** to
 `src/autonomous_control/` and recompiling. `web_gui`, `main.rs`, and the
@@ -20,6 +20,7 @@ flowchart LR
     A2 -- "autonomous_control/your_algorithm\nautonomous_control_info/your_algorithm" --> H
 
     W["WebGui"] -- "autonomous_algorithm_selection" --> H["AutonomousControlsHandler"]
+    W -- "autonomous_parameters" --> algos
     H -- "autonomous_algorithm_status" --> W
     H -- "autonomous_vesc_command" --> V["SimulatedVehicle"]
     W -- "human_vesc_command (WASD)" --> V
@@ -28,8 +29,9 @@ flowchart LR
 
 - **Every algorithm is its own executor.** It runs on its own thread at its
   own rate and publishes the `VescCommand` it would like the vehicle to follow
-  on its own topic, `autonomous_control/<name>`. It also publishes a static
-  label and description on `autonomous_control_info/<name>`.
+  on its own topic, `autonomous_control/<name>`. It also publishes a label,
+  a description, and its tunable parameters with their current values on
+  `autonomous_control_info/<name>`.
 - **All algorithms run all the time,** whether selected or not. A switch is
   therefore instant, and stateful algorithms (filters, integrators) stay warm.
   A `--debug` recording also captures what *every* algorithm wanted, not only
@@ -44,7 +46,8 @@ flowchart LR
 - **`WebGui`** only knows the generic selection and status topics. Its
   "Autonomous Algos" panel builds the dropdown from
   `autonomous_algorithm_status`, so a new algorithm appears there
-  automatically.
+  automatically. The same goes for the sliders of the algorithm in
+  control's parameters (see [Live parameter tuning](#live-parameter-tuning)).
 - **`build.rs`** scans `src/autonomous_control/*.rs` at compile time. It
   generates one `mod` per file plus `autonomous_control::all()`, which returns
   one executor per file. `web_gui`'s `main.rs` adds everything `all()`
@@ -70,7 +73,8 @@ for good, select "None (manual)".
 | Topic | Type | Writer | Meaning |
 |---|---|---|---|
 | `autonomous_control/<name>` | `VescCommand` | the algorithm | What the algorithm wants |
-| `autonomous_control_info/<name>` | `AutonomousAlgorithmInfo` | the algorithm | Label and description for the picker (written once) |
+| `autonomous_control_info/<name>` | `AutonomousAlgorithmInfo` | the algorithm | Label, description, and tunable parameters with their current values |
+| `autonomous_parameters` | `AutonomousParameters` | `WebGui` | Wanted parameter values, per algorithm |
 | `autonomous_algorithm_selection` | `AutonomousAlgorithmSelection` | `WebGui` | Which algorithm should drive (`null` for none) |
 | `autonomous_algorithm_status` | `AutonomousAlgorithmStatus` | handler | Available algorithms, the active one, whether its command is fresh |
 | `autonomous_vesc_command` | `VescCommand` | handler | The autonomous command the vehicle follows |
@@ -171,7 +175,11 @@ impl Executor for PurePursuit {
 }
 ```
 
-### 3. Build and run
+### 3. Optional: make parameters tunable live
+
+See [Live parameter tuning](#live-parameter-tuning).
+
+### 4. Build and run
 
 ```sh
 cargo build
@@ -179,6 +187,69 @@ cargo run --bin web_gui
 ```
 
 Open the UI, go to **Autonomous Algos**, and pick the new algorithm.
+
+## Live parameter tuning
+
+An algorithm can let `web_gui` tune its parameters while it runs. When it's
+the algorithm in control, the "Autonomous Algos" panel shows one slider per
+parameter.
+
+```mermaid
+sequenceDiagram
+    participant UI as web_gui page
+    participant W as WebGui
+    participant A as algorithm
+    participant H as handler
+    UI->>W: POST /api/autonomous_parameter {algorithm, name, value}
+    W->>A: autonomous_parameters (the whole wanted state)
+    A->>A: ParameterTuner::update: sanitize, patch config
+    A->>H: autonomous_control_info/<name> (values in effect)
+    H->>UI: autonomous_algorithm_status (polled)
+```
+
+- **Parameters are declared once,** next to the info, each named after the
+  config field it sets. Its current value is read from the config, so the
+  TOML file stays the source of the defaults:
+
+  ```rust
+  captain.claim_autonomous_control(
+      self.id,
+      AutonomousAlgorithmInfo::new("Gap follower", "...").with_parameters(
+          &self.config,
+          [
+              AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1)
+                  .unit("m")
+                  .description("Threshold for identifying a far away lidar point."),
+              AlgorithmParameter::int("b_radius", 0, 180, 1).unit("points"),
+          ],
+      ),
+  );
+  ```
+
+  The config must derive `Serialize` and `Deserialize`. A value is applied
+  by patching the config's JSON form, so no per-parameter code is needed.
+  Use `int` for integer fields (`usize`, `u32`, ...) and `float` for `f32`
+  or `f64` fields. A name that matches no numeric field panics at startup.
+- **Changes are applied in the loop:** create a `ParameterTuner` at the top
+  of `run()`, and call `tuner.update(captain, &mut self.config)` once per
+  tick. It returns `true` when the config changed.
+- **Rebuild derived state when `update` returns `true`.** Anything computed
+  from the config before the loop (a `Ticker` from a rate, a lookup table,
+  ...) is otherwise stale. `gap_follower.rs` rebuilds its `Ticker` this way,
+  which makes `rate_hz` tunable too.
+- **The algorithm validates, not the UI.** Values are clamped to
+  `min..=max` (and rounded, for `int`). Non-finite values are ignored. Pick
+  bounds that are always safe to run with: for example, a rate must stay
+  well above 1 Hz, or every command is stale (`VESC_COMMAND_TIMEOUT`).
+- **The UI shows what's in effect.** Sliders follow the values the
+  algorithm reports, not what was sent, so a clamped value snaps back.
+- **Only the algorithm in control can be tuned.** `WebGui` rejects anything
+  else.
+- **`autonomous_parameters` holds the whole wanted state,** not single
+  changes. Topics keep only their latest value, so two slider moves between
+  two algorithm ticks would otherwise overwrite each other.
+- **A restart (R) resets every parameter** to its TOML value. A `--debug`
+  recording captures every change, since both topics are recorded.
 
 ## Conventions and pitfalls
 
@@ -210,5 +281,6 @@ Open the UI, go to **Autonomous Algos**, and pick the new algorithm.
 | `src/autonomous_control/*.rs` | One algorithm per file |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
 | `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
-| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection` |
+| `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes |
+| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter` |
 | `src/bin/web_gui/main.rs` | Adds the handler and every algorithm from `all()` |

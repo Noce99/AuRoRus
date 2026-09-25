@@ -207,7 +207,7 @@ const NO_ALGORITHM = "";
  *  `liveVehicleModelKind`. */
 let liveAlgorithm = null;
 
-/** `{name, label, description}` of every algorithm last reported available. */
+/** `{name, label, description, parameters}` of every algorithm last reported available. */
 let algorithmOptions = [];
 
 async function selectAlgorithm(value) {
@@ -226,8 +226,12 @@ function updateAlgorithmDescription(value) {
 /** Rebuilds the `<option>`s, but only when the available algorithms actually
  *  changed - rebuilding on every poll would close the dropdown while open. */
 function syncAlgorithmOptions(available) {
-  if (JSON.stringify(available) === JSON.stringify(algorithmOptions)) return;
+  // Only what the dropdown shows counts - parameters' values change while
+  // tuning, and that alone mustn't rebuild it.
+  const shown = (options) => JSON.stringify(options.map(({ name, label }) => [name, label]));
+  const unchanged = shown(available) === shown(algorithmOptions);
   algorithmOptions = available;
+  if (unchanged) return;
   algorithmSelectEl.innerHTML = "";
   const none = document.createElement("option");
   none.value = NO_ALGORITHM;
@@ -272,6 +276,129 @@ async function pollAlgorithms() {
     algorithmStatusEl.textContent = "No recent command from this algorithm - vehicle held stopped.";
   } else {
     algorithmStatusEl.textContent = "In control. Any WASD key overrides it.";
+  }
+
+  syncAlgorithmParameters(active);
+}
+
+// ---------------------------------------------------------------------
+// Live tuning of the algorithm in control - one slider per parameter it
+// declares in its `AutonomousAlgorithmInfo`. A slider sends the wanted value
+// to `autonomous_parameters`; what it then shows comes back from the
+// algorithm itself (via `autonomous_algorithm_status`), so it always
+// reflects the value actually in effect.
+// ---------------------------------------------------------------------
+
+const algorithmParametersEl = document.getElementById("algorithm-parameters");
+
+/** After a slider was last moved, polls leave it alone this long - long
+ *  enough for the value to reach the algorithm and come back. */
+const PARAMETER_EDIT_GRACE_MS = 1000;
+/** Minimum time between two sends while a slider is being dragged. */
+const PARAMETER_SEND_INTERVAL_MS = 100;
+
+/** What the rendered sliders were built for - the active algorithm and its
+ *  parameters' declarations, without their values - so they're only rebuilt
+ *  (losing a drag in progress) when that changes. */
+let parameterRowsKey = null;
+/** Parameter name -> `{input, valueEl, parameter, lastEditMs, held}`. */
+let parameterRows = new Map();
+
+window.addEventListener("pointerup", () => parameterRows.forEach((row) => (row.held = false)));
+window.addEventListener("pointercancel", () => parameterRows.forEach((row) => (row.held = false)));
+
+/** `{min, max, step}` of a parameter, whatever its kind (`float`/`int`). */
+function parameterRange(parameter) {
+  return Object.values(parameter.kind)[0];
+}
+
+function formatParameterValue(parameter, value) {
+  const decimals = (String(parameterRange(parameter).step).split(".")[1] ?? "").length;
+  const unit = parameter.unit ? ` ${parameter.unit}` : "";
+  return `${Number(value).toFixed(decimals)}${unit}`;
+}
+
+/** Calls `fn` with the latest value at most once per `ms`, always ending on
+ *  the last one - so dragging sends a steady trickle, and where it's
+ *  released is never lost. */
+function throttleLatest(fn, ms) {
+  let lastCallMs = -Infinity;
+  let timer = null;
+  let latest;
+  return (value) => {
+    latest = value;
+    if (timer !== null) return;
+    const wait = Math.max(0, lastCallMs + ms - performance.now());
+    timer = setTimeout(() => {
+      timer = null;
+      lastCallMs = performance.now();
+      fn(latest);
+    }, wait);
+  };
+}
+
+function buildParameterRow(algorithm, parameter) {
+  const { min, max, step } = parameterRange(parameter);
+  const rowEl = document.createElement("div");
+  rowEl.className = "parameter-row";
+
+  const headEl = document.createElement("div");
+  headEl.className = "parameter-head";
+  const nameEl = document.createElement("span");
+  nameEl.className = "parameter-name";
+  nameEl.textContent = parameter.name;
+  const valueEl = document.createElement("span");
+  valueEl.className = "parameter-value";
+  headEl.append(nameEl, valueEl);
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = min;
+  input.max = max;
+  input.step = step;
+
+  const descriptionEl = document.createElement("p");
+  descriptionEl.className = "parameter-description";
+  descriptionEl.textContent = parameter.description;
+
+  rowEl.append(headEl, input, descriptionEl);
+
+  const row = { input, valueEl, parameter, lastEditMs: -Infinity, held: false };
+  const send = throttleLatest((value) => {
+    fetchJSON("/api/autonomous_parameter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ algorithm, name: parameter.name, value }),
+    }).catch((err) => console.error(err));
+  }, PARAMETER_SEND_INTERVAL_MS);
+  input.addEventListener("pointerdown", () => (row.held = true));
+  input.addEventListener("input", () => {
+    row.lastEditMs = performance.now();
+    valueEl.textContent = formatParameterValue(parameter, input.value);
+    send(Number(input.value));
+  });
+  parameterRows.set(parameter.name, row);
+  return rowEl;
+}
+
+/** Shows sliders for `active`'s parameters (none if nothing is in control),
+ *  refreshing their values from the last poll unless one is being edited. */
+function syncAlgorithmParameters(active) {
+  const parameters = algorithmOptions.find((o) => o.name === active)?.parameters ?? [];
+  const key = JSON.stringify([active, parameters.map(({ value, ...declaration }) => declaration)]);
+  if (key !== parameterRowsKey) {
+    parameterRowsKey = key;
+    parameterRows = new Map();
+    algorithmParametersEl.replaceChildren(...parameters.map((p) => buildParameterRow(active, p)));
+    algorithmParametersEl.hidden = parameters.length === 0;
+  }
+
+  const now = performance.now();
+  for (const parameter of parameters) {
+    const row = parameterRows.get(parameter.name);
+    if (row.held || now - row.lastEditMs < PARAMETER_EDIT_GRACE_MS) continue;
+    row.input.value = parameter.value;
+    row.valueEl.textContent = formatParameterValue(parameter, parameter.value);
   }
 }
 

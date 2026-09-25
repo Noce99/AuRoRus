@@ -98,6 +98,48 @@
   color: #f59e0b;
 }
 
+#algorithm-parameters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #303640;
+}
+
+#algorithm-parameters[hidden] {
+  display: none;
+}
+
+.parameter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.parameter-name {
+  font-family: ui-monospace, monospace;
+  color: #e8e8e8;
+}
+
+.parameter-value {
+  font-variant-numeric: tabular-nums;
+  color: #e8e8e8;
+}
+
+.parameter-row input[type="range"] {
+  width: 100%;
+  margin: 4px 0 2px;
+  accent-color: #3f6dc9;
+}
+
+.parameter-description {
+  margin: 0;
+  font-size: 12px;
+  color: #9aa4b2;
+  line-height: 1.35;
+}
+
 #slam-state {
   margin: 0;
   font-size: 15px;
