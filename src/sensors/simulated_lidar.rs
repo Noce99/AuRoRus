@@ -1,15 +1,18 @@
 //! [`SimulatedLidar`]: a synthetic LIDAR sensor that raycasts against the
 //! currently loaded map from the vehicle's real position, for exercising
 //! algorithms against physically grounded readings without real hardware.
-//! Also draws every hit on its own drawing topic (see
+//! Every hit's range is corrupted with gaussian noise. Also draws every hit on its own drawing topic (see
 //! [`crate::topics::Drawing`]).
 
+use super::simulated_imu::gaussian;
 use crate::environment::MapInfo;
 use crate::topics::{
     Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape,
     VEHICLE_STATUS_TOPIC_NAME, VehicleStatus,
 };
 use crate::{Captain, Executor, Ticker};
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 use std::any::Any;
 use std::time::Duration;
 
@@ -29,6 +32,11 @@ pub struct SimulatedLidarConfig {
     /// [`SimulatedLidar`]'s field of view, in radians, centered on the
     /// vehicle's forward direction.
     pub fov_rad: f32,
+    /// Seed for the noise generator; `0` picks a fresh random one per run.
+    pub seed: u64,
+    /// Standard deviation of the zero-mean gaussian noise added to every
+    /// hit's range, in meters - `0.0` gives a perfect sensor.
+    pub range_std_m: f64,
 }
 
 impl Default for SimulatedLidarConfig {
@@ -90,6 +98,11 @@ impl Executor for SimulatedLidar {
         let stale_after =
             Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / self.config.rate_hz));
         let mut ticker = Ticker::new(self.config.rate_hz);
+        let seed = match self.config.seed {
+            0 => rand::rng().random(),
+            seed => seed,
+        };
+        let mut rng = StdRng::seed_from_u64(seed);
 
         while captain.is_running(self.id) {
             let status = vehicle_topic.read();
@@ -110,8 +123,7 @@ impl Executor for SimulatedLidar {
                         ),
                         None => (self.config.max_distance_m, false),
                     };
-                    let distance_m =
-                        distance_m.clamp(self.config.min_distance_m, self.config.max_distance_m);
+                    let distance_m = measured_range_m(&self.config, &mut rng, distance_m, hit);
                     if hit {
                         let d = f64::from(distance_m);
                         hits.push([
@@ -175,6 +187,23 @@ impl Executor for SimulatedLidar {
 /// every consumer of the scan uses to interpret it.
 fn ray_offset_rad(config: &SimulatedLidarConfig, index: usize) -> f32 {
     LidarScan::ray_angle_rad(config.fov_rad, config.num_points, index)
+}
+
+/// What the sensor reports for a ray whose true range is `distance_m`: hits
+/// get gaussian range noise (misses keep reporting max range untouched), and
+/// the result is clamped to the sensor's reported range limits.
+fn measured_range_m(
+    config: &SimulatedLidarConfig,
+    rng: &mut StdRng,
+    distance_m: f32,
+    hit: bool,
+) -> f32 {
+    let distance_m = if hit {
+        distance_m + gaussian(rng, config.range_std_m) as f32
+    } else {
+        distance_m
+    };
+    distance_m.clamp(config.min_distance_m, config.max_distance_m)
 }
 
 /// Marches a ray from `(origin_x, origin_y)` (world meters) at `angle_rad`
@@ -303,10 +332,44 @@ mod tests {
             min_distance_m: 0.0,
             max_distance_m: 1.0,
             fov_rad: 2.0,
+            seed: 1,
+            range_std_m: 0.0,
         };
 
         assert_eq!(ray_offset_rad(&config, 0), -1.0);
         assert_eq!(ray_offset_rad(&config, 1), 0.0);
         assert_eq!(ray_offset_rad(&config, 2), 1.0);
+    }
+
+    #[test]
+    fn a_zero_range_std_reports_the_true_hit_distance_exactly() {
+        let config = SimulatedLidarConfig {
+            range_std_m: 0.0,
+            ..SimulatedLidarConfig::default()
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+
+        assert_eq!(measured_range_m(&config, &mut rng, 3.25, true), 3.25);
+    }
+
+    #[test]
+    fn hit_ranges_are_noisy_with_the_configured_std_but_misses_are_not() {
+        let config = SimulatedLidarConfig {
+            range_std_m: 0.05,
+            ..SimulatedLidarConfig::default()
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+
+        let samples: Vec<f64> = (0..10_000)
+            .map(|_| f64::from(measured_range_m(&config, &mut rng, 5.0, true)))
+            .collect();
+        let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+        let std =
+            (samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / samples.len() as f64).sqrt();
+        assert!((mean - 5.0).abs() < 0.005, "mean {mean}");
+        assert!((std - 0.05).abs() < 0.005, "std {std}");
+
+        let max = config.max_distance_m;
+        assert_eq!(measured_range_m(&config, &mut rng, max, false), max);
     }
 }

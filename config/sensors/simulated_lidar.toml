@@ -13,3 +13,11 @@ max_distance_m = 12.0
 # SimulatedLidar's field of view, centered on the vehicle's forward
 # direction, in radians (2*pi = 6.283185307179586).
 fov_rad = 4.2
+
+# Seed for the noise generator: the same seed gives the same noise sequence
+# on every run. 0 picks a fresh random seed each time.
+seed = 0
+# Standard deviation of the zero-mean gaussian noise added to the range of
+# every hit, in meters (misses keep reporting max_distance_m). 0.0 gives a
+# perfect sensor.
+range_std_m = 0.02

@@ -148,7 +148,7 @@ impl NoiseModel {
 /// One sample from a zero-mean normal distribution with standard deviation
 /// `std`, via the Box-Muller transform. Exactly `0.0` when `std` is `0.0`,
 /// so a zeroed error term leaves the truth untouched bit for bit.
-fn gaussian(rng: &mut StdRng, std: f64) -> f64 {
+pub(super) fn gaussian(rng: &mut StdRng, std: f64) -> f64 {
     // `1.0 - random()` lands in (0, 1], keeping `ln` finite.
     let u1: f64 = 1.0 - rng.random::<f64>();
     let u2: f64 = rng.random();
