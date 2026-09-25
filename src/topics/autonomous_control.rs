@@ -44,6 +44,10 @@ pub struct AutonomousAlgorithmInfo {
     /// Every parameter that can be tuned while the algorithm runs, with the
     /// value it's currently running with. Empty if none.
     pub parameters: Vec<AlgorithmParameter>,
+    /// What the algorithm wants its driver to know right now, e.g. why it's
+    /// holding the vehicle stopped - `None` if nothing. Set with
+    /// [`crate::autonomous_control::report_message`].
+    pub message: Option<String>,
 }
 
 impl AutonomousAlgorithmInfo {
@@ -52,6 +56,7 @@ impl AutonomousAlgorithmInfo {
             label: label.into(),
             description: description.into(),
             parameters: Vec::new(),
+            message: None,
         }
     }
 
@@ -196,6 +201,8 @@ pub struct AvailableAlgorithm {
     pub description: String,
     /// See [`AutonomousAlgorithmInfo::parameters`].
     pub parameters: Vec<AlgorithmParameter>,
+    /// See [`AutonomousAlgorithmInfo::message`].
+    pub message: Option<String>,
 }
 
 /// What [`crate::autonomous_control::AutonomousControlsHandler`] is

@@ -201,6 +201,7 @@ async function pollVehicleModel() {
 const algorithmSelectEl = document.getElementById("algorithm-select");
 const algorithmDescriptionEl = document.getElementById("algorithm-description");
 const algorithmStatusEl = document.getElementById("algorithm-status");
+const algorithmMessageEl = document.getElementById("algorithm-message");
 const algorithmStartBtn = document.getElementById("algorithm-start-btn");
 const algorithmPauseBtn = document.getElementById("algorithm-pause-btn");
 
@@ -212,7 +213,7 @@ let liveAlgorithm = null;
 /** Whether the selected algorithm was last reported running (not paused). */
 let algorithmRunning = false;
 
-/** `{name, label, description, parameters}` of every algorithm last reported available. */
+/** `{name, label, description, parameters, message}` of every algorithm last reported available. */
 let algorithmOptions = [];
 
 async function selectAlgorithm(name, running) {
@@ -305,6 +306,11 @@ async function pollAlgorithms() {
   } else {
     algorithmStatusEl.textContent = "In control. Any WASD key overrides it.";
   }
+
+  // What the selected algorithm itself says, e.g. why it holds the vehicle.
+  const message = algorithmOptions.find((o) => o.name === status.selected)?.message ?? null;
+  algorithmMessageEl.hidden = message === null;
+  algorithmMessageEl.textContent = message ?? "";
 
   syncAlgorithmParameters(status.selected);
 }

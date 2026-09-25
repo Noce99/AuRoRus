@@ -1,0 +1,31 @@
+# Configuration for `aurorus::autonomous_control::pure_pursuit`, which
+# follows the selected map's race line (the `race_line` topic) with the
+# pure pursuit steering law.
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 50.0
+# Where the vehicle's pose comes from: 0 = localization (odometry composed
+# onto SLAM's map_to_odom, only while localizing), 1 = ground truth
+# (vehicle_status, simulation only).
+pose_source = 0
+# Distance between the front and rear axles, in meters.
+wheelbase_m = 0.32
+# Distance from the pose's reference point (the center of gravity) back to
+# the rear axle, in meters.
+lr_m = 0.16
+# Lookahead distance: lookahead_base_m + lookahead_gain_s * reference speed,
+# clamped to [lookahead_min_m, lookahead_max_m], in meters.
+lookahead_min_m = 0.6
+lookahead_max_m = 3.0
+lookahead_base_m = 0.4
+# Lookahead growth with the race line's reference speed, in seconds.
+lookahead_gain_s = 0.3
+# Multiplies the race line's speed profile, pure number.
+speed_scale = 0.6
+# The profile speed is read this far ahead (in time at the reference speed)
+# of the nearest point, to cover actuator lag, in seconds.
+speed_preview_s = 0.2
+# If > 0, ignore the speed profile and drive at this speed, in m/s.
+constant_speed = 0.0
+# Farther than this from the line, the vehicle stops, in meters.
+max_cross_track_m = 1.0

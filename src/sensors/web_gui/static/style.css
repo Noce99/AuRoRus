@@ -30,6 +30,7 @@
 #vehicle-model-description,
 #algorithm-description,
 #algorithm-status,
+#algorithm-message,
 #slam-details,
 #localization-details,
 #planning-details,
@@ -100,6 +101,11 @@
 #planning-outcome.error,
 #algorithm-status.stale {
   color: #f59e0b;
+}
+
+/* What the selected algorithm itself reports, e.g. why it holds the vehicle. */
+#algorithm-message {
+  color: #facc15;
 }
 
 .parameter-list {

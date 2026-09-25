@@ -181,6 +181,14 @@ impl Executor for PurePursuit {
 }
 ```
 
+### Optional: report a message to the driver
+
+`autonomous_control::report_message(captain, id, Some(text))` sets the
+algorithm's `AutonomousAlgorithmInfo::message`, for example to say why the
+vehicle is held stopped. `web_gui` shows it in yellow under the status line in
+the Autonomous Algos panel. Pass `None` to clear it. The info is only rewritten
+when the message changes, so it's fine to call this every tick.
+
 ### 3. Optional: make parameters tunable live
 
 See [Live parameter tuning](#live-parameter-tuning).
@@ -266,6 +274,75 @@ sequenceDiagram
 - **A restart (R) resets every unsaved parameter** to its TOML value. A
   `--debug` recording captures every change, since both topics are
   recorded.
+
+## Pure pursuit
+
+`pure_pursuit.rs` follows the selected map's `race_line`. That is the
+min-time line if the map has one, otherwise the min-curvature line, otherwise
+the centerline (see `planning.md`). Its parameters live in
+`config/autonomous_control/pure_pursuit.toml`.
+
+Each tick it does the following:
+
+1. **Pose.** It gets the pose, then moves it back by `lr_m` to the rear axle.
+   The steering law assumes the car turns about the rear axle.
+2. **Nearest point.** It finds the nearest point on the line.
+   - The first search covers the whole line.
+   - After that it searches only a window starting just behind the last match
+     and running `1.5 · lookahead_max_m + 1` metres ahead of it.
+   - The window keeps the car from snapping to another stretch of track that
+     happens to run close by, such as a hairpin or parallel straights.
+3. **Lookahead distance:**
+   `Ld = clamp(lookahead_base_m + lookahead_gain_s · v_ref, lookahead_min_m, lookahead_max_m)`.
+   `v_ref` is the line's speed at the nearest point.
+4. **Target.** The target is the point `Ld` metres ahead along the line,
+   wrapping around the lap.
+5. **Steering:** `δ = atan(2 · wheelbase_m · sin α / ld)`.
+   - `α` is the bearing of the target relative to the heading.
+   - `ld` is the straight-line distance to the target.
+   - The result is clamped to `max_steering_angle_rad`.
+   - No sign flip is needed: `α` is measured the same way as the heading, so
+     it follows the same convention as `servo_position_rad`.
+6. **Speed.**
+   - Normally: `speed_scale ·` the line's speed `v_ref · speed_preview_s`
+     metres further ahead. Reading ahead covers actuator lag.
+   - If `constant_speed > 0`, that speed is used instead. Use this for lines
+     without a meaningful speed profile, or to tune steering on its own.
+   - The result is clamped to `max_speed_mps`.
+
+**Pose source** (`pose_source`):
+
+- **0, localization (default):** odometry composed onto `slam_status.map_to_odom`,
+  which gives the pose on the map at odometry's rate. It is only used when all
+  of these hold:
+  - SLAM is in the `Localizing` state. Paused doesn't count: the pose would
+    only be dead-reckoned.
+  - Odometry is at most 300 ms old.
+  - Odometry's `reset_count` matches the one SLAM reports.
+- **1, ground truth:** `vehicle_status`. This only exists in simulation and is
+  for debugging.
+
+**The vehicle is held stopped** in any of these cases:
+- there is no race line;
+- there is no trustworthy pose;
+- the car is farther than `max_cross_track_m` from the line (the next tick
+  searches the whole line again).
+
+The reason is shown in yellow in the Autonomous Algos panel, for example
+"Localization isn't running".
+
+The drawing shows:
+- the nearest point, in blue;
+- the target, in purple;
+- the chord from the rear axle to the target;
+- the arc being steered along.
+
+**Tuning tips:**
+- Start with `speed_scale` around 0.6. Pure pursuit cuts corners, so the
+  profile's full speed leaves no margin.
+- If the car oscillates on straights, raise the lookahead with
+  `lookahead_gain_s` or `lookahead_min_m`.
+- If it cuts corners, shorten the lookahead.
 
 ## Conventions and pitfalls
 

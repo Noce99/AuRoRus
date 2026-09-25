@@ -33,7 +33,9 @@
 //!   [`crate::topics::VEHICLE_LIMITS_TOPIC_NAME`];
 //! - if it's expensive to run, can idle while
 //!   [`Captain::is_selected_algorithm`] says it isn't selected;
-//! - optionally, lets its parameters be tuned live - see [`ParameterTuner`].
+//! - optionally, lets its parameters be tuned live - see [`ParameterTuner`];
+//! - optionally, tells the driver what's going on (e.g. why it holds the
+//!   vehicle stopped) - see [`report_message`].
 //!
 //! See `always_left.rs` for the smallest possible example, and
 //! `gap_follower.rs` for one with tunable parameters.
@@ -100,6 +102,7 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
                 label: info.label,
                 description: info.description,
                 parameters: info.parameters,
+                message: info.message,
             })
         })
         .collect();
@@ -192,6 +195,22 @@ impl ParameterTuner {
             .expect("lost writer authorization for this algorithm's info topic");
         true
     }
+}
+
+/// Sets the algorithm running as `executor_id`'s
+/// [`AutonomousAlgorithmInfo::message`] - shown in `web_gui`'s autonomous
+/// algorithms panel - rewriting its info only if the message changed, so it
+/// can be called every tick.
+pub fn report_message(captain: &Captain, executor_id: u8, message: Option<String>) {
+    let info_topic = captain.autonomous_control_info(executor_id);
+    let mut info = info_topic.read().into_value();
+    if info.message == message {
+        return;
+    }
+    info.message = message;
+    info_topic
+        .write(executor_id, info)
+        .expect("lost writer authorization for this algorithm's info topic");
 }
 
 /// Where the algorithm called `name` keeps its config:
