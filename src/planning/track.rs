@@ -340,6 +340,7 @@ pub(crate) mod tests {
             raster: Raster::new(size, size, white),
             centerline: Vec::new(),
             race_line: Vec::new(),
+            min_time_race_line: Vec::new(),
         }
     }
 

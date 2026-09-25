@@ -27,6 +27,18 @@ pub struct PlanningParameters {
     pub values: BTreeMap<String, f64>,
 }
 
+/// What the planned race line minimizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningObjective {
+    /// The lap's squared curvature: saved as `race_line.csv`.
+    #[default]
+    MinCurvature,
+    /// The lap time: the minimum-curvature line first (saved too), then
+    /// the minimum-time line from it, saved as `race_line_min_time.csv`.
+    MinTime,
+}
+
 /// Asks the planner to plan a race line for the map currently selected
 /// (the `map` topic).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -35,6 +47,7 @@ pub struct PlanningRequest {
     /// matches the last one it handled, as
     /// [`crate::topics::SlamSaveRequest::requested`].
     pub requested: u64,
+    pub objective: PlanningObjective,
 }
 
 /// What the planner is doing.
@@ -54,6 +67,8 @@ pub enum PlanningState {
 pub struct PlanningOutcome {
     /// The [`PlanningRequest::requested`] this answers.
     pub requested: u64,
+    /// The objective asked for.
+    pub objective: PlanningObjective,
     /// The map folder the race line was planned for, if one was selected.
     pub map: Option<String>,
     /// The race line file written.
@@ -74,6 +89,16 @@ pub struct PlanningOutcome {
     pub reference_max_curvature_per_m: f64,
     /// How long planning took, in milliseconds.
     pub elapsed_ms: f64,
+    /// For [`PlanningObjective::MinTime`]: the minimum-time line file
+    /// written, if it converged.
+    pub min_time_saved_to: Option<String>,
+    /// For [`PlanningObjective::MinTime`]: why no minimum-time line was
+    /// written (the minimum-curvature one still was).
+    pub min_time_error: Option<String>,
+    /// Length of one lap along the minimum-time line, in meters.
+    pub min_time_lap_length_m: f64,
+    /// Time of one lap along the minimum-time line, in seconds.
+    pub min_time_lap_time_s: f64,
 }
 
 /// What [`crate::planning::Planner`] is currently doing, so a driver can
@@ -112,6 +137,11 @@ mod tests {
                 max_curvature_per_m: 0.8,
                 reference_max_curvature_per_m: 1.4,
                 elapsed_ms: 250.0,
+                objective: PlanningObjective::MinTime,
+                min_time_saved_to: Some("maps/track/race_lines/race_line_min_time.csv".to_string()),
+                min_time_error: None,
+                min_time_lap_length_m: 41.0,
+                min_time_lap_time_s: 11.9,
             }),
         };
 

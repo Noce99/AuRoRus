@@ -29,7 +29,7 @@
 //! curvature one.
 
 use super::PlanError;
-use super::geometry::{Point2, left_normal, resample_even_spacing, tangents};
+use super::geometry::{Point2, curvature_jacobian, left_normal, resample_even_spacing, tangents};
 use super::track::TrackGrid;
 use optimization_engine::constraints::Rectangle;
 use optimization_engine::core::ExitStatus;
@@ -133,8 +133,8 @@ pub fn optimize(
 }
 
 /// Each point's normal and free space either side of it.
-struct Offsets {
-    normals: Vec<Point2>,
+pub(super) struct Offsets {
+    pub(super) normals: Vec<Point2>,
     /// Free space toward the normal (to the left), in meters.
     left_m: Vec<f64>,
     /// Free space away from it (to the right), in meters.
@@ -143,7 +143,7 @@ struct Offsets {
 }
 
 impl Offsets {
-    fn along(line: &[Point2], grid: &TrackGrid) -> Offsets {
+    pub(super) fn along(line: &[Point2], grid: &TrackGrid) -> Offsets {
         let normals: Vec<Point2> = tangents(line).into_iter().map(left_normal).collect();
         let free = |point: &Point2, normal: &Point2, sign: f64| {
             let direction = Point2 {
@@ -173,7 +173,11 @@ impl Offsets {
     /// later on, the line solved around is already accepted, so every box
     /// is only widened to keep it (offset `0`) feasible - it can end up a
     /// hair outside after resampling or the raycast's rounding.
-    fn bounds(&self, margin_m: f64, first: bool) -> Result<(Vec<f64>, Vec<f64>), PlanError> {
+    pub(super) fn bounds(
+        &self,
+        margin_m: f64,
+        first: bool,
+    ) -> Result<(Vec<f64>, Vec<f64>), PlanError> {
         let mut lower = Vec::with_capacity(self.points.len());
         let mut upper = Vec::with_capacity(self.points.len());
         for i in 0..self.points.len() {
@@ -213,53 +217,13 @@ struct CurvatureModel {
 
 impl CurvatureModel {
     fn around(line: &[Point2], normals: &[Point2]) -> CurvatureModel {
-        let n = line.len();
-        let cross = |a: Point2, b: Point2| a.x * b.y - a.y * b.x;
-        let dot = |a: Point2, b: Point2| a.x * b.x + a.y * b.y;
-        let scaled = |a: Point2, k: f64| Point2 {
-            x: a.x * k,
-            y: a.y * k,
-        };
-        let mut model = CurvatureModel {
-            base: Vec::with_capacity(n),
-            prev: Vec::with_capacity(n),
-            this: Vec::with_capacity(n),
-            next: Vec::with_capacity(n),
-        };
-        for i in 0..n {
-            let (p, c, q) = ((i + n - 1) % n, i, (i + 1) % n);
-            let d = Point2 {
-                x: (line[q].x - line[p].x) / 2.0,
-                y: (line[q].y - line[p].y) / 2.0,
-            };
-            let s = Point2 {
-                x: line[q].x - 2.0 * line[c].x + line[p].x,
-                y: line[q].y - 2.0 * line[c].y + line[p].y,
-            };
-            let length = dot(d, d).sqrt().max(1e-12);
-            let numerator = cross(d, s);
-            let denominator = length.powi(3);
-            // d(kappa) for a change (dd, ds) of (d, s): the quotient rule on
-            // (d x s) / |d|^3, with d|d|^3 = 3 |d| (d . dd).
-            let derivative = |dd: Point2, ds: Point2| {
-                let d_numerator = cross(dd, s) + cross(d, ds);
-                let d_denominator = 3.0 * length * dot(d, dd);
-                (d_numerator * denominator - numerator * d_denominator)
-                    / (denominator * denominator)
-            };
-            model.base.push(numerator / denominator);
-            model
-                .prev
-                .push(derivative(scaled(normals[p], -0.5), normals[p]));
-            model.this.push(derivative(
-                Point2 { x: 0.0, y: 0.0 },
-                scaled(normals[c], -2.0),
-            ));
-            model
-                .next
-                .push(derivative(scaled(normals[q], 0.5), normals[q]));
+        let rows = curvature_jacobian(line, normals);
+        CurvatureModel {
+            base: rows.iter().map(|row| row.kappa).collect(),
+            prev: rows.iter().map(|row| row.prev).collect(),
+            this: rows.iter().map(|row| row.this).collect(),
+            next: rows.iter().map(|row| row.next).collect(),
         }
-        model
     }
 
     /// Every point's curvature for offsets `alpha`.

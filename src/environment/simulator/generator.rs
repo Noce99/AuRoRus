@@ -371,6 +371,7 @@ mod tests {
         assert_eq!(map.raster.height_px, generated.height_px);
         assert_eq!(map.centerline.len(), generated.num_race_line_points);
         assert!(map.race_line.is_empty());
+        assert!(map.min_time_race_line.is_empty());
 
         std::fs::remove_dir_all(&config.output_root).ok();
     }

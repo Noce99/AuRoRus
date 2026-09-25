@@ -19,9 +19,9 @@ use crate::topics::{
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
     HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
     PLACE_AT_START_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
-    PLANNING_STATUS_TOPIC_NAME, PlaceAtStart, PlanningParameters, PlanningRequest, PlanningState,
-    PlanningStatus, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
-    SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus,
+    PLANNING_STATUS_TOPIC_NAME, PlaceAtStart, PlanningObjective, PlanningParameters,
+    PlanningRequest, PlanningState, PlanningStatus, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus,
     VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
     VehicleModelSelection, VehicleModelStatus, VescCommand,
@@ -969,12 +969,32 @@ struct PlanningStartResponse {
     requested: u64,
 }
 
-/// `POST /api/planning_start` - asks [`crate::planning::Planner`] to plan a
-/// race line for the selected map, by bumping `planning_request`'s counter.
-/// The planner reports its progress and outcome on `planning_status`, the
-/// outcome under the returned request number. Refused while it's already
-/// planning, or with no map selected.
-pub fn planning_start(captain: &Captain, writer_id: u8) -> ResponseBox {
+#[derive(serde::Deserialize, Default)]
+struct PlanningStartBody {
+    #[serde(default)]
+    objective: PlanningObjective,
+}
+
+/// `POST /api/planning_start` - body `{"objective": "min_curvature" |
+/// "min_time"}` (empty for minimum curvature) - asks
+/// [`crate::planning::Planner`] to plan a race line for the selected map,
+/// by bumping `planning_request`'s counter. The planner reports its
+/// progress and outcome on `planning_status`, the outcome under the
+/// returned request number. Refused while it's already planning, or with
+/// no map selected.
+pub fn planning_start(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+    let mut text = String::new();
+    if let Err(err) = request.as_reader().read_to_string(&mut text) {
+        return bad_request(&format!("failed to read the request body: {err}"));
+    }
+    let body: PlanningStartBody = if text.trim().is_empty() {
+        PlanningStartBody::default()
+    } else {
+        match serde_json::from_str(&text) {
+            Ok(body) => body,
+            Err(err) => return bad_request(&format!("invalid body: {err}")),
+        }
+    };
     let status = captain
         .try_topic::<PlanningStatus>(PLANNING_STATUS_TOPIC_NAME)
         .map(|topic| topic.read().into_value());
@@ -996,7 +1016,13 @@ pub fn planning_start(captain: &Captain, writer_id: u8) -> ResponseBox {
     let topic = captain.topic::<PlanningRequest>(PLANNING_REQUEST_TOPIC_NAME);
     let requested = topic.read().requested.wrapping_add(1);
     topic
-        .write(writer_id, PlanningRequest { requested })
+        .write(
+            writer_id,
+            PlanningRequest {
+                requested,
+                objective: body.objective,
+            },
+        )
         .expect("lost writer authorization for the planning_request topic");
     json_response(&PlanningStartResponse { requested }, 200)
 }

@@ -21,6 +21,7 @@ mod centerline;
 mod config;
 mod geometry;
 mod min_curvature;
+mod min_time;
 mod pipeline;
 mod planner;
 mod speed_profile;
@@ -53,6 +54,8 @@ pub enum PlanError {
     Solver(String),
     /// The optimizer didn't converge within its iteration budget.
     NotConverged { iterations: usize },
+    /// The minimum-time optimization didn't converge.
+    MinTimeNotConverged { reason: String },
     /// Stopped before finishing.
     Cancelled,
 }
@@ -88,6 +91,11 @@ impl std::fmt::Display for PlanError {
                 f,
                 "the optimizer didn't converge in {iterations} iterations - raise \
                  solver_max_iterations, or the spacing"
+            ),
+            Self::MinTimeNotConverged { reason } => write!(
+                f,
+                "the minimum-time optimization didn't converge: {reason} - raise its iteration \
+                 or time limits, or its spacing"
             ),
             Self::Cancelled => write!(f, "cancelled"),
         }

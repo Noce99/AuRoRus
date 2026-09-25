@@ -46,6 +46,65 @@ pub fn curvatures(points: &[Point2]) -> Vec<f64> {
         .collect()
 }
 
+/// One point's discrete curvature and how it changes as the point and its
+/// neighbors move along their normals - see [`curvature_jacobian`].
+#[derive(Debug, Clone, Copy)]
+pub struct CurvatureRow {
+    /// `kappa_i = (d_i x s_i) / |d_i|^3`, with `d_i = (p_{i+1} - p_{i-1}) /
+    /// 2` and `s_i = p_{i+1} - 2 p_i + p_{i-1}`, in 1/m.
+    pub kappa: f64,
+    /// `d kappa_i / d n_{i-1}`, `d kappa_i / d n_i`, `d kappa_i / d n_{i+1}`
+    /// for moves `p_j + n_j * normal_j`, in 1/m^2.
+    pub prev: f64,
+    pub this: f64,
+    pub next: f64,
+}
+
+/// For every point of the closed loop `points`, its discrete curvature from
+/// central differences and that curvature's derivatives with respect to
+/// moving it and its two neighbors along `normals` (one per point, unit
+/// length). Unlike [`curvatures`] (Menger), this is the form the optimizers
+/// differentiate.
+pub fn curvature_jacobian(points: &[Point2], normals: &[Point2]) -> Vec<CurvatureRow> {
+    let n = points.len();
+    let cross = |a: Point2, b: Point2| a.x * b.y - a.y * b.x;
+    let dot = |a: Point2, b: Point2| a.x * b.x + a.y * b.y;
+    let scaled = |a: Point2, k: f64| Point2 {
+        x: a.x * k,
+        y: a.y * k,
+    };
+    (0..n)
+        .map(|i| {
+            let (p, c, q) = ((i + n - 1) % n, i, (i + 1) % n);
+            let d = Point2 {
+                x: (points[q].x - points[p].x) / 2.0,
+                y: (points[q].y - points[p].y) / 2.0,
+            };
+            let s = Point2 {
+                x: points[q].x - 2.0 * points[c].x + points[p].x,
+                y: points[q].y - 2.0 * points[c].y + points[p].y,
+            };
+            let length = dot(d, d).sqrt().max(1e-12);
+            let numerator = cross(d, s);
+            let denominator = length.powi(3);
+            // d(kappa) for a change (dd, ds) of (d, s): the quotient rule on
+            // (d x s) / |d|^3, with d|d|^3 = 3 |d| (d . dd).
+            let derivative = |dd: Point2, ds: Point2| {
+                let d_numerator = cross(dd, s) + cross(d, ds);
+                let d_denominator = 3.0 * length * dot(d, dd);
+                (d_numerator * denominator - numerator * d_denominator)
+                    / (denominator * denominator)
+            };
+            CurvatureRow {
+                kappa: numerator / denominator,
+                prev: derivative(scaled(normals[p], -0.5), normals[p]),
+                this: derivative(Point2 { x: 0.0, y: 0.0 }, scaled(normals[c], -2.0)),
+                next: derivative(scaled(normals[q], 0.5), normals[q]),
+            }
+        })
+        .collect()
+}
+
 /// Largest curvature magnitude along the closed loop, in 1/m.
 pub fn max_abs_curvature(points: &[Point2]) -> f64 {
     curvatures(points)

@@ -44,9 +44,34 @@ solver_max_iterations = 100000
 
 # Top speed, in m/s.
 max_speed_mps = 8.0
+# The vehicle's grip is a friction ellipse: braking or accelerating in a
+# corner leaves less grip to turn. Its lateral semi-axis is the largest
+# cornering acceleration, its longitudinal one the largest braking
+# deceleration, and accelerating is further capped by the motor.
 # Largest cornering (lateral) acceleration, in m/s^2.
 max_lateral_accel_mps2 = 6.0
-# Largest forward acceleration, in m/s^2.
+# Largest forward acceleration the motor gives, in m/s^2.
 max_accel_mps2 = 4.0
 # Largest braking deceleration, in m/s^2.
 max_decel_mps2 = 6.0
+
+# --- Minimum time -------------------------------------------------------------
+
+# Distance between the minimum-time optimization's points, in meters - and
+# between race_line_min_time.csv's points (resampling a polyline linearly
+# would put kinks in it). 0.1 gives about the same lap time as 0.2 but takes
+# over twice as long.
+min_time_spacing_m = 0.2
+# The line's sideways offsets follow a smooth curve (a B-spline) through
+# control points this far apart, in meters. Smaller follows narrow sections
+# closer but makes the problem stiffer and slower to solve.
+min_time_control_spacing_m = 1.0
+# Lowest speed allowed anywhere, in m/s.
+min_speed_mps = 0.5
+# Most outer (augmented Lagrangian) iterations.
+min_time_max_outer_iterations = 30
+# Time budget, in seconds. Minimum curvature is still saved if it runs out.
+min_time_max_duration_s = 120.0
+# Converged once no limit (ellipse, motor) is exceeded by more than this
+# fraction of it. The saved speeds are recomputed to respect them exactly.
+min_time_tolerance = 0.01

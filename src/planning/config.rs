@@ -4,6 +4,7 @@
 //! values back ([`save_parameters`]) or reload them ([`saved_values`]).
 
 use super::min_curvature::MinCurvatureConfig;
+use super::min_time::MinTimeConfig;
 use super::speed_profile::SpeedLimits;
 use crate::topics::AlgorithmParameter;
 use std::collections::BTreeMap;
@@ -51,8 +52,24 @@ pub struct PlanningConfig {
     pub max_lateral_accel_mps2: f64,
     /// Largest forward acceleration of the speed profile, in m/s^2.
     pub max_accel_mps2: f64,
-    /// Largest braking deceleration of the speed profile, in m/s^2.
+    /// Largest braking deceleration, in m/s^2 - the friction ellipse's
+    /// longitudinal semi-axis, so the grip limit on accelerating too.
     pub max_decel_mps2: f64,
+    /// Spacing of the minimum-time optimization's points, in meters.
+    pub min_time_spacing_m: f64,
+    /// Spacing of the B-spline control values the minimum-time line's
+    /// offsets follow, in meters.
+    pub min_time_control_spacing_m: f64,
+    /// Lowest speed the minimum-time line may slow down to, in m/s.
+    pub min_speed_mps: f64,
+    /// Most outer (augmented Lagrangian) iterations of the minimum-time
+    /// optimization.
+    pub min_time_max_outer_iterations: usize,
+    /// Time budget of the minimum-time optimization, in seconds.
+    pub min_time_max_duration_s: f64,
+    /// The minimum-time line has converged once no limit is exceeded by
+    /// more than this fraction of it.
+    pub min_time_tolerance: f64,
 }
 
 impl Default for PlanningConfig {
@@ -74,6 +91,21 @@ impl PlanningConfig {
             tolerance_m: self.tolerance_m,
             solver_tolerance: self.solver_tolerance,
             solver_max_iterations: self.solver_max_iterations,
+        }
+    }
+
+    /// The minimum-time optimizer's share of this config.
+    pub fn min_time(&self) -> MinTimeConfig {
+        MinTimeConfig {
+            margin_m: self.vehicle_width_m / 2.0 + self.safety_margin_m,
+            spacing_m: self.min_time_spacing_m,
+            control_spacing_m: self.min_time_control_spacing_m,
+            min_speed_mps: self.min_speed_mps,
+            limits: self.speed_limits(),
+            max_outer_iterations: self.min_time_max_outer_iterations,
+            max_inner_iterations: self.solver_max_iterations,
+            max_duration: std::time::Duration::from_secs_f64(self.min_time_max_duration_s),
+            tolerance: self.min_time_tolerance,
         }
     }
 
@@ -125,13 +157,29 @@ pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
             .description("Top speed of the speed profile."),
         AlgorithmParameter::float("max_lateral_accel_mps2", 0.5, 20.0, 0.1)
             .unit("m/s²")
-            .description("Largest cornering acceleration."),
+            .description("Largest cornering acceleration - the friction ellipse's lateral axis."),
         AlgorithmParameter::float("max_accel_mps2", 0.5, 20.0, 0.1)
             .unit("m/s²")
-            .description("Largest forward acceleration."),
+            .description("Largest forward acceleration the motor gives."),
         AlgorithmParameter::float("max_decel_mps2", 0.5, 20.0, 0.1)
             .unit("m/s²")
-            .description("Largest braking deceleration."),
+            .description("Largest braking deceleration - the friction ellipse's longitudinal axis."),
+        AlgorithmParameter::float("min_time_spacing_m", 0.05, 1.0, 0.01)
+            .unit("m")
+            .description("Minimum time: distance between the optimized points."),
+        AlgorithmParameter::float("min_time_control_spacing_m", 0.2, 5.0, 0.1)
+            .unit("m")
+            .description("Minimum time: the line bends through control points this far apart - smaller follows the track closer, but is slower to solve."),
+        AlgorithmParameter::float("min_speed_mps", 0.1, 5.0, 0.1)
+            .unit("m/s")
+            .description("Minimum time: lowest speed allowed anywhere."),
+        AlgorithmParameter::int("min_time_max_outer_iterations", 1, 200, 1)
+            .description("Minimum time: most augmented Lagrangian iterations."),
+        AlgorithmParameter::float("min_time_max_duration_s", 5.0, 600.0, 5.0)
+            .unit("s")
+            .description("Minimum time: time budget of the optimization."),
+        AlgorithmParameter::float("min_time_tolerance", 0.001, 0.1, 0.001)
+            .description("Minimum time: converged once no limit is exceeded by more than this fraction."),
     ]
 }
 

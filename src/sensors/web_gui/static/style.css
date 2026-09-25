@@ -264,6 +264,7 @@
 
 #vehicle-model-select,
 #topic-select,
+#planning-objective,
 #slam-save-name {
   flex: 0 0 auto;
   font: inherit;

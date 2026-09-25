@@ -23,6 +23,9 @@ pub const CENTERLINE_FILE_NAME: &str = "centerline.csv";
 /// Name of the planned race line file inside `race_lines/` - see
 /// [`crate::planning`].
 pub const RACE_LINE_FILE_NAME: &str = "race_line.csv";
+/// Name of the planned minimum-time race line file inside `race_lines/` -
+/// see [`crate::planning`].
+pub const MIN_TIME_RACE_LINE_FILE_NAME: &str = "race_line_min_time.csv";
 /// Name of the metadata file inside a map folder.
 pub const INFO_FILE_NAME: &str = "info.json";
 
@@ -36,9 +39,12 @@ pub struct Map {
     /// [`crate::localization::Slam`], until [`crate::planning`] computes
     /// one).
     pub centerline: Vec<SpeedPoint>,
-    /// The planned race line - empty until [`crate::planning`] has planned
-    /// one.
+    /// The planned (minimum-curvature) race line - empty until
+    /// [`crate::planning`] has planned one.
     pub race_line: Vec<SpeedPoint>,
+    /// The planned minimum-time race line - empty until [`crate::planning`]
+    /// has planned one.
+    pub min_time_race_line: Vec<SpeedPoint>,
 }
 
 /// Error returned by [`Map::load`].
@@ -81,9 +87,9 @@ impl From<RaceLineReadError> for MapLoadError {
 
 impl Map {
     /// Reads back a map folder written by any [`crate::environment::MapSource`].
-    /// A missing centerline or race line file loads as an empty
-    /// [`Map::centerline`]/[`Map::race_line`]; a malformed one is still an
-    /// error.
+    /// A missing line file loads as an empty [`Map::centerline`],
+    /// [`Map::race_line`] or [`Map::min_time_race_line`]; a malformed one is
+    /// still an error.
     pub fn load(folder: &Path) -> Result<Map, MapLoadError> {
         let info = info::read(&folder.join(INFO_FILE_NAME))?;
         let raster = tiff::read(&folder.join(MAP_TIFF_FILE_NAME))?;
@@ -93,6 +99,7 @@ impl Map {
             raster,
             centerline: read_line_if_present(folder, CENTERLINE_FILE_NAME)?,
             race_line: read_line_if_present(folder, RACE_LINE_FILE_NAME)?,
+            min_time_race_line: read_line_if_present(folder, MIN_TIME_RACE_LINE_FILE_NAME)?,
         })
     }
 }

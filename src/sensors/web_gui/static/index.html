@@ -144,8 +144,12 @@
     <section id="panel-planning" class="panel-section" hidden>
       <h1>Planning</h1>
       <p id="planning-state"></p>
+      <select id="planning-objective" title="What the race line minimizes">
+        <option value="min_curvature">Minimum curvature</option>
+        <option value="min_time">Minimum time</option>
+      </select>
       <div id="planning-controls">
-        <button type="button" id="planning-start-btn" title="Plan a minimum-curvature race line for the selected map, and save it in its folder">&#9654; Start computation</button>
+        <button type="button" id="planning-start-btn" title="Plan a race line for the selected map, and save it in its folder">&#9654; Start computation</button>
       </div>
       <p id="planning-details"></p>
       <p id="planning-outcome"></p>

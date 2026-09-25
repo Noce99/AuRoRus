@@ -1,6 +1,7 @@
 //! The [`SelectedRaceLine`] topic: the line a vehicle should follow on the
-//! currently selected map - its planned race line if it has one (see
-//! [`crate::planning`]), its centerline otherwise. Published by
+//! currently selected map - its planned minimum-time line if it has one,
+//! else its planned (minimum-curvature) race line (see [`crate::planning`]),
+//! else its centerline. Published by
 //! [`crate::sensors::MapServer`] alongside [`crate::topics::SelectedMap`].
 
 use crate::environment::SpeedPoint;
@@ -18,8 +19,11 @@ pub enum RaceLineKind {
     None,
     /// The map's centerline - it has no planned race line yet.
     Centerline,
-    /// The map's planned race line.
+    /// The map's planned (minimum-curvature) race line - it has no
+    /// minimum-time line.
     RaceLine,
+    /// The map's planned minimum-time line.
+    MinTime,
 }
 
 /// The line to follow on the selected map: closed, one point per row of its

@@ -108,7 +108,9 @@ pub fn handle(
         (Method::Post, "/api/planning_parameters_load") => {
             live_api::load_planning_parameters(captain, writer_id)
         }
-        (Method::Post, "/api/planning_start") => live_api::planning_start(captain, writer_id),
+        (Method::Post, "/api/planning_start") => {
+            live_api::planning_start(&mut request, captain, writer_id)
+        }
         _ => not_found(),
     };
 

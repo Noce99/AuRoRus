@@ -69,10 +69,12 @@ fn load(path: &Path) -> Option<Loaded> {
     }
 }
 
-/// The line to follow on `map`: its planned race line if it has one, its
-/// centerline otherwise.
+/// The line to follow on `map`: its planned minimum-time line if it has
+/// one, else its planned race line, else its centerline.
 fn race_line(map: Map) -> SelectedRaceLine {
-    let (kind, points) = if !map.race_line.is_empty() {
+    let (kind, points) = if !map.min_time_race_line.is_empty() {
+        (RaceLineKind::MinTime, map.min_time_race_line)
+    } else if !map.race_line.is_empty() {
         (RaceLineKind::RaceLine, map.race_line)
     } else if !map.centerline.is_empty() {
         (RaceLineKind::Centerline, map.centerline)
@@ -130,7 +132,7 @@ fn race_line_shapes(race_line: &SelectedRaceLine) -> Vec<Shape> {
         return Vec::new();
     }
     let width_px = match race_line.kind {
-        RaceLineKind::RaceLine => 3.0,
+        RaceLineKind::RaceLine | RaceLineKind::MinTime => 3.0,
         _ => 1.5,
     };
     let (slowest, fastest) = points.iter().fold((f64::INFINITY, 0.0f64), |(lo, hi), p| {
@@ -363,6 +365,7 @@ mod tests {
             raster: Raster::new(10, 10, vec![true; 100]),
             centerline: Vec::new(),
             race_line: Vec::new(),
+            min_time_race_line: Vec::new(),
         }
     }
 
@@ -391,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn the_planned_race_line_wins_over_the_centerline() {
+    fn the_fastest_planned_line_wins() {
         let line = StartFinishLine {
             a: WorldPoint { x: 0.0, y: 1.0 },
             b: WorldPoint { x: 0.0, y: -1.0 },
@@ -407,9 +410,18 @@ mod tests {
         assert_eq!(centerline_only.kind, RaceLineKind::Centerline);
 
         map.race_line = vec![point(0.0, 2.0), point(1.0, 3.0), point(2.0, 4.0)];
-        let planned = race_line(map);
+        let planned = race_line(Map {
+            centerline: map.centerline.clone(),
+            race_line: map.race_line.clone(),
+            ..test_map(line)
+        });
         assert_eq!(planned.kind, RaceLineKind::RaceLine);
         assert_eq!(planned.points.len(), 3);
+
+        map.min_time_race_line = vec![point(0.0, 5.0), point(1.0, 5.0)];
+        let fastest = race_line(map);
+        assert_eq!(fastest.kind, RaceLineKind::MinTime);
+        assert_eq!(fastest.points.len(), 2);
     }
 
     #[test]

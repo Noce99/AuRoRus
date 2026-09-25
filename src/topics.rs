@@ -33,7 +33,8 @@ pub use odometry::{ODOMETRY_TOPIC_NAME, Odometry};
 pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
 pub use planning::{
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
-    PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState, PlanningStatus,
+    PlanningObjective, PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState,
+    PlanningStatus,
 };
 pub use race_line::{RACE_LINE_TOPIC_NAME, RaceLineKind, SelectedRaceLine};
 pub use slam::{

@@ -5,11 +5,13 @@
 use super::config::{PlanningConfig, tunable_parameters};
 use super::geometry::Point2;
 use super::pipeline::{PlannedLines, Progress, plan};
-use crate::environment::{CENTERLINE_FILE_NAME, Map, RACE_LINE_FILE_NAME, write_line};
+use crate::environment::{
+    CENTERLINE_FILE_NAME, MIN_TIME_RACE_LINE_FILE_NAME, Map, RACE_LINE_FILE_NAME, write_line,
+};
 use crate::topics::{
     Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
-    PLANNING_STATUS_TOPIC_NAME, PlanningOutcome, PlanningParameters, PlanningRequest,
-    PlanningState, PlanningStatus, SelectedMap, Shape,
+    PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome, PlanningParameters,
+    PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -68,18 +70,19 @@ impl Planner {
     }
 
     /// Plans and saves the race line for `map_path` (the selected map, if
-    /// any), answering request number `requested`. Publishes its progress
-    /// through `status` and the drawing topic.
+    /// any), answering `request`. Publishes its progress through `status`
+    /// and the drawing topic.
     fn handle_request(
         &self,
         captain: &Captain,
-        requested: u64,
+        request: PlanningRequest,
         map_path: Option<&Path>,
         status: &mut PlanningStatus,
     ) -> PlanningOutcome {
         let started = Instant::now();
         let mut outcome = PlanningOutcome {
-            requested,
+            requested: request.requested,
+            objective: request.objective,
             map: map_path.map(|path| path.display().to_string()),
             ..PlanningOutcome::default()
         };
@@ -102,23 +105,46 @@ impl Planner {
         let result = Map::load(map_path)
             .map_err(|err| format!("failed to load the map: {err}"))
             .and_then(|map| {
-                let planned = plan(&map, &self.config, &mut |progress| {
-                    match progress {
-                        Progress::Stage(stage) => status.stage = stage,
+                // The latest minimum-curvature line, drawn under the
+                // minimum-time one it starts.
+                let mut min_curvature_line: Vec<Point2> = Vec::new();
+                let planned = plan(&map, &self.config, request.objective, &mut |progress| {
+                    let drawing = match progress {
+                        Progress::Stage(stage) => {
+                            status.stage = stage;
+                            None
+                        }
                         Progress::Iteration { total, iteration } => {
                             status.stage = format!(
                                 "Optimizing - iteration {}/{total}, moved up to {:.3} m",
                                 iteration.number, iteration.max_move_m
                             );
-                            drawing_topic
-                                .write(
-                                    self.id,
-                                    progress_drawing(iteration.reference, iteration.solution),
-                                )
-                                .expect(
-                                    "lost writer authorization for the planner's drawing topic",
-                                );
+                            min_curvature_line = iteration.solution.to_vec();
+                            Some(progress_drawing(
+                                iteration.reference,
+                                iteration.solution,
+                                Color::AMBER,
+                            ))
                         }
+                        Progress::MinTimeIteration { total, iteration } => {
+                            status.stage = format!(
+                                "Optimizing the lap time - iteration {}/{total}, lap {:.2} s, \
+                                 limits exceeded by up to {:.1}%",
+                                iteration.number,
+                                iteration.lap_time_s,
+                                100.0 * iteration.violation
+                            );
+                            Some(progress_drawing(
+                                &min_curvature_line,
+                                iteration.points,
+                                Color::PURPLE,
+                            ))
+                        }
+                    };
+                    if let Some(drawing) = drawing {
+                        drawing_topic
+                            .write(self.id, drawing)
+                            .expect("lost writer authorization for the planner's drawing topic");
                     }
                     publish(status);
                     captain.is_running(self.id)
@@ -131,13 +157,23 @@ impl Planner {
             .write(self.id, Drawing::default().z_index(PROGRESS_Z_INDEX))
             .expect("lost writer authorization for the planner's drawing topic");
         match result {
-            Ok((planned, saved_to)) => {
-                outcome.saved_to = Some(saved_to);
+            Ok((planned, saved)) => {
+                outcome.saved_to = Some(saved.race_line);
                 outcome.computed_centerline = planned.computed_centerline.is_some();
                 outcome.lap_length_m = planned.lap_length_m;
                 outcome.lap_time_s = planned.lap_time_s;
                 outcome.max_curvature_per_m = planned.max_curvature_per_m;
                 outcome.reference_max_curvature_per_m = planned.reference_max_curvature_per_m;
+                match (&planned.min_time, saved.min_time) {
+                    (Some(Ok(line)), Some(Ok(path))) => {
+                        outcome.min_time_saved_to = Some(path);
+                        outcome.min_time_lap_length_m = line.lap_length_m;
+                        outcome.min_time_lap_time_s = line.lap_time_s;
+                    }
+                    (_, Some(Err(err))) => outcome.min_time_error = Some(err),
+                    (Some(Err(err)), _) => outcome.min_time_error = Some(err.to_string()),
+                    _ => {}
+                }
             }
             Err(err) => outcome.error = Some(err),
         }
@@ -146,21 +182,43 @@ impl Planner {
     }
 }
 
+/// The files [`save`] wrote.
+struct Saved {
+    /// The (minimum-curvature) race line file.
+    race_line: String,
+    /// The minimum-time line file, or why it couldn't be written - `None`
+    /// when there's no minimum-time line to write.
+    min_time: Option<Result<String, String>>,
+}
+
 /// Writes `planned`'s race line - and its computed centerline, if the map
-/// had none - into `map`'s folder. Returns the race line file's path.
-fn save(map: &Map, planned: &PlannedLines) -> Result<String, String> {
+/// had none, and its minimum-time line, if there is one - into `map`'s
+/// folder.
+fn save(map: &Map, planned: &PlannedLines) -> Result<Saved, String> {
     if let Some(centerline) = &planned.computed_centerline {
         write_line(&map.folder, CENTERLINE_FILE_NAME, centerline)
             .map_err(|err| format!("failed to save the centerline: {err}"))?;
     }
-    write_line(&map.folder, RACE_LINE_FILE_NAME, &planned.race_line)
+    let race_line = write_line(&map.folder, RACE_LINE_FILE_NAME, &planned.race_line)
         .map(|path| path.display().to_string())
-        .map_err(|err| format!("failed to save the race line: {err}"))
+        .map_err(|err| format!("failed to save the race line: {err}"))?;
+    let min_time = match &planned.min_time {
+        Some(Ok(line)) => Some(
+            write_line(&map.folder, MIN_TIME_RACE_LINE_FILE_NAME, &line.race_line)
+                .map(|path| path.display().to_string())
+                .map_err(|err| format!("failed to save the minimum-time line: {err}")),
+        ),
+        _ => None,
+    };
+    Ok(Saved {
+        race_line,
+        min_time,
+    })
 }
 
-/// The optimization's progress: the line it solved around, thin and
-/// grey, and its solution on top.
-fn progress_drawing(reference: &[Point2], solution: &[Point2]) -> Drawing {
+/// The optimization's progress: the line it started from, thin and grey,
+/// and its current solution on top in `color`.
+fn progress_drawing(reference: &[Point2], solution: &[Point2], color: Color) -> Drawing {
     let polyline = |points: &[Point2], width_px, color| Shape::Polyline {
         points: points.iter().map(|p| [p.x as f32, p.y as f32]).collect(),
         closed: true,
@@ -169,7 +227,7 @@ fn progress_drawing(reference: &[Point2], solution: &[Point2]) -> Drawing {
     };
     Drawing::new(vec![
         polyline(reference, 1.0, Color::WHITE.with_alpha(120)),
-        polyline(solution, 2.0, Color::AMBER),
+        polyline(solution, 2.0, color),
     ])
     .z_index(PROGRESS_Z_INDEX)
 }
@@ -209,6 +267,7 @@ impl Executor for Planner {
         // Seeded from the topic, so a restart of just this executor doesn't
         // replay a request it already handled.
         let mut handled = request_topic().map_or(0, |topic| topic.read().requested);
+        let mut objective = PlanningObjective::default();
 
         while captain.is_running(self.id) {
             if self.apply_parameters(captain, &mut seen_parameters) {
@@ -218,12 +277,19 @@ impl Executor for Planner {
                     .expect("lost writer authorization for the planning_status topic");
             }
 
-            let requested = request_topic().map_or(handled, |topic| topic.read().requested);
-            if requested != handled {
-                handled = requested;
+            let request = request_topic().map_or(
+                PlanningRequest {
+                    requested: handled,
+                    objective,
+                },
+                |topic| topic.read().into_value(),
+            );
+            if request.requested != handled {
+                handled = request.requested;
+                objective = request.objective;
                 let map_path = map_topic.read().into_value().path;
                 let outcome =
-                    self.handle_request(captain, requested, map_path.as_deref(), &mut status);
+                    self.handle_request(captain, request, map_path.as_deref(), &mut status);
                 status.state = PlanningState::Idle;
                 status.stage.clear();
                 status.last_outcome = Some(outcome);

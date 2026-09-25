@@ -696,6 +696,25 @@ const planningStateEl = document.getElementById("planning-state");
 const planningDetailsEl = document.getElementById("planning-details");
 const planningOutcomeEl = document.getElementById("planning-outcome");
 const planningStartBtn = document.getElementById("planning-start-btn");
+const planningObjectiveEl = document.getElementById("planning-objective");
+
+/** Where this browser remembers the picked objective. */
+const PLANNING_OBJECTIVE_KEY = "aurorus.planning.objective";
+try {
+  const saved = localStorage.getItem(PLANNING_OBJECTIVE_KEY);
+  if (saved && [...planningObjectiveEl.options].some((o) => o.value === saved)) {
+    planningObjectiveEl.value = saved;
+  }
+} catch {
+  // No storage (e.g. a private window): the default objective it is.
+}
+planningObjectiveEl.addEventListener("change", () => {
+  try {
+    localStorage.setItem(PLANNING_OBJECTIVE_KEY, planningObjectiveEl.value);
+  } catch {
+    // Not remembered - it still applies to this page.
+  }
+});
 
 const syncPlanningParameters = createParameterPanel({
   containerEl: document.getElementById("planning-parameters"),
@@ -712,7 +731,11 @@ planningStartBtn.addEventListener("click", () => {
   planningStartBtn.disabled = true;
   planningOutcomeEl.classList.remove("error");
   planningOutcomeEl.textContent = "";
-  fetchJSON("/api/planning_start", { method: "POST" })
+  fetchJSON("/api/planning_start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ objective: planningObjectiveEl.value }),
+  })
     .then(() => pollPlanning())
     .catch((err) => {
       planningOutcomeEl.classList.add("error");
@@ -734,6 +757,18 @@ function describePlanningOutcome(outcome) {
   if (outcome.computed_centerline) {
     parts.push("The map had no centerline: one was computed from its walls and saved too.");
   }
+  if (outcome.objective === "min_time") {
+    if (outcome.min_time_error !== null) {
+      parts.push(`Minimum time failed: ${outcome.min_time_error}`);
+    } else if (outcome.min_time_saved_to !== null) {
+      const gain = (1 - outcome.min_time_lap_time_s / outcome.lap_time_s) * 100;
+      parts.push(
+        `Minimum-time line saved to ${outcome.min_time_saved_to}:`,
+        `lap ${outcome.min_time_lap_length_m.toFixed(1)} m in ${outcome.min_time_lap_time_s.toFixed(2)} s`,
+        `(${gain.toFixed(1)}% faster than minimum curvature).`,
+      );
+    }
+  }
   return parts.join(" ");
 }
 
@@ -749,6 +784,7 @@ async function pollPlanning() {
   planningStateEl.className = missing ? "stale" : status.state;
   planningStateEl.textContent = missing ? "Planner not running" : planningComputing ? "Computing" : "Idle";
   planningStartBtn.disabled = missing || planningComputing || liveMapName === null;
+  planningObjectiveEl.disabled = planningComputing;
 
   if (missing) {
     planningDetailsEl.textContent = "";
@@ -757,11 +793,17 @@ async function pollPlanning() {
   } else if (liveMapName === null) {
     planningDetailsEl.textContent = "Select a map to plan a race line for.";
   } else {
-    planningDetailsEl.textContent = `Plans a minimum-curvature race line for ${liveMapName}, with a speed profile.`;
+    planningDetailsEl.textContent =
+      planningObjectiveEl.value === "min_time"
+        ? `Plans the minimum-curvature race line for ${liveMapName}, then the minimum-time line from it.`
+        : `Plans a minimum-curvature race line for ${liveMapName}, with a speed profile.`;
   }
 
   const outcome = status.last_outcome;
-  planningOutcomeEl.classList.toggle("error", outcome !== null && outcome.error !== null);
+  planningOutcomeEl.classList.toggle(
+    "error",
+    outcome !== null && (outcome.error !== null || outcome.min_time_error !== null),
+  );
   if (outcome !== null) planningOutcomeEl.textContent = describePlanningOutcome(outcome);
 
   syncPlanningParameters("planner", status.parameters);
