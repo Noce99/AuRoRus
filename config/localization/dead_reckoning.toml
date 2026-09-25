@@ -20,6 +20,14 @@ integration = "midpoint"
 speed_std_mps = 0.05
 yaw_rate_std_rad_s = 0.01
 
+# Distance from the rear axle forward to the point the pose tracks - the CG,
+# the same point vehicle_status reports - in meters. Wheel speed and yaw rate
+# describe the rear axle's motion; the CG also slides sideways at
+# yaw_rate * rear_axle_to_cg_m while turning, and leaving that out puts the
+# estimate up to 2 * rear_axle_to_cg_m off after a half turn. Match lr_m in
+# actuators/simulated_vehicle.toml (or the real car's geometry).
+rear_axle_to_cg_m = 0.16
+
 # Draw where dead reckoning thinks the vehicle is on the web GUI - a
 # translucent purple vehicle over the true one, plus the trail it followed -
 # anchored at the start pose, to compare its drift against the truth.

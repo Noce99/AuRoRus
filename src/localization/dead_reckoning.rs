@@ -42,6 +42,12 @@ pub struct DeadReckoningConfig {
     /// Yaw-rate noise the covariance assumes, standard deviation per reading
     /// in radians/second.
     pub yaw_rate_std_rad_s: f64,
+    /// Distance from the rear axle forward to the point the pose tracks (the
+    /// CG, like [`crate::topics::VehicleStatus`]), in meters. Wheel speed
+    /// and yaw rate alone describe the rear axle's motion; any point ahead
+    /// of it also slides sideways at `yaw_rate * rear_axle_to_cg_m` while
+    /// turning (assuming the rear tires don't slip).
+    pub rear_axle_to_cg_m: f64,
     /// Whether to draw the dead-reckoned vehicle and trail, anchored at the
     /// start pose.
     pub draw: bool,
@@ -221,23 +227,33 @@ fn step(
 ) -> Odometry {
     let v = reading.wheel_speed_mps;
     let w = reading.yaw_rate_rad_s;
+    let lever_m = config.rear_axle_to_cg_m;
     let (x_m, y_m, heading_rad) = integrate(
         (odometry.x_m, odometry.y_m, odometry.heading_rad),
-        v,
+        (v, w * lever_m),
         w,
         dt_s,
         config.integration,
     );
 
+    // The tracked point's world-frame velocity at the mid-heading.
     let (sin_m, cos_m) = (odometry.heading_rad + 0.5 * w * dt_s).sin_cos();
+    let vx_world = v * cos_m - w * lever_m * sin_m;
+    let vy_world = v * sin_m + w * lever_m * cos_m;
     let f = [
-        [1.0, 0.0, -v * dt_s * sin_m],
-        [0.0, 1.0, v * dt_s * cos_m],
+        [1.0, 0.0, -vy_world * dt_s],
+        [0.0, 1.0, vx_world * dt_s],
         [0.0, 0.0, 1.0],
     ];
     let g = [
-        [dt_s * cos_m, -0.5 * v * dt_s * dt_s * sin_m],
-        [dt_s * sin_m, 0.5 * v * dt_s * dt_s * cos_m],
+        [
+            dt_s * cos_m,
+            -lever_m * dt_s * sin_m - 0.5 * dt_s * dt_s * vy_world,
+        ],
+        [
+            dt_s * sin_m,
+            lever_m * dt_s * cos_m + 0.5 * dt_s * dt_s * vx_world,
+        ],
         [0.0, dt_s],
     ];
     let q = [
@@ -270,13 +286,14 @@ fn step(
     }
 }
 
-/// `(x_m, y_m, heading_rad)` advanced by `dt_s` of unicycle motion at
-/// constant speed `v` and yaw rate `w` - `dx/dt = v cos(heading)`, `dy/dt =
-/// v sin(heading)`, `dheading/dt = w` - with the heading wrapped to
+/// `(x_m, y_m, heading_rad)` advanced by `dt_s` of planar rigid-body motion
+/// at constant body-frame velocity `(vx, vy)` and yaw rate `w` - `dx/dt = vx
+/// cos(heading) - vy sin(heading)`, `dy/dt = vx sin(heading) + vy
+/// cos(heading)`, `dheading/dt = w` - with the heading wrapped to
 /// `(-pi, pi]`.
 fn integrate(
     pose: (f64, f64, f64),
-    v: f64,
+    (vx, vy): (f64, f64),
     w: f64,
     dt_s: f64,
     method: Integration,
@@ -286,7 +303,7 @@ fn integrate(
     // method reduces to averaging the velocity direction at a few headings.
     let velocity_at = |fraction: f64| {
         let (sin, cos) = (heading + fraction * w * dt_s).sin_cos();
-        (v * cos, v * sin)
+        (vx * cos - vy * sin, vx * sin + vy * cos)
     };
     let (dx, dy) = match method {
         Integration::Euler => velocity_at(0.0),
@@ -388,9 +405,12 @@ mod tests {
     use super::*;
     use std::f64::consts::{FRAC_PI_2, PI};
 
+    /// A config tracking the rear axle itself, so the pose follows plain
+    /// unicycle motion.
     fn config(integration: Integration) -> DeadReckoningConfig {
         DeadReckoningConfig {
             integration,
+            rear_axle_to_cg_m: 0.0,
             ..DeadReckoningConfig::default()
         }
     }
@@ -448,6 +468,43 @@ mod tests {
             assert!(error_m < tolerance_m, "{method:?}: ended {error_m} m off");
             assert!((odometry.heading_rad - FRAC_PI_2).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn a_half_turn_of_the_kinematic_bicycle_tracks_its_cg() {
+        // Fed the CG's exact vx and yaw rate, dead reckoning must follow the
+        // CG - not the rear axle, which ends 2 * lr off after a half turn.
+        use crate::environment::simulator::vehicle::{
+            BicycleParams, BicycleState, step as bicycle_step,
+        };
+        let params = BicycleParams {
+            lf_m: 0.16,
+            lr_m: 0.16,
+        };
+        let config = DeadReckoningConfig {
+            integration: Integration::Midpoint,
+            rear_axle_to_cg_m: params.lr_m,
+            ..DeadReckoningConfig::default()
+        };
+        let (steering_rad, dt_s) = (0.3, 0.01);
+        let beta = (0.5 * f64::tan(steering_rad)).atan();
+        let mut truth = BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 2.0,
+        };
+        let mut odometry = Odometry::default();
+        while truth.heading_rad < PI - 0.05 {
+            let reading = reading(
+                truth.speed_mps * beta.cos(),
+                truth.speed_mps * beta.sin() / params.lr_m,
+            );
+            odometry = step(odometry, &reading, dt_s, &config);
+            truth = bicycle_step(truth, params, steering_rad, 0.0, dt_s);
+        }
+        let error_m = (odometry.x_m - truth.x_m).hypot(odometry.y_m - truth.y_m);
+        assert!(error_m < 1e-3, "ended {error_m} m off the CG");
     }
 
     #[test]
