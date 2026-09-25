@@ -1,7 +1,9 @@
 use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
+use aurorus::localization::{DeadReckoning, DeadReckoningConfig};
 use aurorus::sensors::{
-    MapServer, MapServerConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
+    MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
+    SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
 use aurorus::topics::VehicleModelKind;
 use aurorus::{Executor, Runner};
@@ -19,6 +21,12 @@ fn main() {
     let simulated_lidar_config =
         aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
             .unwrap_or_else(|_| SimulatedLidarConfig::default());
+    let simulated_imu_config =
+        aurorus::config::load(&config.config_dir.join("sensors/simulated_imu.toml"))
+            .unwrap_or_else(|_| SimulatedImuConfig::default());
+    let dead_reckoning_config =
+        aurorus::config::load(&config.config_dir.join("localization/dead_reckoning.toml"))
+            .unwrap_or_else(|_| DeadReckoningConfig::default());
     let vehicle_config =
         aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
             .unwrap_or_else(|_| SimulatedVehicleConfig::default());
@@ -29,6 +37,8 @@ fn main() {
     runner.add_executor(WebGui::new("WebGui", config.maps_root, web_gui_config).boxed());
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
     runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
+    runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
+    runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
     runner.add_executor(
         SimulatedVehicle::new(
             "SimulatedVehicle",

@@ -33,6 +33,7 @@ pub mod autonomous_control;
 pub mod config;
 pub mod debug_format;
 pub mod environment;
+pub mod localization;
 pub mod sensors;
 pub mod topics;
 pub mod web;

@@ -399,6 +399,58 @@ fn advance(
     (next_state, next_steering_rad)
 }
 
+/// The vehicle's velocity in the body frame at `state`: `(vx_mps, vy_mps,
+/// yaw_rate_rad_s)`. Read straight off the state for every model that tracks
+/// them; for the kinematic [`VehicleModel::Bicycle`], which only tracks a
+/// ground speed, derived from its slip angle under `steering_angle_rad` with
+/// the same equations its step integrates (see
+/// [`crate::environment::simulator::vehicle::bicycle`]).
+///
+/// `model` and `state` must be the same [`VehicleModelKind`], as for
+/// [`advance`].
+fn body_velocity(
+    model: &VehicleModel,
+    state: &VehicleState,
+    steering_angle_rad: f64,
+) -> (f64, f64, f64) {
+    match (model, state) {
+        (VehicleModel::Bicycle { params, .. }, VehicleState::Bicycle(s)) => {
+            let beta =
+                ((params.lr_m / (params.lf_m + params.lr_m)) * steering_angle_rad.tan()).atan();
+            (
+                s.speed_mps * beta.cos(),
+                s.speed_mps * beta.sin(),
+                (s.speed_mps / params.lr_m) * beta.sin(),
+            )
+        }
+        (_, VehicleState::DynamicBicycle(s)) => (s.vx_mps, s.vy_mps, s.yaw_rate_rad_s),
+        (_, VehicleState::NonlinearBicycle(s)) => (s.vx_mps, s.vy_mps, s.yaw_rate_rad_s),
+        (_, VehicleState::PacejkaBicycle(s)) => (s.vx_mps, s.vy_mps, s.yaw_rate_rad_s),
+        (_, VehicleState::TwoTrack(s)) => (s.vx_mps, s.vy_mps, s.yaw_rate_rad_s),
+        _ => unreachable!("SimulatedVehicle::run always keeps model/state kinds in sync"),
+    }
+}
+
+/// The CG's acceleration in the body frame, `(ax_mps2, ay_mps2)`, between
+/// two consecutive ticks `dt_s` apart whose body-frame velocities were
+/// `previous` and `current` (each `(vx_mps, vy_mps)`), while yawing at
+/// `yaw_rate_rad_s`. The body frame rotates, so this is the rate of change
+/// of the body-frame velocity plus the rotation term - `ax = dvx/dt - vy *
+/// yaw_rate`, `ay = dvy/dt + vx * yaw_rate` - which is what an accelerometer
+/// bolted to the chassis reads.
+fn body_acceleration(
+    previous: (f64, f64),
+    current: (f64, f64),
+    yaw_rate_rad_s: f64,
+    dt_s: f64,
+) -> (f64, f64) {
+    let (vx_mps, vy_mps) = current;
+    (
+        (vx_mps - previous.0) / dt_s - vy_mps * yaw_rate_rad_s,
+        (vy_mps - previous.1) / dt_s + vx_mps * yaw_rate_rad_s,
+    )
+}
+
 /// Body size [`SimulatedVehicle`] draws the vehicle at - roughly a 1/10-scale
 /// RC car, matching the models' default geometry.
 const DRAWN_BODY_LENGTH_M: f64 = 0.45;
@@ -541,6 +593,11 @@ impl Executor for SimulatedVehicle {
         let mut applied_place_request = place_at_start_topic.read().requested;
         let mut state = state_from_start(applied_start, applied_kind);
         let mut steering_angle_rad = 0.0;
+        // Last tick's body-frame velocity, to differentiate into
+        // `VehicleStatus`'s accelerations. `None` whenever the state was just
+        // replaced wholesale (a placement or a model switch) rather than
+        // integrated, so that jump never reads as an acceleration spike.
+        let mut previous_body_velocity: Option<(f64, f64)> = None;
         // The model integrates a fixed `dt_s` per tick, so the loop has to
         // actually run at `tick_rate_hz` for simulated time to track real
         // time - which is what `Ticker` (unlike a fixed sleep) guarantees.
@@ -555,6 +612,7 @@ impl Executor for SimulatedVehicle {
                 self.model = default_model(wanted_kind, &self.config);
                 state = carry_over_state(state, wanted_kind);
                 applied_kind = wanted_kind;
+                previous_body_velocity = None;
                 model_status_topic
                     .write(self.id, VehicleModelStatus { kind: applied_kind })
                     .expect("lost writer authorization for the vehicle_model_status topic");
@@ -567,6 +625,7 @@ impl Executor for SimulatedVehicle {
                 steering_angle_rad = 0.0;
                 applied_start = wanted_start;
                 applied_place_request = wanted_place_request;
+                previous_body_velocity = None;
             }
 
             let command = select_command(autonomous_topic.read(), human_topic.read());
@@ -582,6 +641,16 @@ impl Executor for SimulatedVehicle {
             state = next_state;
             steering_angle_rad = next_steering_rad;
 
+            let (vx_mps, vy_mps, yaw_rate_rad_s) =
+                body_velocity(&self.model, &state, steering_angle_rad);
+            let (ax_mps2, ay_mps2) = match previous_body_velocity {
+                Some(previous) => {
+                    body_acceleration(previous, (vx_mps, vy_mps), yaw_rate_rad_s, dt_s)
+                }
+                None => (0.0, 0.0),
+            };
+            previous_body_velocity = Some((vx_mps, vy_mps));
+
             status_topic
                 .write(
                     self.id,
@@ -590,6 +659,11 @@ impl Executor for SimulatedVehicle {
                         y_m: state.y_m(),
                         heading_rad: state.heading_rad(),
                         speed_mps: state.speed_mps(),
+                        vx_mps,
+                        vy_mps,
+                        yaw_rate_rad_s,
+                        ax_mps2,
+                        ay_mps2,
                     },
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
@@ -1114,5 +1188,63 @@ mod tests {
             }
             _ => panic!("expected TwoTrack state"),
         }
+    }
+
+    #[test]
+    fn body_velocity_of_the_kinematic_model_matches_its_heading_rate() {
+        let model = test_model();
+        let state = VehicleState::Bicycle(BicycleState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            speed_mps: 3.0,
+        });
+        let steering_rad = 0.2;
+        let dt_s = 0.001;
+
+        let (vx_mps, vy_mps, yaw_rate_rad_s) = body_velocity(&model, &state, steering_rad);
+        // Hold the same steering so `advance` integrates exactly what
+        // `body_velocity` describes.
+        let (next, _) = advance(&model, state, steering_rad, steering_rad, 3.0, dt_s);
+
+        assert!((vx_mps.hypot(vy_mps) - 3.0).abs() < 1e-12);
+        assert!(vy_mps > 0.0, "steering left must slip the CG velocity left");
+        let heading_rate = next.heading_rad() / dt_s;
+        assert!(
+            (yaw_rate_rad_s - heading_rate).abs() < 1e-3,
+            "yaw rate {yaw_rate_rad_s} vs integrated heading rate {heading_rate}"
+        );
+    }
+
+    #[test]
+    fn body_velocity_of_a_dynamic_model_is_read_off_its_state() {
+        let state = VehicleState::DynamicBicycle(DynamicState {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+            vx_mps: 2.0,
+            vy_mps: -0.1,
+            yaw_rate_rad_s: 0.7,
+        });
+        assert_eq!(
+            body_velocity(&test_dynamic_model(), &state, 0.3),
+            (2.0, -0.1, 0.7)
+        );
+    }
+
+    #[test]
+    fn body_acceleration_in_a_steady_turn_is_purely_centripetal() {
+        // Constant body-frame velocity while yawing: the only acceleration is
+        // v * yaw_rate = v^2 / R, pointing left for a left turn.
+        let (ax_mps2, ay_mps2) = body_acceleration((3.0, 0.0), (3.0, 0.0), 1.5, 0.01);
+        assert_eq!(ax_mps2, 0.0);
+        assert!((ay_mps2 - 4.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn body_acceleration_on_a_straight_line_is_the_speed_change_rate() {
+        let (ax_mps2, ay_mps2) = body_acceleration((1.0, 0.0), (1.02, 0.0), 0.0, 0.01);
+        assert!((ax_mps2 - 2.0).abs() < 1e-9);
+        assert_eq!(ay_mps2, 0.0);
     }
 }

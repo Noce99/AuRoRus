@@ -1,0 +1,40 @@
+# Configuration for `aurorus::sensors::SimulatedImu`, a synthetic inertial
+# sensor + wheel-speed feedback that samples the simulated vehicle's true
+# motion and corrupts it the way real hardware would, for exercising
+# dead reckoning, localization and mapping without real hardware.
+#
+# Every reading is `truth * (1 + scale_error) + bias + gaussian_noise`, per
+# channel. White noise is drawn fresh for every sample; `speed_scale_error`
+# is drawn once per run (a miscalibrated speed-to-ERPM gain doesn't change
+# from one sample to the next), and biases are constant. White noise alone
+# averages out when integrated - scale errors and biases are what make
+# dead reckoning drift.
+
+# Rate at which SimulatedImu publishes a new reading, in Hz. SimulatedVehicle
+# only updates the truth at its own tick_rate_hz, so going above that just
+# resamples the same truth with fresh noise.
+rate_hz = 100.0
+# Seed for the noise generator: the same seed gives the same noise sequence
+# on every run. 0 picks a fresh random seed each time.
+seed = 0
+
+# Master knob: multiplies every standard deviation *and* bias below, so 0.0
+# gives a perfect sensor and 2.0 doubles every error.
+noise_scale = 0.0
+
+# White noise on the measured wheel speed, standard deviation in m/s.
+speed_std_mps = 0.05
+# Standard deviation of the per-run multiplicative error on wheel speed
+# (0.02 = the reported speed is typically off by about 2%).
+speed_scale_error_std = 0.02
+
+# White noise on the gyroscope, standard deviation in rad/s.
+yaw_rate_std_rad_s = 0.01
+# Constant gyroscope bias, in rad/s (0.001 rad/s = ~3.4 degrees of heading
+# drift per minute).
+yaw_rate_bias_rad_s = 0.001
+
+# White noise on each accelerometer axis, standard deviation in m/s^2.
+accel_std_mps2 = 0.1
+# Constant bias on each accelerometer axis, in m/s^2.
+accel_bias_mps2 = 0.02

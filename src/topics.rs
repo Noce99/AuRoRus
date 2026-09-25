@@ -4,8 +4,10 @@
 
 mod autonomous_control;
 mod drawing;
+mod imu;
 mod lidar_scan;
 mod map;
+mod odometry;
 mod place_at_start;
 mod start_state;
 mod vehicle_limits;
@@ -19,8 +21,10 @@ pub use autonomous_control::{
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AvailableAlgorithm,
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, Shape};
+pub use imu::{IMU_TOPIC_NAME, ImuReading};
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
+pub use odometry::{ODOMETRY_TOPIC_NAME, Odometry};
 pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
 pub use start_state::{START_STATE_TOPIC_NAME, StartState};
 pub use vehicle_limits::{ActuatorLimits, VEHICLE_LIMITS_TOPIC_NAME};

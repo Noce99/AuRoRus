@@ -1,0 +1,26 @@
+# Configuration for `aurorus::localization::DeadReckoning`, which integrates
+# the imu topic (wheel speed + yaw rate) into the odometry topic's pose.
+# Hardware-agnostic: the same executor runs on sensors/simulated_imu's output
+# and, on the real car, on the VESC driver's.
+
+# How often DeadReckoning polls the imu topic, in Hz. Every new reading is
+# integrated over the time since the previous one, so polling slower than
+# the IMU publishes merges samples instead of losing time - but polling
+# faster keeps each integration step on exactly one sample.
+rate_hz = 200.0
+
+# How each interval between two readings is integrated: "euler", "midpoint"
+# or "rk4". The inputs are held constant over the interval, so the three only
+# differ in how they follow the heading turning mid-interval.
+integration = "midpoint"
+
+# The measurement noise the covariance assumes, as standard deviations per
+# reading - on the real car these come from characterizing the hardware; in
+# simulation, match them to sensors/simulated_imu.toml.
+speed_std_mps = 0.05
+yaw_rate_std_rad_s = 0.01
+
+# Draw where dead reckoning thinks the vehicle is on the web GUI - a
+# translucent purple vehicle over the true one, plus the trail it followed -
+# anchored at the start pose, to compare its drift against the truth.
+draw = true

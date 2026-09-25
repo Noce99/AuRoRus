@@ -126,7 +126,9 @@ pub fn select_map(
         Some(name) => match safe_map_folder(name, maps_root) {
             Some(path) => Some(path),
             None => {
-                return bad_request("invalid name: must not be empty or contain '/', '\\', or '..'");
+                return bad_request(
+                    "invalid name: must not be empty or contain '/', '\\', or '..'",
+                );
             }
         },
     };
