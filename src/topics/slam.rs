@@ -1,7 +1,8 @@
 //! The topics tying [`crate::localization::Slam`] to whoever drives it (e.g.
 //! `web_gui`'s Mapping panel): [`SlamCommand`] says what SLAM should be
-//! doing, [`SlamStatus`] reports what it's actually doing, and [`SlamMap`]
-//! carries the map built so far - mirroring the
+//! doing, [`SlamSaveRequest`] asks it to save its map, [`SlamStatus`]
+//! reports what it's actually doing, and [`SlamMap`] carries the map built
+//! so far - mirroring the
 //! [`crate::topics::VehicleModelSelection`]/[`crate::topics::VehicleModelStatus`]
 //! pair.
 
@@ -13,6 +14,8 @@ pub const SLAM_COMMAND_TOPIC_NAME: &str = "slam_command";
 pub const SLAM_STATUS_TOPIC_NAME: &str = "slam_status";
 /// Name of the topic [`SlamMap`] is published on.
 pub const SLAM_MAP_TOPIC_NAME: &str = "slam_map";
+/// Name of the topic [`SlamSaveRequest`] is published on.
+pub const SLAM_SAVE_TOPIC_NAME: &str = "slam_save";
 
 /// What SLAM is (or should be) doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -26,6 +29,13 @@ pub enum SlamState {
     Waiting,
     /// Mapping: every new scan is matched and added to the map.
     Running,
+    /// Localizing on the selected map ([`crate::topics::SelectedMap`]):
+    /// every new scan is matched against it, and the map never changes.
+    /// Refused - SLAM stays in [`SlamState::Waiting`] - while a map built by
+    /// SLAM is in memory.
+    Localizing,
+    /// Localization paused: the pose is kept, but new scans are ignored.
+    LocalizationPaused,
 }
 
 impl SlamState {
@@ -36,15 +46,31 @@ impl SlamState {
             SlamState::Off => "off",
             SlamState::Waiting => "waiting",
             SlamState::Running => "running",
+            SlamState::Localizing => "localizing",
+            SlamState::LocalizationPaused => "localization_paused",
         }
     }
 
     /// The state named `name` in the web API, if any - see
     /// [`Self::api_str`].
     pub fn from_api_str(name: &str) -> Option<Self> {
-        [SlamState::Off, SlamState::Waiting, SlamState::Running]
+        SlamState::ALL
             .into_iter()
             .find(|state| state.api_str() == name)
+    }
+
+    /// Every state.
+    pub const ALL: [SlamState; 5] = [
+        SlamState::Off,
+        SlamState::Waiting,
+        SlamState::Running,
+        SlamState::Localizing,
+        SlamState::LocalizationPaused,
+    ];
+
+    /// Whether this is one of the localization states.
+    pub fn is_localization(self) -> bool {
+        matches!(self, SlamState::Localizing | SlamState::LocalizationPaused)
     }
 }
 
@@ -60,17 +86,45 @@ pub struct SlamCommand {
     pub clear_requested: u64,
 }
 
+/// Asks SLAM to save the map built so far as a new map folder named `name`
+/// under its maps root - see [`crate::localization::Slam`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct SlamSaveRequest {
+    /// The new map folder's name.
+    pub name: String,
+    /// Bumped on every request: SLAM saves whenever this no longer matches
+    /// the last one it handled, as [`SlamCommand::clear_requested`].
+    pub requested: u64,
+}
+
+/// How SLAM handled a [`SlamSaveRequest`]: exactly one of `saved_to` and
+/// `error` is set.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct SlamSaveOutcome {
+    /// The [`SlamSaveRequest::requested`] this answers.
+    pub requested: u64,
+    /// The folder the map was saved to.
+    pub saved_to: Option<String>,
+    /// Why the map wasn't saved.
+    pub error: Option<String>,
+}
+
 /// What [`crate::localization::Slam`] is currently doing, so a driver of
 /// [`SlamCommand`] can reflect it.
-#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SlamStatus {
     /// The state SLAM is actually in.
     pub state: SlamState,
     /// How many scans the map is built from so far.
     pub scans: usize,
-    /// Latest corrected pose `(x_m, y_m, heading_rad)`, in SLAM's own frame
-    /// (see [`SlamMap`]) - `None` before the first scan.
+    /// Latest corrected pose `(x_m, y_m, heading_rad)` - `None` before the
+    /// first scan. While mapping, in SLAM's own frame (see [`SlamMap`]);
+    /// while localizing, in the selected map's frame.
     pub pose: Option<[f64; 3]>,
+    /// While localizing, where odometry's frame sits on the map as
+    /// `(x_m, y_m, heading_rad)`: odometry's pose composed onto this is the
+    /// vehicle's pose on the map, between two scans too. `None` otherwise.
+    pub map_to_odom: Option<[f64; 3]>,
     /// The [`crate::topics::Odometry::reset_count`] the map is being built
     /// against.
     pub odometry_reset_count: u64,
@@ -86,6 +140,8 @@ pub struct SlamStatus {
     /// How long the latest pose graph optimization took, in milliseconds -
     /// `None` until a loop is closed.
     pub last_optimization_ms: Option<f64>,
+    /// How the latest [`SlamSaveRequest`] went - `None` before the first.
+    pub last_save: Option<SlamSaveOutcome>,
 }
 
 /// The occupancy map built so far, in SLAM's own frame: the `odom` frame of
@@ -126,7 +182,7 @@ mod tests {
 
     #[test]
     fn every_state_round_trips_through_its_api_name() {
-        for state in [SlamState::Off, SlamState::Waiting, SlamState::Running] {
+        for state in SlamState::ALL {
             assert_eq!(SlamState::from_api_str(state.api_str()), Some(state));
             assert_eq!(
                 serde_json::to_string(&state).unwrap(),

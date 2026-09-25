@@ -235,9 +235,7 @@ mod tests {
             },
             generated_at: String::new(),
             source: MapSource::Random,
-            track_width_m: 0.0,
-            point_spacing_m: 0.0,
-            seed: 0,
+            generation: None,
         }
     }
 

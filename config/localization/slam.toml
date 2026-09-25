@@ -109,3 +109,10 @@ loop_search_space_resolution_m = 0.05
 loop_search_space_smear_deviation_m = 0.03
 # Most Levenberg-Marquardt iterations one pose graph optimization may take.
 optimizer_max_iterations = 20
+
+# --- Localization -----------------------------------------------------------
+
+# While localizing on a known map, a match is only trusted at or above this
+# response (0 to 1). Below it, the pose follows odometry alone until a scan
+# matches again. Localization reuses the scan matching parameters above.
+localization_minimum_response = 0.3

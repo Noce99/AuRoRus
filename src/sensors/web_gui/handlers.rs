@@ -97,6 +97,7 @@ pub fn handle(
         (Method::Post, "/api/slam_command") => {
             live_api::slam_command(&mut request, captain, writer_id)
         }
+        (Method::Post, "/api/slam_save") => live_api::slam_save(&mut request, captain, writer_id),
         _ => not_found(),
     };
 

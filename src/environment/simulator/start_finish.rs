@@ -95,6 +95,8 @@ fn turn_angle(closed_points: &[Point2], i: usize) -> f64 {
 /// `closed_points[1]`, centered on `closed_points[0]`, spanning
 /// `track_width_m`. Callers should [`rotate_to_straightest`] first, so
 /// index `0` is somewhere this straight-chord assumption actually holds.
+/// `a` is on the left of the direction of travel and `b` on the right, as
+/// [`crate::environment::StartFinishLine`] requires.
 ///
 /// # Panics
 ///
@@ -145,6 +147,29 @@ mod tests {
         let seg_dir = (seg.a.x - seg.b.x, seg.a.y - seg.b.y);
         let dot = dir.0 * seg_dir.0 + dir.1 * seg_dir.1;
         assert!(dot.abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_is_on_the_left_of_the_direction_of_travel() {
+        use crate::environment::{StartFinishLine, WorldPoint};
+
+        // Heading along +y.
+        let points = [Point2 { x: 0.0, y: 0.0 }, Point2 { x: 0.0, y: 1.0 }];
+        let seg = compute(&points, 2.0);
+        assert!(seg.a.x < 0.0 && seg.b.x > 0.0);
+
+        let line = StartFinishLine {
+            a: WorldPoint {
+                x: seg.a.x,
+                y: seg.a.y,
+            },
+            b: WorldPoint {
+                x: seg.b.x,
+                y: seg.b.y,
+            },
+        };
+        let (_, _, heading) = line.start_pose();
+        assert!((heading - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
     }
 
     #[test]

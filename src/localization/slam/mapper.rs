@@ -136,6 +136,12 @@ impl Mapper {
         self.last_optimization_ms
     }
 
+    /// The first kept scan's corrected pose - where mapping started. The
+    /// optimizer holds it fixed, so it never moves.
+    pub fn first_pose(&self) -> Option<Pose2> {
+        self.scans.first().map(LocalizedScan::corrected_pose)
+    }
+
     /// The latest kept scan's corrected pose.
     pub fn pose(&self) -> Option<Pose2> {
         self.scans.last().map(LocalizedScan::corrected_pose)

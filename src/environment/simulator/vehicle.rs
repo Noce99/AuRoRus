@@ -85,8 +85,9 @@ mod tunable {
                 .description(format!("{label} tire Magic Formula stiffness factor (B).")),
             AlgorithmParameter::float(format!("{axle}_c"), 0.5, 3.0, 0.05)
                 .description(format!("{label} tire Magic Formula shape factor (C).")),
-            AlgorithmParameter::float(format!("{axle}_d_mu"), 0.1, 2.0, 0.05)
-                .description(format!("{label} tire peak friction coefficient (D = mu * Fz).")),
+            AlgorithmParameter::float(format!("{axle}_d_mu"), 0.1, 2.0, 0.05).description(format!(
+                "{label} tire peak friction coefficient (D = mu * Fz)."
+            )),
             AlgorithmParameter::float(format!("{axle}_e"), -3.0, 1.0, 0.1)
                 .description(format!("{label} tire Magic Formula curvature factor (E).")),
         ]

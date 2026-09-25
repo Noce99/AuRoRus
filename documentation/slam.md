@@ -1,7 +1,8 @@
 # SLAM
 
 How the `Slam` executor builds a map of the track while the vehicle drives,
-and how it's driven from `web_gui`'s **Mapping** panel.
+saves it under `maps/`, and localizes the vehicle on a known map, and how
+it's driven from `web_gui`'s **Mapping** and **Localization** panels.
 
 `Slam` is a pure-Rust port of the mapping core of
 [slam_toolbox](../other_repos/slam_toolbox), which is itself a ROS wrapper
@@ -26,14 +27,17 @@ flowchart LR
     L["SimulatedLidar"] -- "lidar_scan" --> S["Slam"]
     I["SimulatedImu"] -- "imu" --> D["DeadReckoning"]
     D -- "odometry (+ reset_count)" --> S
-    W["WebGui"] -- "slam_command" --> S
+    W["WebGui"] -- "slam_command, slam_save" --> S
     S -- "slam_status" --> W
     S -- "slam_map" --> X["(any consumer)"]
     S -- "draw/Slam" --> W
-    M["MapServer"] -- "start_state (drawing anchor only)" --> S
+    M["MapServer"] -- "start_state" --> S
+    M -- "map (localization only)" --> S
+    S -- "map.tiff + info.json" --> F[("maps/")]
 ```
 
-- **Inputs:** `lidar_scan`, `odometry` and `slam_command`. SLAM never reads
+- **Inputs:** `lidar_scan`, `odometry`, `slam_command` and `slam_save`,
+  plus `map` and `start_state` while localizing. SLAM never reads
   `vehicle_status`, which is the simulator's ground truth. It only knows
   what a real car would know.
 - **`slam_status`:** the state SLAM is actually in, how many scans the map
@@ -58,16 +62,20 @@ flowchart LR
 | `off` | Nothing in memory, no scans taken. Entering `off` throws the map away. |
 | `waiting` | Paused: the map is kept, and new scans are ignored. |
 | `running` | Every new scan is matched and added to the map. |
+| `localizing` | Every new scan is matched against the selected map, which never changes (see [Localization](#localization)). |
+| `localization_paused` | Paused: the localized pose is kept, and new scans are ignored. |
 
 The Mapping panel's **Play**, **Pause** and **Clear** buttons write
 `running`, `waiting` and `off`. The label shows the state reported on
 `slam_status`, not the one requested, so it also tells you when SLAM isn't
 running at all.
 
-`web_gui` also writes `off` when **a map is selected** and when **the vehicle
-is placed at the start** (the "P" key). Both make the old map meaningless:
-it's either a different track, or dead reckoning (whose frame the map is
-built in) has just been reset.
+`web_gui` also writes `off` when **a map is selected** and, unless
+localizing, when **the vehicle is placed at the start** (the "P" key). Both
+make the old map meaningless: it's either a different track, or dead
+reckoning (whose frame the map is built in) has just been reset. While
+localizing, "P" leaves the state alone: SLAM restarts localization from the
+start by itself when dead reckoning resets.
 
 Two safety nets:
 
@@ -191,6 +199,8 @@ nearest cell for each pixel.
 | `matrix3.rs` | `Matrix3` |
 | `pose_graph.rs` | `MapperGraph`'s bookkeeping: `LinkScans`, `LinkInfo`, `FindNearLinkedScans` (`TraverseForScans` + `NearScanVisitor`), `ComputeWeightedMean` |
 | `optimizer.rs` | `solvers/ceres_solver.cpp` + `ceres_utils.h`: `PoseGraph2dErrorTerm`, `AngleManifold`, first node fixed |
+| `map_saver.rs` | slam_toolbox's `map_saver` (which calls nav2's): the saved map's cleanup and start/finish line are our own |
+| `localizer.rs` | the role of `ProcessLocalization`, but matching against the map's walls rather than stored scans |
 | `mapper.rs` | `Mapper::Process`, `HasMovedEnough`, `ScanManager::AddRunningScan`, `MapperGraph::AddEdges`, `LinkChainToScan`, `LinkNearChains`, `FindNearChains`, `TryCloseLoop`, `FindPossibleLoopClosure`, `CorrectPoses` |
 | `../slam.rs` | the executor, config, and drawing (slam_toolbox's ROS node) |
 
@@ -270,12 +280,89 @@ about 1 m too short (worst scan error 1.08 m). With loop closure the whole
 trajectory is corrected, to a worst error of 0.25 m, and the pose back over
 the start is off by 3 mm.
 
+## Saving the map
+
+The Mapping panel's **Save map** saves the map built so far as a new map
+folder: type a name and press the button. `web_gui` only writes the request
+(`slam_save`: the name plus a counter bumped on every request, as with
+`clear_requested`). SLAM does the saving itself, so any binary running
+`Slam` can save maps, with or without `web_gui`. It saves under the maps
+root it was created with (`web_gui --maps-root`, `maps/` by default), and
+reports the saved folder or the error on `slam_status`'s `last_save`.
+
+The folder has the same format as a generated map, minus the centerline,
+which isn't known: `map.tiff` and an `info.json` with `"source": "real"` and
+no `generation` block. `map_saver.rs` builds both:
+
+- **The binary map.** Only free space the vehicle can reach from its
+  trajectory is white. The flood fill from the trajectory doesn't cross cells
+  next to a wall, which plugs the one-cell holes beams slip through, and then
+  grows back by one cell so the track still reaches its walls. Occupied and
+  unknown cells, free specks outside the walls, and areas beams leaked into
+  are all black. The map is cropped to the track plus a 10-pixel black
+  border, since a ray leaving the image hits nothing.
+- **The frame.** The saved map is in SLAM's own frame (see [Frames](#frames)).
+- **The start/finish line** goes through the first scan's pose (where Play was
+  pressed; the optimizer holds that pose fixed). Of the lines through it that
+  span the track from border to border, and are at most 1.5 times as long as
+  the shortest, it's the one closest to perpendicular to both borders. Each
+  border's direction is fitted to its pixels within 0.3 m of the line's end.
+  The ends are ordered so the direction of travel it carries (below) is the
+  way the vehicle was heading.
+
+**Start/finish line convention (every map):** the direction of travel is
+`b - a` turned a quarter counterclockwise, i.e. `a` is on the driver's left.
+`MapServer` places the vehicle from the line alone: at its midpoint, heading
+that way (`StartFinishLine::start_pose`). The generator writes its lines in
+that order too.
+
+## Localization
+
+The **Localization** panel's **Start** and **Pause** write `localizing` and
+`localization_paused`. Start is only enabled with a map selected, and never
+while SLAM has a map of its own in memory (clear or save it first). SLAM
+refuses it anyway in that case, and stays `waiting`.
+
+It localizes on the **selected map**, the one `MapServer` publishes on
+`map`, exactly as on the real car. In the simulator that's also the map the
+vehicle drives in, so any map works: a generated one, or one SLAM saved.
+
+This isn't slam_toolbox's localization mode. That one loads a serialized
+pose graph and matches each scan against the stored scans nearby, linking
+it into the graph temporarily (Karto's `ProcessLocalization`). Here the map
+is just the binary raster every map folder has (`localizer.rs`):
+
+- **Reference:** the map's wall points, the centers of black pixels next to a
+  white one, extracted once per map.
+- **Start:** odometry's origin is placed at `start_state`, where dead
+  reckoning was last reset. A new map or a dead-reckoning reset restarts
+  localization from there.
+- **Each scan:** its prior is odometry's pose moved by the current
+  correction. The same correlative scan matcher as mapping, with the same
+  search window and penalties, matches it against the wall points around
+  the prior. A match scoring at least `localization_minimum_response` moves
+  the pose and updates the correction. A weaker one leaves the pose to
+  odometry until a scan matches again.
+- **Output:** `slam_status`'s `pose` (in the map's frame) and `map_to_odom`,
+  the correction: composing the latest odometry onto it gives the pose
+  between two scans too. The drawing shows a blue vehicle at the pose.
+
+The map is never changed. There's no global relocalization: odometry must
+start close to the truth (within the search window) and stay close enough
+between scans, as with slam_toolbox's localization.
+
+Measured on a generated track with IMU `noise_scale = 5`, the gap follower
+driving for 90 s: odometry drifted up to 8.4 m, while the localized pose
+(`map_to_odom` composed with the latest odometry) stayed within 5.6 cm and
+1.6° of the truth. Each match took about 11 ms in a release build. On the
+map SLAM saved of that track, the error stayed within 5 cm.
+
 ## What's next
 
 - **Asynchronous optimization.** A long session with several laps grows the
   graph. Optimizing on a separate thread, as slam_toolbox's async mode does
   with its map updates, would keep scan matching on schedule.
-- **Saving the map** into `maps/` in the repo's own format (TIFF plus
-  `info.json`), so a SLAM map can be loaded like any generated one.
-- **Localization mode:** matching against a saved map without extending it
-  (slam_toolbox's localization mode, `ProcessAgainstNodesNearBy`).
+- **A centerline for saved maps**, e.g. from the saved map's skeleton or the
+  mapping trajectory, so they get race lines like generated maps.
+- **Global relocalization:** finding the vehicle on the map with no idea
+  where it is (slam_toolbox doesn't do this either).

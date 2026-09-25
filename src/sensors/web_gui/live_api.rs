@@ -6,25 +6,26 @@
 //! start line, and drive SLAM (`map_selection`, `human_vesc_command`,
 //! `vehicle_model_selection`, `vehicle_model_parameters`,
 //! `autonomous_algorithm_selection`, `autonomous_parameters`,
-//! `place_at_start`, `slam_command`) - as
+//! `place_at_start`, `slam_command`, `slam_save`) - as
 //! opposed to [`super::maps_api`], which lists/generates map folders on
 //! disk, and [`super::draw_api`], which serves what's drawn on the map.
 
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
-use crate::{actuators, autonomous_control};
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, ActuatorLimits, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmSelection,
-    AutonomousAlgorithmStatus, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
-    PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand,
-    SlamState, SlamStatus, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind,
-    VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VescCommand,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
+    AUTONOMOUS_PARAMETERS_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
+    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
+    VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
 use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, WriteMeta};
+use crate::{actuators, autonomous_control};
 use std::path::Path;
 use std::sync::Mutex;
 use tiny_http::{Request, ResponseBox};
@@ -731,16 +732,23 @@ pub fn restart(captain: &Captain) -> ResponseBox {
 /// [`crate::actuators::SimulatedVehicle`] to place the vehicle at whatever
 /// `start_state` currently holds, e.g. from the "P" keyboard shortcut. Unlike
 /// [`restart`], this doesn't tear anything down - just resets the vehicle's
-/// simulated position/heading/speed in place. Also turns SLAM off: the
-/// vehicle jumps, and dead reckoning - whose frame the map is built in -
-/// resets with it.
+/// simulated position/heading/speed in place. Also turns SLAM's mapping
+/// off: the vehicle jumps, and dead reckoning - whose frame the map is built
+/// in - resets with it. Localization carries on: SLAM restarts it from the
+/// start by itself when dead reckoning resets.
 pub fn place_at_start(captain: &Captain, writer_id: u8) -> ResponseBox {
     let topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
     let requested = topic.read().requested.wrapping_add(1);
     topic
         .write(writer_id, PlaceAtStart { requested })
         .expect("lost writer authorization for the place_at_start topic");
-    write_slam_command(captain, writer_id, SlamState::Off);
+    let slam_state = captain
+        .topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME)
+        .read()
+        .state;
+    if !slam_state.is_localization() {
+        write_slam_command(captain, writer_id, SlamState::Off);
+    }
     json_response(&(), 200)
 }
 
@@ -763,7 +771,7 @@ struct SlamCommandBody {
 }
 
 /// `POST /api/slam_command` - body `{"state": "running" | "waiting" |
-/// "off"}` - writes the wanted state to `slam_command`, for
+/// "off" | "localizing" | "localization_paused"}` - writes the wanted state to `slam_command`, for
 /// [`crate::localization::Slam`] to pick up. `"off"` clears SLAM's map.
 pub fn slam_command(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
     let body: SlamCommandBody = match read_json(request) {
@@ -775,6 +783,41 @@ pub fn slam_command(request: &mut Request, captain: &Captain, writer_id: u8) -> 
     };
     write_slam_command(captain, writer_id, state);
     json_response(&(), 200)
+}
+
+#[derive(serde::Deserialize)]
+struct SlamSaveBody {
+    name: String,
+}
+
+/// The response to a [`slam_save`]: the request number whose outcome to
+/// look for in [`SlamStatus::last_save`].
+#[derive(serde::Serialize)]
+struct SlamSaveResponse {
+    requested: u64,
+}
+
+/// `POST /api/slam_save` - body `{"name": "..."}` - asks
+/// [`crate::localization::Slam`] to save its map as a new map folder named
+/// `name`. SLAM saves it on its next tick, and reports how it went on
+/// `slam_status`'s `last_save`, under the returned request number.
+pub fn slam_save(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+    let body: SlamSaveBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let topic = captain.topic::<SlamSaveRequest>(SLAM_SAVE_TOPIC_NAME);
+    let requested = topic.read().requested.wrapping_add(1);
+    topic
+        .write(
+            writer_id,
+            SlamSaveRequest {
+                name: body.name,
+                requested,
+            },
+        )
+        .expect("lost writer authorization for the slam_save topic");
+    json_response(&SlamSaveResponse { requested }, 200)
 }
 
 /// Writes `state` to `slam_command`, bumping

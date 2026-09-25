@@ -18,12 +18,11 @@ use crate::environment::simulator::vehicle::{
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
-    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart,
-    START_STATE_TOPIC_NAME, Shape, StartState, VEHICLE_LIMITS_TOPIC_NAME,
-    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
-    VehicleModelKind, VehicleModelParameters, VehicleModelSelection, VehicleModelStatus,
-    VehicleStatus, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME,
+    Shape, StartState, VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME,
+    VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelParameters, VehicleModelSelection,
+    VehicleModelStatus, VehicleStatus, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
@@ -279,12 +278,14 @@ fn tunable_parameters(
         VehicleModelKind::DynamicBicycle => {
             with_values(DynamicParams::tunable_parameters(), &config.dynamic_bicycle)
         }
-        VehicleModelKind::NonlinearBicycle => {
-            with_values(NonlinearTireParams::tunable_parameters(), &config.nonlinear_bicycle)
-        }
-        VehicleModelKind::PacejkaBicycle => {
-            with_values(PacejkaTireParams::tunable_parameters(), &config.pacejka_bicycle)
-        }
+        VehicleModelKind::NonlinearBicycle => with_values(
+            NonlinearTireParams::tunable_parameters(),
+            &config.nonlinear_bicycle,
+        ),
+        VehicleModelKind::PacejkaBicycle => with_values(
+            PacejkaTireParams::tunable_parameters(),
+            &config.pacejka_bicycle,
+        ),
         VehicleModelKind::TwoTrack => {
             with_values(TwoTrackParams::tunable_parameters(), &config.two_track)
         }
@@ -360,15 +361,26 @@ fn saved_table_values(
     parameters: &[AlgorithmParameter],
 ) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
     let path = config_path();
-    let names: Vec<&str> = parameters.iter().map(|parameter| parameter.name.as_str()).collect();
-    Ok((crate::config::load_toml_values(&path, Some(table), &names)?, path))
+    let names: Vec<&str> = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect();
+    Ok((
+        crate::config::load_toml_values(&path, Some(table), &names)?,
+        path,
+    ))
 }
 
 fn save_table(table: &str, parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
     let path = config_path();
     let values: Vec<(&str, String)> = parameters
         .iter()
-        .map(|parameter| (parameter.name.as_str(), crate::config::parameter_toml_value(parameter)))
+        .map(|parameter| {
+            (
+                parameter.name.as_str(),
+                crate::config::parameter_toml_value(parameter),
+            )
+        })
         .collect();
     crate::config::save_toml_values(&path, Some(table), &values)?;
     Ok(path)
@@ -1093,12 +1105,20 @@ mod tests {
     fn wanted_values_apply_to_the_running_kind_only() {
         let mut config = SimulatedVehicleConfig::default();
         let wanted = BTreeMap::from([("lf_m".to_string(), 0.3), ("mass_kg".to_string(), 99.0)]);
-        assert!(apply_wanted(VehicleModelKind::DynamicBicycle, &mut config, &wanted));
+        assert!(apply_wanted(
+            VehicleModelKind::DynamicBicycle,
+            &mut config,
+            &wanted
+        ));
         assert_eq!(config.dynamic_bicycle.lf_m, 0.3);
         // Clamped to its range.
         assert_eq!(config.dynamic_bicycle.mass_kg, 15.0);
         assert_eq!(config.bicycle, SimulatedVehicleConfig::default().bicycle);
-        assert!(!apply_wanted(VehicleModelKind::DynamicBicycle, &mut config, &wanted));
+        assert!(!apply_wanted(
+            VehicleModelKind::DynamicBicycle,
+            &mut config,
+            &wanted
+        ));
 
         let status = model_status(VehicleModelKind::DynamicBicycle, &config);
         let lf = status.parameters.iter().find(|p| p.name == "lf_m").unwrap();

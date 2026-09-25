@@ -2,7 +2,7 @@
 //! generation. Built entirely on the existing [`crate::environment`] module
 //! (`Map::load`, `read_info`, `GenerationConfig`, `generate`).
 
-use crate::environment::{self, GenerationConfig, Map, MapGenerationError, random_seed};
+use crate::environment::{self, GenerationConfig, Map, MapGenerationError, MapSource, random_seed};
 use crate::web::{bad_request, error_response, header, json_response, not_found};
 use std::path::{Path, PathBuf};
 use tiny_http::{Request, Response, ResponseBox};
@@ -14,7 +14,9 @@ struct MapSummary {
     width_px: u32,
     height_px: u32,
     resolution_m_per_px: f64,
-    seed: u64,
+    source: MapSource,
+    /// Only for generated maps.
+    seed: Option<u64>,
     generated_at: String,
 }
 
@@ -36,7 +38,8 @@ pub fn list(maps_root: &Path) -> ResponseBox {
                 width_px: info.width_px,
                 height_px: info.height_px,
                 resolution_m_per_px: info.resolution_m_per_px,
-                seed: info.seed,
+                source: info.source,
+                seed: info.generation.map(|generation| generation.seed),
                 generated_at: info.generated_at,
             });
         }
@@ -230,12 +233,7 @@ struct GeneratedMapSummary {
     num_race_line_points: usize,
 }
 
-/// Validates `name` as a map folder name: non-empty, and free of any path
-/// separator or `..` component, so it can never escape `maps_root` - unlike
-/// `generate_map`'s CLI flag, this one comes from an arbitrary HTTP client.
+/// `name`'s folder under `maps_root` - see [`environment::map_folder`].
 pub(super) fn safe_map_folder(name: &str, maps_root: &Path) -> Option<PathBuf> {
-    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
-        return None;
-    }
-    Some(maps_root.join(name))
+    environment::map_folder(maps_root, name)
 }

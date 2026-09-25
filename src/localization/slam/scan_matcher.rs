@@ -113,6 +113,40 @@ impl ScanMatcher {
         penalize: bool,
         refine: bool,
     ) -> MatchResult {
+        self.match_with(scan, penalize, refine, |matcher, prior| {
+            matcher.add_scans(base, (prior.x_m, prior.y_m));
+        })
+    }
+
+    /// Where `scan` - starting from its corrected pose - best overlaps the
+    /// fixed reference `points`, e.g. the walls of a known map, as
+    /// [`Self::match_scan`] does for reference scans. Every point is used:
+    /// unlike a reference scan's, a map's points weren't seen from anywhere
+    /// in particular, so none can be dropped for facing away.
+    pub fn match_points(
+        &mut self,
+        scan: &LocalizedScan,
+        points: &[(f64, f64)],
+        penalize: bool,
+        refine: bool,
+    ) -> MatchResult {
+        self.match_with(scan, penalize, refine, |matcher, _| {
+            matcher.grid.clear();
+            for &(x_m, y_m) in points {
+                matcher.grid.add_point(x_m, y_m);
+            }
+        })
+    }
+
+    /// [`Self::match_scan`]'s search, with the grid - already centered on
+    /// the prior - filled by `fill_grid(self, prior)`.
+    fn match_with(
+        &mut self,
+        scan: &LocalizedScan,
+        penalize: bool,
+        refine: bool,
+        fill_grid: impl FnOnce(&mut Self, Pose2),
+    ) -> MatchResult {
         let prior = scan.corrected_pose();
         self.penalize = penalize;
         if scan.world_points().is_empty() {
@@ -132,7 +166,7 @@ impl ScanMatcher {
         let half_roi_m = 0.5 * f64::from(self.grid.roi_side() - 1) * resolution_m;
         self.grid
             .set_offset(prior.x_m - half_roi_m, prior.y_m - half_roi_m);
-        self.add_scans(base, (prior.x_m, prior.y_m));
+        fill_grid(self, prior);
 
         let search_offset_m = 0.5 * f64::from(self.search_side - 1) * resolution_m;
         // The coarse pass only checks every other cell.
@@ -579,6 +613,45 @@ pub(super) mod tests {
 
         let mut matcher = ScanMatcher::new(0.5, 0.01, 0.03, 12.0, params());
         let result = matcher.match_scan(&scan, &[&reference], true, true);
+
+        assert!(
+            result.pose.squared_distance(&truth).sqrt() < 0.02,
+            "matched {:?}, truth {truth:?}",
+            result.pose
+        );
+        assert!(wrap_to_pi(result.pose.heading_rad - truth.heading_rad).abs() < 0.01);
+        assert!(result.response > 0.5, "response {}", result.response);
+    }
+
+    /// The room of [`room_scan`] as a map's wall points, `spacing_m` apart.
+    pub fn room_points(spacing_m: f64) -> Vec<(f64, f64)> {
+        let mut points = Vec::new();
+        let steps = |from: f64, to: f64| {
+            let n = ((to - from) / spacing_m).round() as usize;
+            (0..=n).map(move |i| from + i as f64 * spacing_m)
+        };
+        for x in steps(-3.0, 4.0) {
+            points.extend([(x, -2.0), (x, 5.0)]);
+        }
+        for y in steps(-2.0, 5.0) {
+            points.extend([(-3.0, y), (4.0, y)]);
+        }
+        let n = (2.0 * std::f64::consts::PI * 0.5 / spacing_m).ceil() as usize;
+        for i in 0..n {
+            let (sin, cos) = (2.0 * std::f64::consts::PI * i as f64 / n as f64).sin_cos();
+            points.push((1.5 + 0.5 * cos, 2.0 + 0.5 * sin));
+        }
+        points
+    }
+
+    #[test]
+    fn matching_against_map_points_recovers_a_wrong_prior() {
+        let truth = Pose2::new(0.3, 0.2, 0.1);
+        let prior = Pose2::new(truth.x_m - 0.12, truth.y_m + 0.08, truth.heading_rad - 0.06);
+        let scan = LocalizedScan::new(&room_scan(truth, 360), Instant::now(), prior, 12.0);
+
+        let mut matcher = ScanMatcher::new(0.5, 0.01, 0.1, 12.0, params());
+        let result = matcher.match_points(&scan, &room_points(0.05), true, true);
 
         assert!(
             result.pose.squared_distance(&truth).sqrt() < 0.02,

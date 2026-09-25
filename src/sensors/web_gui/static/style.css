@@ -30,7 +30,8 @@
 #vehicle-model-description,
 #algorithm-description,
 #algorithm-status,
-#slam-details {
+#slam-details,
+#localization-details {
   margin: 0;
   font-size: 13px;
   color: #9aa4b2;
@@ -170,32 +171,38 @@
   line-height: 1.35;
 }
 
-#slam-state {
+#slam-state,
+#localization-state {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
   color: #9aa4b2;
 }
 
-#slam-state.running {
+#slam-state.running,
+#localization-state.localizing {
   color: #7fd18b;
 }
 
-#slam-state.waiting {
+#slam-state.waiting,
+#localization-state.localization_paused {
   color: #e0a458;
 }
 
-#slam-state.stale {
+#slam-state.stale,
+#localization-state.stale {
   color: #f59e0b;
 }
 
 #slam-controls,
+#localization-controls,
 #algorithm-controls {
   display: flex;
   gap: 8px;
 }
 
 #slam-controls button,
+#localization-controls button,
 #algorithm-controls button {
   flex: 1 1 0;
 }
@@ -248,7 +255,8 @@
 }
 
 #vehicle-model-select,
-#topic-select {
+#topic-select,
+#slam-save-name {
   flex: 0 0 auto;
   font: inherit;
   background: #22272e;

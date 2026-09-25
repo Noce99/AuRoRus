@@ -4,7 +4,7 @@
 //! [`GenerationConfig::output_root`].
 
 use crate::environment::info::{
-    self, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint,
+    self, GenerationInfo, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint,
 };
 use crate::environment::map::{
     CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, RACE_LINES_DIR_NAME,
@@ -170,9 +170,11 @@ pub fn generate(
         },
         generated_at: info::now_rfc3339(),
         source: MapSource::Random,
-        track_width_m: config.track_width_m,
-        point_spacing_m: config.point_spacing_m,
-        seed: config.seed,
+        generation: Some(GenerationInfo {
+            track_width_m: config.track_width_m,
+            point_spacing_m: config.point_spacing_m,
+            seed: config.seed,
+        }),
     };
     info::write(&map_info, &folder.join(INFO_FILE_NAME)).map_err(MapGenerationError::Info)?;
 

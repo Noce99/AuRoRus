@@ -1,16 +1,21 @@
 //! [`Slam`]: builds an occupancy map of the track from lidar scans and
 //! odometry while the vehicle drives - a Rust port of the mapping core of
-//! slam_toolbox (Karto's `Mapper`), minus loop closure for now. See
+//! slam_toolbox (Karto's `Mapper`) - and saves it under `maps/`; or
+//! localizes the vehicle on a known map, without changing it. See
 //! `documentation/slam.md` for how it's structured, how it's driven from
 //! `web_gui`, and what's next.
 //!
-//! Reads [`LIDAR_SCAN_TOPIC_NAME`], [`ODOMETRY_TOPIC_NAME`], and
-//! [`SLAM_COMMAND_TOPIC_NAME`]; publishes [`SLAM_STATUS_TOPIC_NAME`],
+//! Reads [`LIDAR_SCAN_TOPIC_NAME`], [`ODOMETRY_TOPIC_NAME`],
+//! [`SLAM_COMMAND_TOPIC_NAME`], [`SLAM_SAVE_TOPIC_NAME`] and - to localize
+//! on it - [`MAP_TOPIC_NAME`]; publishes
+//! [`SLAM_STATUS_TOPIC_NAME`],
 //! [`SLAM_MAP_TOPIC_NAME`], and - optionally - a drawing of the map, the
 //! trajectory, and the estimated vehicle, anchored at
 //! [`START_STATE_TOPIC_NAME`] so it overlays the true map.
 
 mod correlation_grid;
+mod localizer;
+mod map_saver;
 mod mapper;
 mod matrix3;
 mod occupancy_grid;
@@ -21,18 +26,22 @@ mod pose_graph;
 mod scan;
 mod scan_matcher;
 
+use crate::environment;
 use crate::topics::{
-    Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, ODOMETRY_TOPIC_NAME, Odometry,
-    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, START_STATE_TOPIC_NAME,
-    Shape, SlamCommand, SlamMap, SlamState, SlamStatus, StartState,
+    Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
+    Odometry, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, START_STATE_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap,
+    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState,
 };
 use crate::{Captain, Executor, Ticker};
+use localizer::{Localizer, LocalizerParams};
 use mapper::{Mapper, MapperParams, Processed};
 use odometry_buffer::{OdometryBuffer, PoseAt};
 use pose::Pose2;
 use scan::LocalizedScan;
 use scan_matcher::MatchParams;
 use std::any::Any;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Every tunable parameter [`Slam`] needs - loaded from
@@ -126,6 +135,10 @@ pub struct SlamConfig {
     pub loop_search_space_smear_deviation_m: f64,
     /// Most Levenberg-Marquardt iterations one optimization may take.
     pub optimizer_max_iterations: usize,
+
+    /// While localizing, a match against the map is only trusted at or
+    /// above this response - below it, the pose follows odometry alone.
+    pub localization_minimum_response: f64,
 }
 
 impl Default for SlamConfig {
@@ -136,6 +149,31 @@ impl Default for SlamConfig {
 }
 
 impl SlamConfig {
+    fn localizer_params(&self) -> LocalizerParams {
+        LocalizerParams {
+            correlation_search_space_dimension_m: self.correlation_search_space_dimension_m,
+            correlation_search_space_resolution_m: self.correlation_search_space_resolution_m,
+            correlation_search_space_smear_deviation_m: self
+                .correlation_search_space_smear_deviation_m,
+            max_laser_range_m: self.max_laser_range_m,
+            minimum_response: self.localization_minimum_response,
+            matching: self.match_params(),
+        }
+    }
+
+    fn match_params(&self) -> MatchParams {
+        MatchParams {
+            coarse_search_angle_offset_rad: self.coarse_search_angle_offset_rad,
+            coarse_angle_resolution_rad: self.coarse_angle_resolution_rad,
+            fine_search_angle_offset_rad: self.fine_search_angle_offset_rad,
+            distance_variance_penalty: self.distance_variance_penalty,
+            angle_variance_penalty: self.angle_variance_penalty,
+            minimum_distance_penalty: self.minimum_distance_penalty,
+            minimum_angle_penalty: self.minimum_angle_penalty,
+            use_response_expansion: self.use_response_expansion,
+        }
+    }
+
     fn mapper_params(&self) -> MapperParams {
         MapperParams {
             minimum_time_interval_s: self.minimum_time_interval_s,
@@ -163,16 +201,7 @@ impl SlamConfig {
             loop_search_space_resolution_m: self.loop_search_space_resolution_m,
             loop_search_space_smear_deviation_m: self.loop_search_space_smear_deviation_m,
             optimizer_max_iterations: self.optimizer_max_iterations,
-            matching: MatchParams {
-                coarse_search_angle_offset_rad: self.coarse_search_angle_offset_rad,
-                coarse_angle_resolution_rad: self.coarse_angle_resolution_rad,
-                fine_search_angle_offset_rad: self.fine_search_angle_offset_rad,
-                distance_variance_penalty: self.distance_variance_penalty,
-                angle_variance_penalty: self.angle_variance_penalty,
-                minimum_distance_penalty: self.minimum_distance_penalty,
-                minimum_angle_penalty: self.minimum_angle_penalty,
-                use_response_expansion: self.use_response_expansion,
-            },
+            matching: self.match_params(),
         }
     }
 }
@@ -184,6 +213,8 @@ const DRAWN_BODY_WIDTH_M: f64 = 0.25;
 const DRAWN_AXLE_M: f64 = 0.16;
 /// Translucent, so the true vehicle stays visible where they overlap.
 const DRAWN_COLOR: Color = Color::GREEN.with_alpha(170);
+/// The vehicle localized on a known map, told apart from mapping's.
+const LOCALIZED_COLOR: Color = Color::BLUE.with_alpha(190);
 /// Loop-closure edges stand out from the trajectory.
 const LOOP_EDGE_COLOR: Color = Color::AMBER;
 /// Radius of the circle marking where a loop was closed, in meters.
@@ -197,18 +228,29 @@ const DRAWN_Z_INDEX: i32 = -50;
 /// [`LidarScan`] - posed by interpolating [`Odometry`] at the instant it was
 /// written - to the map. [`SlamState::Off`], a bumped
 /// [`SlamCommand::clear_requested`], or odometry being reset all throw the
-/// map away.
+/// map away. A [`SlamSaveRequest`] saves the map built so far as a new map
+/// folder under `maps_root`, reporting how it went on
+/// [`SlamStatus::last_save`].
+///
+/// While [`SlamCommand::state`] is [`SlamState::Localizing`], every new scan
+/// is matched against the selected map ([`MAP_TOPIC_NAME`]) instead,
+/// starting from [`START_STATE_TOPIC_NAME`] - where odometry was reset -
+/// and the map is never changed. That's refused while SLAM has a map of its
+/// own in memory: clear or save it first.
 pub struct Slam {
     id: u8,
     name: String,
+    maps_root: PathBuf,
     config: SlamConfig,
 }
 
 impl Slam {
-    pub fn new(name: impl Into<String>, config: SlamConfig) -> Self {
+    /// Creates a `Slam` that saves maps under `maps_root`.
+    pub fn new(name: impl Into<String>, maps_root: impl Into<PathBuf>, config: SlamConfig) -> Self {
         Self {
             id: 0,
             name: name.into(),
+            maps_root: maps_root.into(),
             config,
         }
     }
@@ -231,6 +273,8 @@ impl Executor for Slam {
         let lidar_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
         let odometry_topic = captain.topic::<Odometry>(ODOMETRY_TOPIC_NAME);
         let command_topic = captain.topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME);
+        let save_topic = captain.topic::<SlamSaveRequest>(SLAM_SAVE_TOPIC_NAME);
+        let selected_map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let status_topic = captain.topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME);
         let map_topic = captain.topic::<SlamMap>(SLAM_MAP_TOPIC_NAME);
@@ -242,6 +286,9 @@ impl Executor for Slam {
         let mut last_scan_write = lidar_topic.read().meta.write_count;
         let mut last_odometry_write = None;
         let mut applied_clear = command_topic.read().clear_requested;
+        // A request left over from before this executor started isn't
+        // answered.
+        let mut applied_save = save_topic.read().requested;
         let map_publish_period = Duration::from_secs_f64(self.config.map_publish_period_s);
         let mut last_published: Option<Instant> = None;
         let mut ticker = Ticker::new(self.config.rate_hz);
@@ -270,10 +317,31 @@ impl Executor for Slam {
                 state.clear();
             }
 
+            // Localization never runs over a map being built.
+            let effective_state =
+                if command.state.is_localization() && state.mapper.scan_count() > 0 {
+                    SlamState::Waiting
+                } else {
+                    command.state
+                };
+            if effective_state.is_localization() {
+                let selected_map = selected_map_topic.read();
+                state.update_localization(
+                    &selected_map.value,
+                    selected_map.meta.write_count,
+                    &start_state_topic.read(),
+                    self.config.localizer_params(),
+                );
+            } else {
+                state.stop_localizing();
+            }
+
             let scan = lidar_topic.read();
             let new_scan = scan.meta.write_count != last_scan_write;
             last_scan_write = scan.meta.write_count;
-            if command.state == SlamState::Running {
+            let processing = effective_state == SlamState::Running
+                || (effective_state == SlamState::Localizing && state.localization.is_some());
+            if processing {
                 // An older scan still waiting for odometry to catch up goes
                 // first; a newer one replaces it only if it's still waiting
                 // after that.
@@ -286,11 +354,26 @@ impl Executor for Slam {
                 state.pending = None;
             }
 
+            let save = save_topic.read().into_value();
+            if save.requested != applied_save {
+                applied_save = save.requested;
+                state.last_save = Some(state.save(&save, &self.maps_root));
+            }
+
             status_topic
-                .write(self.id, state.status(command.state))
+                .write(self.id, state.status(effective_state))
                 .expect("lost writer authorization for the slam_status topic");
 
-            if state.map_changed
+            if let Some(localization) = &state.localization {
+                if state.localization_changed {
+                    state.localization_changed = false;
+                    if let Some(drawing_topic) = &drawing_topic {
+                        drawing_topic
+                            .write(self.id, localized_drawing(localization.localizer.pose()))
+                            .expect("lost writer authorization for SLAM's drawing topic");
+                    }
+                }
+            } else if state.map_changed
                 && last_published.is_none_or(|at| at.elapsed() >= map_publish_period)
             {
                 state.map_changed = false;
@@ -327,7 +410,11 @@ impl Executor for Slam {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(Slam::new(self.name.clone(), self.config))
+        Box::new(Slam::new(
+            self.name.clone(),
+            self.maps_root.clone(),
+            self.config,
+        ))
     }
 }
 
@@ -345,6 +432,22 @@ struct State {
     last_process_ms: Option<f64>,
     /// Whether the map changed since it was last published.
     map_changed: bool,
+    last_save: Option<SlamSaveOutcome>,
+    /// Localizing on a known map - `None` unless localizing, or with no map
+    /// selected.
+    localization: Option<Localization>,
+    /// Whether the localized pose changed since it was last drawn.
+    localization_changed: bool,
+}
+
+/// A [`Localizer`], and what it was built for: once either changes, it's
+/// rebuilt.
+struct Localization {
+    localizer: Localizer,
+    /// The write of [`MAP_TOPIC_NAME`] whose map it localizes on.
+    map_write: u64,
+    /// The [`Odometry::reset_count`] its starting pose was taken for.
+    odometry_reset_count: Option<u64>,
 }
 
 impl State {
@@ -358,6 +461,58 @@ impl State {
             last_process_ms: None,
             // Publish the (empty) map once right away.
             map_changed: true,
+            last_save: None,
+            localization: None,
+            localization_changed: false,
+        }
+    }
+
+    /// Localizes on `map` (the `map_write`th write of [`MAP_TOPIC_NAME`]),
+    /// (re)starting from `start` - where odometry was reset - whenever the
+    /// map or odometry's reset count changed. Stops localizing if no map
+    /// is loaded.
+    fn update_localization(
+        &mut self,
+        map: &SelectedMap,
+        map_write: u64,
+        start: &StartState,
+        params: LocalizerParams,
+    ) {
+        let odometry_reset_count = self.odometry.reset_count();
+        let current = self.localization.as_ref().is_some_and(|localization| {
+            localization.map_write == map_write
+                && localization.odometry_reset_count == odometry_reset_count
+        });
+        if current {
+            return;
+        }
+        let rebuilt = map.info.is_some().then(|| Localization {
+            localizer: Localizer::new(
+                params,
+                localizer::wall_points(map),
+                Pose2::new(start.x_m, start.y_m, start.heading_rad),
+            ),
+            map_write,
+            odometry_reset_count,
+        });
+        // A scan waiting since before is for the old start or map.
+        self.pending = None;
+        self.last_match_response = None;
+        self.last_process_ms = None;
+        self.localization = rebuilt;
+        self.localization_changed = true;
+        // Nothing drawn left over from the old localization, if it's gone.
+        self.map_changed = true;
+    }
+
+    /// Forgets the localization, if any.
+    fn stop_localizing(&mut self) {
+        if self.localization.take().is_some() {
+            self.pending = None;
+            self.last_match_response = None;
+            self.last_process_ms = None;
+            // Draw the mapping state again, replacing the localized vehicle.
+            self.map_changed = true;
         }
     }
 
@@ -390,9 +545,25 @@ impl State {
             }
         };
         let (written_at, scan) = self.pending.take().expect("checked above");
-        let threshold_m = self.mapper.range_threshold_m(f64::from(scan.max_distance));
-
         let started = Instant::now();
+
+        if let Some(localization) = &mut self.localization {
+            let threshold_m = localization
+                .localizer
+                .range_threshold_m(f64::from(scan.max_distance));
+            let localized = localization.localizer.process(LocalizedScan::new(
+                &scan,
+                written_at,
+                pose,
+                threshold_m,
+            ));
+            self.last_match_response = Some(localized.response);
+            self.last_process_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+            self.localization_changed = true;
+            return;
+        }
+
+        let threshold_m = self.mapper.range_threshold_m(f64::from(scan.max_distance));
         let processed =
             self.mapper
                 .process(LocalizedScan::new(&scan, written_at, pose, threshold_m));
@@ -407,13 +578,19 @@ impl State {
     }
 
     fn status(&self, state: SlamState) -> SlamStatus {
+        let as_array = |pose: Pose2| [pose.x_m, pose.y_m, pose.heading_rad];
+        let (pose, map_to_odom) = match &self.localization {
+            Some(localization) => (
+                localization.localizer.pose(),
+                Some(localization.localizer.map_to_odom()),
+            ),
+            None => (self.mapper.pose(), None),
+        };
         SlamStatus {
             state,
             scans: self.mapper.scan_count(),
-            pose: self
-                .mapper
-                .pose()
-                .map(|pose| [pose.x_m, pose.y_m, pose.heading_rad]),
+            pose: pose.map(as_array),
+            map_to_odom: map_to_odom.map(as_array),
             odometry_reset_count: self
                 .map_reset_count
                 .or(self.odometry.reset_count())
@@ -422,8 +599,48 @@ impl State {
             last_process_ms: self.last_process_ms,
             loop_closures: self.mapper.loop_closures(),
             last_optimization_ms: self.mapper.last_optimization_ms(),
+            last_save: self.last_save.clone(),
         }
     }
+
+    /// Saves the map built so far as `request`'s folder under `maps_root`
+    /// (see [`map_saver`]).
+    fn save(&self, request: &SlamSaveRequest, maps_root: &Path) -> SlamSaveOutcome {
+        let saved = save_map(
+            &self.mapper.map(),
+            self.mapper.first_pose(),
+            &request.name,
+            maps_root,
+        );
+        match &saved {
+            Ok(folder) => println!("slam: saved the map to {folder:?}"),
+            Err(err) => eprintln!("slam: failed to save the map: {err}"),
+        }
+        SlamSaveOutcome {
+            requested: request.requested,
+            saved_to: saved
+                .as_ref()
+                .ok()
+                .map(|folder| folder.display().to_string()),
+            error: saved.err(),
+        }
+    }
+}
+
+/// Saves `map`, started from `first_pose`, as the map folder `name` under
+/// `maps_root` - the folder, or why it couldn't be saved.
+fn save_map(
+    map: &SlamMap,
+    first_pose: Option<Pose2>,
+    name: &str,
+    maps_root: &Path,
+) -> Result<PathBuf, String> {
+    let folder = environment::map_folder(maps_root, name.trim())
+        .ok_or_else(|| format!("invalid map name {name:?}"))?;
+    let start = first_pose.ok_or_else(|| map_saver::ExportError::Empty.to_string())?;
+    let (info, raster) = map_saver::export(map, start).map_err(|err| err.to_string())?;
+    environment::save(&folder, &info, &raster).map_err(|err| err.to_string())?;
+    Ok(folder)
 }
 
 /// What [`Slam`] draws: `map`, its trajectory, and a vehicle at `pose`,
@@ -499,6 +716,29 @@ fn drawing(
         rear_axle_m: DRAWN_AXLE_M,
         color: DRAWN_COLOR,
     });
+    Drawing::new(shapes).z_index(DRAWN_Z_INDEX)
+}
+
+/// What [`Slam`] draws while localizing: the vehicle at `pose`, already in
+/// the map's frame. Empty before the first scan.
+fn localized_drawing(pose: Option<Pose2>) -> Drawing {
+    let shapes = pose
+        .map(|pose| {
+            vec![Shape::Vehicle {
+                x_m: pose.x_m,
+                y_m: pose.y_m,
+                heading_rad: pose.heading_rad,
+                // Redrawn on every scan only: don't extrapolate in between.
+                speed_mps: 0.0,
+                steering_rad: 0.0,
+                length_m: DRAWN_BODY_LENGTH_M,
+                width_m: DRAWN_BODY_WIDTH_M,
+                front_axle_m: DRAWN_AXLE_M,
+                rear_axle_m: DRAWN_AXLE_M,
+                color: LOCALIZED_COLOR,
+            }]
+        })
+        .unwrap_or_default();
     Drawing::new(shapes).z_index(DRAWN_Z_INDEX)
 }
 

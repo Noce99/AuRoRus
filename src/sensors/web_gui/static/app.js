@@ -92,7 +92,8 @@ function renderMapList(maps, selectedName) {
   for (const map of maps) {
     const li = document.createElement("li");
     li.textContent = map.name;
-    li.title = `${map.width_px}x${map.height_px} px, seed ${map.seed}`;
+    const origin = map.seed == null ? `recorded ${map.generated_at}` : `seed ${map.seed}`;
+    li.title = `${map.width_px}x${map.height_px} px, ${origin}`;
     if (map.name === selectedName) li.classList.add("selected");
     li.addEventListener("click", () => {
       renderMapList(maps, map.name); // optimistic highlight; pollLiveMap confirms it
@@ -511,20 +512,41 @@ const syncVehicleLimits = createParameterPanel({
 
 // ---------------------------------------------------------------------
 // Mapping panel - drives SLAM through the `slam_command` topic (Play:
-// running, Pause: waiting, Clear: off) and shows what it's actually doing,
-// from the `slam_status` topic.
+// running, Pause: waiting, Clear: off), saves its map through the
+// `slam_save` topic, and shows what it's actually doing, from the
+// `slam_status` topic.
 // ---------------------------------------------------------------------
 
 const slamStateEl = document.getElementById("slam-state");
 const slamDetailsEl = document.getElementById("slam-details");
 const slamButtons = document.querySelectorAll("#slam-controls button");
+const slamSaveFormEl = document.getElementById("slam-save");
+const slamSaveNameEl = document.getElementById("slam-save-name");
+const slamSaveBtn = document.getElementById("slam-save-btn");
+const slamSaveStatusEl = document.getElementById("slam-save-status");
+
+/** The save request this tab is waiting on SLAM to answer, or null. */
+let pendingSlamSave = null;
+/** Whether SLAM currently has anything to save. */
+let slamHasMap = false;
 
 /** `slam_status` older than this means SLAM isn't running at all. */
 const SLAM_STATUS_STALE_MS = 1000;
 
-const SLAM_STATE_LABELS = { off: "Off", waiting: "Waiting", running: "Running" };
+const SLAM_STATE_LABELS = {
+  off: "Off",
+  waiting: "Waiting",
+  running: "Running",
+  localizing: "Localizing",
+  localization_paused: "Localization paused",
+};
 
-for (const button of slamButtons) {
+const localizationStateEl = document.getElementById("localization-state");
+const localizationDetailsEl = document.getElementById("localization-details");
+const localizationStartBtn = document.getElementById("localization-start-btn");
+const localizationPauseBtn = document.getElementById("localization-pause-btn");
+
+for (const button of [...slamButtons, localizationStartBtn, localizationPauseBtn]) {
   button.addEventListener("click", () => {
     fetchJSON("/api/slam_command", {
       method: "POST",
@@ -534,6 +556,45 @@ for (const button of slamButtons) {
       .then(() => pollSlam())
       .catch((err) => console.error(err));
   });
+}
+
+// SLAM saves on its own thread: the POST only files the request, and the
+// outcome shows up on `slam_status` under the returned request number.
+slamSaveFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = slamSaveNameEl.value.trim();
+  if (!name) return;
+  slamSaveBtn.disabled = true;
+  slamSaveStatusEl.classList.remove("error");
+  slamSaveStatusEl.textContent = "Saving...";
+  fetchJSON("/api/slam_save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+    .then(({ requested }) => {
+      pendingSlamSave = requested;
+      return pollSlam();
+    })
+    .catch((err) => {
+      slamSaveStatusEl.classList.add("error");
+      slamSaveStatusEl.textContent = `Couldn't save: ${err.message}`;
+      slamSaveBtn.disabled = !slamHasMap;
+    });
+});
+
+/** Shows how SLAM handled this tab's pending save request, once it has. */
+function showSlamSaveOutcome(outcome) {
+  if (pendingSlamSave === null || !outcome || outcome.requested !== pendingSlamSave) return;
+  pendingSlamSave = null;
+  if (outcome.error !== null) {
+    slamSaveStatusEl.classList.add("error");
+    slamSaveStatusEl.textContent = `Couldn't save: ${outcome.error}`;
+  } else {
+    slamSaveStatusEl.textContent = `Saved to ${outcome.saved_to}`;
+    slamSaveNameEl.value = "";
+    refreshMapList().catch((err) => console.error(err));
+  }
 }
 
 // Polls the `slam_status` topic (via `/api/slam`): the state SLAM is
@@ -549,9 +610,17 @@ async function pollSlam() {
   for (const button of slamButtons) {
     button.disabled = !stale && button.dataset.state === status.state;
   }
+  renderLocalization(status, stale);
 
+  if (!stale) showSlamSaveOutcome(status.last_save);
+  slamHasMap = !stale && status.scans > 0;
+  slamSaveBtn.disabled = !slamHasMap || pendingSlamSave !== null;
   if (stale) {
     slamDetailsEl.textContent = "";
+    return;
+  }
+  if (status.state === "localizing" || status.state === "localization_paused") {
+    slamDetailsEl.textContent = "Localizing on the selected map - see the Localization panel.";
     return;
   }
   const parts = [`${status.scans} scan${status.scans === 1 ? "" : "s"} in the map.`];
@@ -566,6 +635,52 @@ async function pollSlam() {
     parts.push(`(last optimized in ${status.last_optimization_ms.toFixed(1)} ms)`);
   }
   slamDetailsEl.textContent = parts.join(" ") + ".";
+}
+
+// Localization panel - the localization half of `slam_status`. Start is
+// only offered with a map selected, and never over a map SLAM is building:
+// that one has to be cleared or saved first.
+function renderLocalization(status, stale) {
+  const localizing = !stale && status.state === "localizing";
+  const paused = !stale && status.state === "localization_paused";
+  const hasSlamMap = !stale && status.scans > 0;
+
+  localizationStateEl.className = stale ? "stale" : status.state;
+  localizationStateEl.textContent = stale
+    ? "SLAM not running"
+    : localizing
+      ? "Localizing"
+      : paused
+        ? "Paused"
+        : "Not localizing";
+  localizationStartBtn.disabled = stale || localizing || hasSlamMap || liveMapName === null;
+  localizationPauseBtn.disabled = !localizing;
+
+  if (stale) {
+    localizationDetailsEl.textContent = "";
+  } else if (hasSlamMap) {
+    localizationDetailsEl.textContent =
+      "SLAM has a map in memory: clear or save it in the Mapping panel first.";
+  } else if (liveMapName === null) {
+    localizationDetailsEl.textContent = "Select a map to localize on.";
+  } else if ((localizing || paused) && status.pose !== null) {
+    const [x, y, heading] = status.pose;
+    const parts = [
+      `On ${liveMapName} at (${x.toFixed(2)}, ${y.toFixed(2)}) m,`,
+      `heading ${((heading * 180) / Math.PI).toFixed(1)}°.`,
+    ];
+    if (status.last_match_response !== null) {
+      parts.push(`Last match: ${(status.last_match_response * 100).toFixed(0)}%`);
+    }
+    if (status.last_process_ms !== null) {
+      parts.push(`in ${status.last_process_ms.toFixed(1)} ms.`);
+    }
+    localizationDetailsEl.textContent = parts.join(" ");
+  } else if (localizing || paused) {
+    localizationDetailsEl.textContent = `On ${liveMapName}, waiting for the first scan.`;
+  } else {
+    localizationDetailsEl.textContent = `Tracks the car on ${liveMapName} from its start line, where odometry was last reset.`;
+  }
 }
 
 // ---------------------------------------------------------------------

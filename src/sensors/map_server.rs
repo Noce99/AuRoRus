@@ -85,21 +85,10 @@ fn drawing(map: &SelectedMap) -> Drawing {
     .z_index(-100)
 }
 
-/// The vehicle's initial state for `map`: the middle of its start/finish
-/// line, heading along the track's direction of travel there - the tangent
-/// from the race line's first point (the start/finish line is centered on
-/// it, by construction of [`crate::environment::simulator::generate`])
-/// toward its second - at rest. Falls back to a heading of `0.0` if the race
-/// line has fewer than two points, which a generated map never does, but a
-/// malformed one might.
+/// The vehicle's initial state for `map`: at rest, on its start/finish
+/// line - see [`crate::environment::StartFinishLine::start_pose`].
 fn start_state(map: &Map) -> StartState {
-    let line = &map.info.start_finish_line;
-    let x_m = (line.a.x + line.b.x) / 2.0;
-    let y_m = (line.a.y + line.b.y) / 2.0;
-    let heading_rad = match (map.race_line.first(), map.race_line.get(1)) {
-        (Some(p0), Some(p1)) => (p1.y - p0.y).atan2(p1.x - p0.x),
-        _ => 0.0,
-    };
+    let (x_m, y_m, heading_rad) = map.info.start_finish_line.start_pose();
     StartState {
         x_m,
         y_m,
@@ -201,11 +190,11 @@ impl Executor for MapServer {
 mod tests {
     use super::*;
     use crate::environment::{
-        ImageOrigin, MapInfo, MapSource, Raster, SpeedPoint, StartFinishLine, WorldPoint,
+        ImageOrigin, MapInfo, MapSource, Raster, StartFinishLine, WorldPoint,
     };
     use std::path::PathBuf;
 
-    fn test_map(line: StartFinishLine, race_line: Vec<SpeedPoint>) -> Map {
+    fn test_map(line: StartFinishLine) -> Map {
         Map {
             folder: PathBuf::new(),
             info: MapInfo {
@@ -219,83 +208,27 @@ mod tests {
                 },
                 start_finish_line: line,
                 generated_at: String::new(),
-                source: MapSource::Random,
-                track_width_m: 2.0,
-                point_spacing_m: 0.25,
-                seed: 0,
+                source: MapSource::Real,
+                generation: None,
             },
             raster: Raster::new(10, 10, vec![true; 100]),
-            race_line,
+            race_line: Vec::new(),
         }
     }
 
     #[test]
-    fn start_state_is_centered_on_the_start_finish_line() {
+    fn start_state_is_placed_by_the_start_finish_line_alone() {
+        // `a` on the left of a vehicle heading along +x.
         let line = StartFinishLine {
             a: WorldPoint { x: 1.0, y: 3.0 },
             b: WorldPoint { x: 1.0, y: -1.0 },
         };
-        let race_line = vec![
-            SpeedPoint {
-                x: 1.0,
-                y: 1.0,
-                speed_mps: 0.0,
-            },
-            SpeedPoint {
-                x: 2.0,
-                y: 1.0,
-                speed_mps: 0.0,
-            },
-        ];
-        let map = test_map(line, race_line);
 
-        let state = start_state(&map);
+        let state = start_state(&test_map(line));
 
         assert_eq!(state.x_m, 1.0);
         assert_eq!(state.y_m, 1.0);
+        assert!(state.heading_rad.abs() < 1e-12);
         assert_eq!(state.speed_mps, 0.0);
-    }
-
-    #[test]
-    fn start_state_heading_is_tangent_to_the_track_direction() {
-        let line = StartFinishLine {
-            a: WorldPoint { x: 0.0, y: 1.0 },
-            b: WorldPoint { x: 0.0, y: -1.0 },
-        };
-        let race_line = vec![
-            SpeedPoint {
-                x: 0.0,
-                y: 0.0,
-                speed_mps: 0.0,
-            },
-            SpeedPoint {
-                x: 0.0,
-                y: 1.0,
-                speed_mps: 0.0,
-            },
-        ];
-        let map = test_map(line, race_line);
-
-        let state = start_state(&map);
-
-        assert!((state.heading_rad - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-    }
-
-    #[test]
-    fn start_state_falls_back_to_zero_heading_with_too_few_race_line_points() {
-        let line = StartFinishLine {
-            a: WorldPoint { x: 0.0, y: 1.0 },
-            b: WorldPoint { x: 0.0, y: -1.0 },
-        };
-        let map = test_map(
-            line,
-            vec![SpeedPoint {
-                x: 0.0,
-                y: 0.0,
-                speed_mps: 0.0,
-            }],
-        );
-
-        assert_eq!(start_state(&map).heading_rad, 0.0);
     }
 }

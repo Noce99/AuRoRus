@@ -27,24 +27,56 @@ pub struct ImageOrigin {
 }
 
 /// The two endpoints of the start/finish line, in world coordinates.
+///
+/// Their order carries the direction of travel: it's `b - a` rotated a
+/// quarter turn counterclockwise (`a` on the driver's left, `b` on the
+/// right) - so the line alone places the vehicle, see
+/// [`StartFinishLine::start_pose`].
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct StartFinishLine {
     pub a: WorldPoint,
     pub b: WorldPoint,
 }
 
-/// Whether a map was procedurally generated or recorded from a real track.
-/// Only [`MapSource::Random`] is producible today; kept as an enum (rather
-/// than always writing a fixed literal) so a future `Real` source can gain
-/// its own fields without an incompatible schema change.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+impl StartFinishLine {
+    /// Where a vehicle starts on this line: its midpoint, heading along the
+    /// direction of travel (see [`StartFinishLine`]), as `(x_m, y_m,
+    /// heading_rad)`. A degenerate line (both ends equal) heads along `+x`.
+    pub fn start_pose(&self) -> (f64, f64, f64) {
+        let x_m = (self.a.x + self.b.x) / 2.0;
+        let y_m = (self.a.y + self.b.y) / 2.0;
+        let (dx, dy) = (self.b.x - self.a.x, self.b.y - self.a.y);
+        let heading_rad = if dx == 0.0 && dy == 0.0 {
+            0.0
+        } else {
+            // (dx, dy) rotated a quarter turn counterclockwise.
+            dx.atan2(-dy)
+        };
+        (x_m, y_m, heading_rad)
+    }
+}
+
+/// Whether a map was procedurally generated ([`MapSource::Random`], see
+/// [`MapInfo::generation`]) or recorded from a track by
+/// [`crate::localization::Slam`] ([`MapSource::Real`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MapSource {
     Random,
     Real,
 }
 
-/// The full contents of a generated map's `info.json`.
+/// How a [`MapSource::Random`] map was generated.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct GenerationInfo {
+    pub track_width_m: f64,
+    pub point_spacing_m: f64,
+    /// RNG seed used to generate this map - re-running with the same seed
+    /// and config reproduces it exactly.
+    pub seed: u64,
+}
+
+/// The full contents of a map's `info.json`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MapInfo {
     pub resolution_m_per_px: f64,
@@ -52,14 +84,12 @@ pub struct MapInfo {
     pub height_px: u32,
     pub origin: ImageOrigin,
     pub start_finish_line: StartFinishLine,
-    /// RFC3339 timestamp of when this map was generated.
+    /// RFC3339 timestamp of when this map was generated or saved.
     pub generated_at: String,
     pub source: MapSource,
-    pub track_width_m: f64,
-    pub point_spacing_m: f64,
-    /// RNG seed used to generate this map - re-running with the same seed
-    /// and config reproduces it exactly.
-    pub seed: u64,
+    /// How the map was generated - only for [`MapSource::Random`] maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<GenerationInfo>,
 }
 
 /// The current UTC time, formatted as RFC3339. Deliberately UTC (not local,
@@ -165,9 +195,11 @@ mod tests {
             },
             generated_at: now_rfc3339(),
             source: MapSource::Random,
-            track_width_m: 2.5,
-            point_spacing_m: 0.25,
-            seed: 42,
+            generation: Some(GenerationInfo {
+                track_width_m: 2.5,
+                point_spacing_m: 0.25,
+                seed: 42,
+            }),
         }
     }
 
@@ -183,8 +215,40 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
 
         assert_eq!(value["source"], "random");
-        assert_eq!(value["seed"], 42);
+        assert_eq!(value["generation"]["seed"], 42);
         assert_eq!(value["width_px"], 100);
         assert!(value["generated_at"].as_str().unwrap().contains('T'));
+    }
+
+    #[test]
+    fn a_map_without_generation_info_omits_the_block() {
+        let info = MapInfo {
+            source: MapSource::Real,
+            generation: None,
+            ..sample_info()
+        };
+        let value = serde_json::to_value(&info).unwrap();
+        assert!(value.get("generation").is_none());
+
+        let read: MapInfo = serde_json::from_value(value).unwrap();
+        assert!(read.generation.is_none());
+    }
+
+    #[test]
+    fn the_start_pose_is_the_midpoint_heading_along_the_direction_of_travel() {
+        // `a` on the left of a vehicle heading along +y.
+        let line = StartFinishLine {
+            a: WorldPoint { x: -1.0, y: 3.0 },
+            b: WorldPoint { x: 1.0, y: 3.0 },
+        };
+        let (x, y, heading) = line.start_pose();
+        assert_eq!((x, y), (0.0, 3.0));
+        assert!((heading - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+
+        let degenerate = StartFinishLine {
+            a: WorldPoint { x: 2.0, y: 2.0 },
+            b: WorldPoint { x: 2.0, y: 2.0 },
+        };
+        assert_eq!(degenerate.start_pose(), (2.0, 2.0, 0.0));
     }
 }

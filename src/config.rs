@@ -72,8 +72,8 @@ pub fn apply_parameters<C: Serialize + DeserializeOwned>(
 /// Panics if `config` has no numeric field named after one of
 /// `parameters` - a typo in the declaration, caught at startup.
 pub fn refresh_parameter_values<C: Serialize>(parameters: &mut [AlgorithmParameter], config: &C) {
-    let json =
-        serde_json::to_value(config).expect("a tunable config must serialize to JSON to be tunable");
+    let json = serde_json::to_value(config)
+        .expect("a tunable config must serialize to JSON to be tunable");
     for parameter in parameters {
         parameter.value = json
             .get(&parameter.name)
@@ -141,7 +141,8 @@ pub fn save_toml_values(
     values: &[(&str, String)],
 ) -> Result<(), String> {
     let text = fs::read_to_string(path).map_err(|err| format!("failed to read {path:?}: {err}"))?;
-    let updated = set_toml_values(&text, section, values).map_err(|err| format!("{path:?}: {err}"))?;
+    let updated =
+        set_toml_values(&text, section, values).map_err(|err| format!("{path:?}: {err}"))?;
     updated
         .parse::<toml::Table>()
         .map_err(|err| format!("{path:?} would no longer parse, not saved: {err}"))?;
@@ -175,7 +176,9 @@ pub fn load_toml_values(
         .iter()
         .map(|&name| {
             let value = table.get(name).and_then(|value| {
-                value.as_float().or_else(|| value.as_integer().map(|int| int as f64))
+                value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|int| int as f64))
             });
             match value {
                 Some(value) => Ok((name.to_string(), value)),
@@ -384,7 +387,11 @@ mod tests {
     #[test]
     fn saved_values_load_back() {
         let path = std::env::temp_dir().join(format!("aurorus_load_{}.toml", std::process::id()));
-        fs::write(&path, "rate_hz = 50.0\nradius = 3\n[bicycle]\nlf_m = 0.16\n").unwrap();
+        fs::write(
+            &path,
+            "rate_hz = 50.0\nradius = 3\n[bicycle]\nlf_m = 0.16\n",
+        )
+        .unwrap();
         let top = load_toml_values(&path, None, &["rate_hz", "radius"]).unwrap();
         assert_eq!(top, wanted(&[("rate_hz", 50.0), ("radius", 3.0)]));
         let table = load_toml_values(&path, Some("bicycle"), &["lf_m"]).unwrap();
@@ -399,14 +406,20 @@ mod tests {
         let value =
             |parameter: AlgorithmParameter, value| AlgorithmParameter { value, ..parameter };
         let float = AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1);
-        assert_eq!(parameter_toml_value(&value(float, 3.299999952316284)), "3.3");
+        assert_eq!(
+            parameter_toml_value(&value(float, 3.299999952316284)),
+            "3.3"
+        );
         let whole = AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0);
         assert_eq!(parameter_toml_value(&value(whole, 50.0)), "50.0");
         let fine = AlgorithmParameter::float("k", 0.0, 1.0, 0.025);
         assert_eq!(parameter_toml_value(&value(fine, 0.125)), "0.125");
         let hundredths = AlgorithmParameter::float("c", 0.5, 3.0, 0.05);
         assert_eq!(parameter_toml_value(&value(hundredths.clone(), 1.3)), "1.3");
-        assert_eq!(parameter_toml_value(&value(hundredths.clone(), 1.25)), "1.25");
+        assert_eq!(
+            parameter_toml_value(&value(hundredths.clone(), 1.25)),
+            "1.25"
+        );
         assert_eq!(parameter_toml_value(&value(hundredths.clone(), 2.0)), "2.0");
         assert_eq!(parameter_toml_value(&value(hundredths, 0.4189)), "0.4189");
         let int = AlgorithmParameter::int("radius", 0, 100, 1);

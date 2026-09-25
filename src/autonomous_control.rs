@@ -221,7 +221,12 @@ pub fn save_parameters(name: &str, parameters: &[AlgorithmParameter]) -> Result<
     let path = config_path(name);
     let values: Vec<(&str, String)> = parameters
         .iter()
-        .map(|parameter| (parameter.name.as_str(), crate::config::parameter_toml_value(parameter)))
+        .map(|parameter| {
+            (
+                parameter.name.as_str(),
+                crate::config::parameter_toml_value(parameter),
+            )
+        })
         .collect();
     crate::config::save_toml_values(&path, None, &values)?;
     Ok(path)
@@ -235,7 +240,10 @@ pub fn saved_values(
     parameters: &[AlgorithmParameter],
 ) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
     let path = config_path(name);
-    let names: Vec<&str> = parameters.iter().map(|parameter| parameter.name.as_str()).collect();
+    let names: Vec<&str> = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect();
     Ok((crate::config::load_toml_values(&path, None, &names)?, path))
 }
 

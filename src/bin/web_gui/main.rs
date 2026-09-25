@@ -36,12 +36,12 @@ fn main() {
     let mut runner = Runner::new();
     runner.activate_verbose();
 
-    runner.add_executor(WebGui::new("WebGui", config.maps_root, web_gui_config).boxed());
+    runner.add_executor(WebGui::new("WebGui", config.maps_root.clone(), web_gui_config).boxed());
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
     runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
     runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
     runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
-    runner.add_executor(Slam::new("Slam", slam_config).boxed());
+    runner.add_executor(Slam::new("Slam", config.maps_root, slam_config).boxed());
     runner.add_executor(
         SimulatedVehicle::new(
             "SimulatedVehicle",

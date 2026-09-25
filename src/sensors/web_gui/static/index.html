@@ -21,6 +21,7 @@
       <button class="panel-nav-btn" data-panel="topics">Topics</button>
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
       <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
+      <button class="panel-nav-btn" data-panel="localization">Localization</button>
     </nav>
   </aside>
 
@@ -122,6 +123,21 @@
         <button type="button" id="slam-clear-btn" data-state="off" title="Stop and throw the map away">Clear</button>
       </div>
       <p id="slam-details"></p>
+      <form id="slam-save" class="parameter-save">
+        <input type="text" id="slam-save-name" placeholder="Map name" required title="Name of the new folder under maps/" />
+        <button type="submit" id="slam-save-btn" title="Save the map built so far under maps/">Save map</button>
+        <p id="slam-save-status"></p>
+      </form>
+    </section>
+
+    <section id="panel-localization" class="panel-section" hidden>
+      <h1>Localization</h1>
+      <p id="localization-state"></p>
+      <div id="localization-controls">
+        <button type="button" id="localization-start-btn" data-state="localizing" title="Start or resume localizing on the selected map">&#9654; Start</button>
+        <button type="button" id="localization-pause-btn" data-state="localization_paused" title="Pause, keeping the pose">&#10074;&#10074; Pause</button>
+      </div>
+      <p id="localization-details"></p>
     </section>
   </aside>
 

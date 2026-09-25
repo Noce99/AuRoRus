@@ -30,8 +30,8 @@ pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMa
 pub use odometry::{ODOMETRY_TOPIC_NAME, Odometry};
 pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
 pub use slam::{
-    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SlamCommand, SlamMap,
-    SlamState, SlamStatus,
+    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
+    SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,
 };
 pub use start_state::{START_STATE_TOPIC_NAME, StartState};
 pub use vehicle_limits::{ActuatorLimits, VEHICLE_LIMITS_TOPIC_NAME};
