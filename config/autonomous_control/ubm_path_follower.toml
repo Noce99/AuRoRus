@@ -1,0 +1,50 @@
+# Configuration for `aurorus::autonomous_control::ubm_path_follower`, ported
+# from ubm's path follower: follows the selected map's race line with a PD,
+# P-enhanced or Stanley steering law, plus an optional feedforward term.
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 50.0
+# Where the vehicle's pose and speed come from: 0 = localization (odometry
+# composed onto SLAM's map_to_odom, only while localizing), 1 = ground truth
+# (vehicle_status, simulation only).
+pose_source = 0
+# Steering law: 0 = PD, 1 = P-enhanced, 2 = Stanley.
+controller = 0
+# Feedforward: 0 = none, 1 = from the line's curvature, 2 = learned per point.
+feedforward = 0
+# Distance between the front and rear axles, in meters (ubm's car: 0.285).
+wheelbase_m = 0.32
+# Proportional gain on the heading error, pure number.
+kk_s = 0.9
+# Derivative gain on the heading error (PD only), in seconds.
+kd_s = 0.0
+# Gain on the cross-track error (Stanley only).
+k_stanley = 2.5
+# Race line points past the nearest one Stanley tracks (time-delay
+# compensation), pure number.
+tdp = 6
+# Above this speed, P-enhanced steers less, in m/s.
+min_speed = 2.5
+# Heading errors below this are damped further by P-enhanced, in radians.
+max_error = 0.15
+# How much P-enhanced damps with speed, pure number.
+decay_v = 0.2
+# How much P-enhanced damps small errors, per m/s above min_speed.
+decay_e = 0.2
+# Lookahead distance: look_ahead_gain_s * speed + min_look_ahead_m.
+look_ahead_gain_s = 0.2
+min_look_ahead_m = 0.45
+# Feedforward delay: meters of the line ahead (path-based), or race line
+# points behind (learned).
+delay_ff_action = 0.0
+# Feedforward gain, pure number.
+beta_ff_gain = 0.4
+# Learned feedforward: weight of the previous value when updating it
+# (1 = never update), pure number.
+averaging_ff_gain = 1.0
+# Multiplies the race line's speed profile, pure number (ubm used 1.0).
+scale_speed = 0.6
+# If > 0, ignore the speed profile and drive at this speed, in m/s.
+constant_speed = 0.0
+# Farther than this from the line, the vehicle stops, in meters.
+max_cross_track_m = 1.0

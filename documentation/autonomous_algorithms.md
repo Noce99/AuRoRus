@@ -466,6 +466,52 @@ these cases:
 The drawing is the potential field's, plus the nearest point (blue) and the
 pursuit point (green).
 
+## UBM Path Follower
+
+`ubm_path_follower.rs` is a port of ubm's `path_follower_node.cpp` and
+`steering_controller.cpp`. It follows the selected map's race line, like
+`pure_pursuit`, and uses the same pose sources (`pose_source`), which also
+supply the speed `v` (odometry's, or `vehicle_status`'s). Its parameters live
+in `config/autonomous_control/ubm_path_follower.toml`.
+
+Each tick it does the following:
+
+1. **Nearest point.** It finds the nearest point on the line, with the
+   same windowed search as `pure_pursuit`.
+2. **Steering law**, chosen by `controller`:
+   - **0, PD (default).** The lookahead point is
+     `look_ahead_gain_s · v + min_look_ahead_m` metres ahead of the nearest
+     point. The heading error is measured from the pose moved back by
+     `wheelbase_m`, as ubm does. Steering is
+     `kk_s · err + clamp(kd_s · d(err)/dt, ±0.2)`, with no derivative on the
+     first tick.
+   - **1, P-enhanced.** Steering starts as `kk_s · err`. Above `min_speed`,
+     it's multiplied by `(min_speed / v)^decay_v`. For errors up to
+     `max_error`, it's also multiplied by
+     `|err / max_error|^((v − min_speed) · decay_e)`. At speed, small errors
+     barely steer.
+   - **2, Stanley.** It uses the race-line point `tdp` points past the
+     nearest one. Steering is
+     `wrap(h − heading) − atan(k_stanley · d / max(v, 0.5))`, where `h` is
+     the line's direction there and `d` the signed distance from it
+     (positive toward increasing heading).
+3. **Feedforward** (`feedforward`), added on top:
+   - **1, from the curvature:** `beta_ff_gain · atan(κ · wheelbase_m)`,
+     with `κ` the line's curvature `delay_ff_action` metres ahead.
+   - **2, learned:** a value per race-line point, updated with the steering
+     `delay_ff_action` points behind. `averaging_ff_gain = 1` never updates
+     it. The table resets when the line changes.
+   - The sum never exceeds the steering limit.
+4. **Speed** is `scale_speed ·` the line's speed at the nearest point, or
+   `constant_speed` if that's > 0.
+
+The vehicle is held stopped in the same cases as `pure_pursuit`: no race
+line, no trustworthy pose, or farther than `max_cross_track_m` from the
+line. ubm had no such guard. Lap statistics and lap progress aren't ported.
+
+The drawing shows the nearest point (blue), the target (the lookahead or
+Stanley point, purple), and the chord to it.
+
 ## Conventions and pitfalls
 
 - **Publish at least once per second.** The handler treats anything older than

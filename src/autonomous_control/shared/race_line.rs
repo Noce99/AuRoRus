@@ -209,7 +209,7 @@ impl Line {
     pub(crate) fn at(&self, s_m: f64) -> SpeedPoint {
         let n = self.points.len();
         let s_m = s_m.rem_euclid(self.lap_m());
-        let segment = (self.cumulative_m.partition_point(|&c| c <= s_m) - 1).min(n - 1);
+        let segment = self.segment_at(s_m);
         let len_m = self.segment_len_m(segment);
         let t = if len_m > 0.0 {
             (s_m - self.cumulative_m[segment]) / len_m
@@ -223,10 +223,92 @@ impl Line {
             speed_mps: a.speed_mps + t * (b.speed_mps - a.speed_mps),
         }
     }
+
+    /// The segment holding arc length `s_m`, wrapped around the lap.
+    pub(crate) fn segment_at(&self, s_m: f64) -> usize {
+        let s_m = s_m.rem_euclid(self.lap_m());
+        (self.cumulative_m.partition_point(|&c| c <= s_m) - 1).min(self.points.len() - 1)
+    }
+
+    /// Direction of `segment` (wrapped around the lap), same convention as a
+    /// pose's heading.
+    pub(crate) fn segment_heading(&self, segment: usize) -> f64 {
+        let n = self.points.len();
+        let (a, b) = (self.points[segment % n], self.points[(segment + 1) % n]);
+        (b.y - a.y).atan2(b.x - a.x)
+    }
+
+    /// Signed curvature at arc length `s_m`: that of the circle through the
+    /// start of its segment and the points either side of it (Menger
+    /// curvature), positive where the line turns toward increasing heading.
+    pub(crate) fn curvature_at(&self, s_m: f64) -> f64 {
+        let n = self.points.len();
+        let i = self.segment_at(s_m);
+        let (a, b, c) = (self.points[(i + n - 1) % n], self.points[i], self.points[(i + 1) % n]);
+        let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        let sides = (b.x - a.x).hypot(b.y - a.y) * (c.x - b.x).hypot(c.y - b.y) * (c.x - a.x).hypot(c.y - a.y);
+        if sides > 0.0 { 2.0 * cross / sides } else { 0.0 }
+    }
+}
+
+/// The vehicle's speed from `source` ([`POSE_LOCALIZATION`]: odometry's,
+/// [`POSE_GROUND_TRUTH`]: the simulator's), or why there's none.
+pub(crate) fn speed(captain: &Captain, source: u8) -> Result<f64, String> {
+    match source {
+        POSE_LOCALIZATION => Ok(captain
+            .try_topic::<Odometry>(ODOMETRY_TOPIC_NAME)
+            .ok_or("No odometry in this binary.")?
+            .read()
+            .speed_mps),
+        POSE_GROUND_TRUTH => Ok(captain
+            .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)
+            .ok_or("No ground truth pose (vehicle_status) in this binary.")?
+            .read()
+            .speed_mps),
+        _ => Err(format!("Unknown pose source {source}.")),
+    }
 }
 
 
 pub(crate) fn wrap_to_pi(angle_rad: f64) -> f64 {
     let wrapped = (angle_rad + PI).rem_euclid(2.0 * PI) - PI;
     if wrapped <= -PI { wrapped + 2.0 * PI } else { wrapped }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn circle(radius_m: f64, counterclockwise: bool) -> Line {
+        let n = 400;
+        let sign = if counterclockwise { 1.0 } else { -1.0 };
+        Line::new(
+            (0..n)
+                .map(|i| {
+                    let angle = sign * 2.0 * PI * i as f64 / n as f64;
+                    SpeedPoint { x: radius_m * angle.cos(), y: radius_m * angle.sin(), speed_mps: 2.0 }
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn curvature_is_the_inverse_radius_signed_by_turning_direction() {
+        assert!((circle(4.0, true).curvature_at(1.0) - 0.25).abs() < 1e-3);
+        assert!((circle(4.0, false).curvature_at(1.0) + 0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_segment_heads_from_its_start_to_its_end() {
+        let line = Line::new(vec![
+            SpeedPoint { x: 0.0, y: 0.0, speed_mps: 1.0 },
+            SpeedPoint { x: 0.0, y: 2.0, speed_mps: 1.0 },
+            SpeedPoint { x: -1.0, y: 1.0, speed_mps: 1.0 },
+        ])
+        .unwrap();
+        assert!((line.segment_heading(0) - PI / 2.0).abs() < 1e-12);
+        assert_eq!(line.segment_at(1.0), 0);
+        assert_eq!(line.segment_at(2.5), 1);
+    }
 }
