@@ -1,28 +1,50 @@
 //! [`Runner`] owns every [`Executor`] and every topic, and runs the executors in
 //! parallel against a shared [`Captain`].
 
-use crate::core::captain::Captain;
+use crate::core::captain::{Captain, RunnerRequest};
 use crate::core::debug_executor::DebugExecutor;
 use crate::core::executor::Executor;
 use crate::core::log::{self, LogColor};
 use crate::core::topic::RwLockTopic;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
+
+/// How long [`Runner::run_until_stopped`] waits for a [`RunnerRequest`] before checking again
+/// whether everything was told to stop - bounds how late it notices a stop.
+const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// A cheap, `Clone`-able handle that can signal every executor to stop from any
 /// thread - e.g. a Ctrl+C handler running on its own OS thread while
 /// [`Runner::run_until_stopped`] blocks the caller's thread. Deliberately exposes
 /// only [`stop`](Self::stop), not the rest of [`Captain`]'s surface.
+///
+/// Keeps working across restarts ([`Captain::request_restart`]): it stops
+/// whichever [`Captain`] is current, and a stop that lands while
+/// [`Runner::run_until_stopped`] is rebuilding everything still ends it.
 #[derive(Clone)]
-pub struct StopHandle(Arc<Captain>);
+pub struct StopHandle(Arc<SharedStop>);
+
+/// What a [`Runner`] and its [`StopHandle`]s share.
+struct SharedStop {
+    /// The [`Captain`] currently running - replaced on every restart.
+    current: Mutex<Arc<Captain>>,
+    /// Set by [`StopHandle::stop`]: a final stop, never a restart.
+    stopped: AtomicBool,
+}
 
 impl StopHandle {
-    /// Same effect as [`Runner::stop`], callable from any thread without a `&Runner`.
+    /// Same effect as [`Runner::stop`], callable from any thread without a `&Runner` -
+    /// except that it's always final: a restart already requested is dropped.
     pub fn stop(&self) {
-        self.0.stop();
+        // Set before stopping the current captain, so a rebuild swapping in a
+        // new one right now sees it (see `Runner::run_until_stopped`).
+        self.0.stopped.store(true, Ordering::SeqCst);
+        self.0.current.lock().unwrap().stop();
     }
 }
 
@@ -67,20 +89,30 @@ pub struct Runner {
     /// Set by [`debug_mode`](Self::debug_mode); `None` means debug recording is off.
     /// Passed to every executor's [`Executor::set_debug_mode`] as it's spawned.
     debug_frequency_hz: Option<f64>,
+    /// The ids of every group of executors started by [`Captain::spawn_group`], by group name.
+    groups: HashMap<String, Vec<u16>>,
+    /// Shared with every [`StopHandle`] - see [`stop_handle`](Self::stop_handle).
+    shared_stop: Arc<SharedStop>,
 }
 
 impl Runner {
     /// Creates an empty runner with no topics or executors registered yet.
     /// Verbose logging is off by default - see [`activate_verbose`](Self::activate_verbose).
     pub fn new() -> Self {
+        let captain = Arc::new(Captain::new());
         Self {
-            captain: Arc::new(Captain::new()),
+            shared_stop: Arc::new(SharedStop {
+                current: Mutex::new(captain.clone()),
+                stopped: AtomicBool::new(false),
+            }),
+            captain,
             next_id: 0,
             pending: Vec::new(),
             running: HashMap::new(),
             registered_topics: Vec::new(),
             verbose: false,
             debug_frequency_hz: None,
+            groups: HashMap::new(),
         }
     }
 
@@ -110,7 +142,7 @@ impl Runner {
     /// calling [`run_until_stopped`](Self::run_until_stopped), which otherwise
     /// blocks the calling thread.
     pub fn stop_handle(&self) -> StopHandle {
-        StopHandle(self.captain.clone())
+        StopHandle(self.shared_stop.clone())
     }
 
     /// Turns on verbose logging: every subsequent call to a method below prints
@@ -272,9 +304,19 @@ impl Runner {
     /// over. Returns the finished executors once a stop was *not*
     /// accompanied by a restart request - same contract as
     /// [`join_all`](Self::join_all) today.
+    ///
+    /// Meanwhile, starts and stops groups of executors as
+    /// [`Captain::spawn_group`]/[`Captain::stop_group`] ask. A restart doesn't
+    /// bring any group back - only the executors added via
+    /// [`add_executor`](Self::add_executor).
     pub fn run_until_stopped(&mut self) -> Vec<Box<dyn Executor>> {
         loop {
             self.run_all();
+            while self.captain.is_running_at_all() {
+                if let Some(request) = self.captain.next_runner_request(REQUEST_POLL_INTERVAL) {
+                    self.handle(request);
+                }
+            }
             let finished = self.join_all_with_ids();
             if !self.captain.take_restart_requested() {
                 return finished.into_iter().map(|(_, executor)| executor).collect();
@@ -285,12 +327,64 @@ impl Runner {
             );
 
             self.captain = Arc::new(Captain::new());
+            *self.shared_stop.current.lock().unwrap() = self.captain.clone();
+            // A `StopHandle::stop` that landed during this restart stopped
+            // the old captain: end here rather than starting over. One from
+            // now on stops the new one.
+            if self.shared_stop.stopped.load(Ordering::SeqCst) {
+                return finished.into_iter().map(|(_, executor)| executor).collect();
+            }
             self.captain.set_verbose(self.verbose);
             for register in &self.registered_topics {
                 register(&self.captain);
             }
+            let grouped: HashSet<u16> = self.groups.drain().flat_map(|(_, ids)| ids).collect();
             for (id, executor) in finished {
-                self.pending.push((id, executor.fresh()));
+                if !grouped.contains(&id) {
+                    self.pending.push((id, executor.fresh()));
+                }
+            }
+        }
+    }
+
+    /// Acts on one [`RunnerRequest`] - see [`Captain::spawn_group`] and [`Captain::stop_group`].
+    fn handle(&mut self, request: RunnerRequest) {
+        match request {
+            RunnerRequest::Spawn { group, executors } => {
+                if self.groups.contains_key(&group) {
+                    self.log(
+                        LogColor::Red,
+                        format!("group {group:?} is already running - not starting it again"),
+                    );
+                    return;
+                }
+                let ids = executors
+                    .into_iter()
+                    .map(|executor| self.add_executor(executor))
+                    .collect();
+                self.run_all();
+                self.log(LogColor::Green, format!("started group {group:?}"));
+                self.groups.insert(group, ids);
+            }
+            RunnerRequest::Stop { group } => {
+                let Some(ids) = self.groups.remove(&group) else {
+                    self.log(
+                        LogColor::Red,
+                        format!("group {group:?} isn't running - nothing to stop"),
+                    );
+                    return;
+                };
+                // Signal them all first, so they wind down in parallel.
+                for &id in &ids {
+                    self.captain.stop_executor(id);
+                }
+                for id in &ids {
+                    if let Some(handle) = self.running.remove(id) {
+                        handle.join().expect("executor thread panicked");
+                    }
+                }
+                self.captain.unregister_topics_written_by(&ids);
+                self.log(LogColor::Green, format!("stopped group {group:?}"));
             }
         }
     }
@@ -469,6 +563,210 @@ mod tests {
         }
     }
 
+    /// Claims `topic` (a `u32`) and idles until stopped, flagging when it's finished. Never
+    /// meant to be restarted: its `fresh` panics, so a test fails if a restart brings it back.
+    struct GroupMember {
+        id: u16,
+        topic: String,
+        finished: Arc<AtomicBool>,
+    }
+
+    impl Executor for GroupMember {
+        fn init(&mut self, id: u16) {
+            self.id = id;
+        }
+
+        fn claim_writing_topics(&mut self, captain: &Captain) {
+            captain.claim_writer::<u32>(&self.topic, self.id, || 0);
+        }
+
+        fn run(&mut self, captain: &Captain) {
+            while captain.is_running(self.id) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            self.finished.store(true, Ordering::Relaxed);
+        }
+
+        fn name(&self) -> String {
+            format!("Member {}", self.topic)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            panic!("a group's executors must not be brought back by a restart");
+        }
+    }
+
+    /// Polls `condition` every millisecond for up to a second; whether it became true.
+    fn eventually(condition: impl Fn() -> bool) -> bool {
+        (0..1000).any(|_| {
+            thread::sleep(Duration::from_millis(1));
+            condition()
+        })
+    }
+
+    /// What [`Spawner`] saw, for the test to check once everything stopped.
+    #[derive(Default)]
+    struct SpawnerLog {
+        topics_appeared: AtomicBool,
+        topics_disappeared: AtomicBool,
+        members_finished: AtomicBool,
+    }
+
+    /// Starts a group of two [`GroupMember`]s from inside its own `run`, waits for their topics,
+    /// then - if `restart` - requests a restart with the group still running, or else stops the
+    /// group, waits for its topics to go away, and stops everything. A fresh one (after a
+    /// restart) stops everything right away.
+    struct Spawner {
+        id: u16,
+        restart: bool,
+        log: Arc<SpawnerLog>,
+        members_finished: [Arc<AtomicBool>; 2],
+    }
+
+    impl Executor for Spawner {
+        fn init(&mut self, id: u16) {
+            self.id = id;
+        }
+
+        fn run(&mut self, captain: &Captain) {
+            let members = self
+                .members_finished
+                .iter()
+                .enumerate()
+                .map(|(i, finished)| {
+                    Box::new(GroupMember {
+                        id: 0,
+                        topic: format!("group/{i}"),
+                        finished: finished.clone(),
+                    }) as Box<dyn Executor>
+                })
+                .collect();
+            captain.spawn_group("group", members);
+            let registered = |name: &str| captain.try_topic::<u32>(name).is_some();
+            let appeared = eventually(|| registered("group/0") && registered("group/1"));
+            self.log.topics_appeared.store(appeared, Ordering::Relaxed);
+
+            if self.restart {
+                captain.request_restart();
+                return;
+            }
+
+            captain.stop_group("group");
+            let gone = eventually(|| !registered("group/0") && !registered("group/1"));
+            self.log.topics_disappeared.store(gone, Ordering::Relaxed);
+            let finished = self
+                .members_finished
+                .iter()
+                .all(|finished| finished.load(Ordering::Relaxed));
+            self.log.members_finished.store(finished, Ordering::Relaxed);
+            captain.stop();
+        }
+
+        fn name(&self) -> String {
+            "Spawner".to_string()
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            Box::new(Stopper)
+        }
+    }
+
+    /// Stops everything as soon as it starts.
+    struct Stopper;
+
+    impl Executor for Stopper {
+        fn init(&mut self, _id: u16) {}
+
+        fn run(&mut self, captain: &Captain) {
+            captain.stop();
+        }
+
+        fn name(&self) -> String {
+            "Stopper".to_string()
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn fresh(&self) -> Box<dyn Executor> {
+            Box::new(Stopper)
+        }
+    }
+
+    fn spawner(restart: bool) -> (Spawner, Arc<SpawnerLog>, [Arc<AtomicBool>; 2]) {
+        let log = Arc::new(SpawnerLog::default());
+        let members_finished = [
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        ];
+        let spawner = Spawner {
+            id: 0,
+            restart,
+            log: log.clone(),
+            members_finished: members_finished.clone(),
+        };
+        (spawner, log, members_finished)
+    }
+
+    #[test]
+    fn a_group_can_be_started_and_stopped_while_everything_runs() {
+        let mut runner = Runner::new();
+        let (spawner, log, _) = spawner(false);
+        runner.add_executor(Box::new(spawner));
+        let other_iterations = Arc::new(AtomicUsize::new(0));
+        runner.add_executor(Box::new(CountingExecutor {
+            id: 0,
+            iterations: other_iterations.clone(),
+            finished: Arc::new(AtomicBool::new(false)),
+            restart_after: None,
+            stop_after: None,
+        }));
+
+        let finished = runner.run_until_stopped();
+
+        assert!(log.topics_appeared.load(Ordering::Relaxed));
+        assert!(log.topics_disappeared.load(Ordering::Relaxed));
+        assert!(log.members_finished.load(Ordering::Relaxed));
+        // Stopping the group left everyone else running.
+        assert!(other_iterations.load(Ordering::Relaxed) > 0);
+        assert_eq!(finished.len(), 2);
+        assert!(runner.groups.is_empty());
+    }
+
+    #[test]
+    fn a_restart_does_not_bring_a_group_back() {
+        let mut runner = Runner::new();
+        let (spawner, log, members_finished) = spawner(true);
+        runner.add_executor(Box::new(spawner));
+
+        // A group member's `fresh` panics, which would fail the test here.
+        let finished = runner.run_until_stopped();
+
+        assert!(log.topics_appeared.load(Ordering::Relaxed));
+        assert!(members_finished.iter().all(|f| f.load(Ordering::Relaxed)));
+        // Only the spawner came back (as a `Stopper`), without its group.
+        assert_eq!(finished.len(), 1);
+        assert!(finished[0].as_any().is::<Stopper>());
+        assert!(runner.groups.is_empty());
+    }
+
+    #[test]
+    fn stopping_a_group_that_is_not_running_is_harmless() {
+        let mut runner = Runner::new();
+        runner.captain.stop_group("nothing");
+        runner.add_executor(Box::new(Stopper));
+        assert_eq!(runner.run_until_stopped().len(), 1);
+    }
+
     /// A reader added before the writer of the topic it reads must still find that
     /// topic registered - reading an unregistered topic terminates the process, which
     /// would fail this whole test binary.
@@ -554,6 +852,51 @@ mod tests {
         );
 
         assert!(matches!(result, Err(SwitchExecutorError::NotRunning(0))));
+    }
+
+    #[test]
+    fn a_stop_handle_still_stops_everything_after_a_restart() {
+        let mut runner = Runner::new();
+        // Restarts once, then - as a fresh instance, with no `stop_after` -
+        // would run forever.
+        runner.add_executor(Box::new(CountingExecutor {
+            id: 0,
+            iterations: Arc::new(AtomicUsize::new(0)),
+            finished: Arc::new(AtomicBool::new(false)),
+            restart_after: Some(3),
+            stop_after: None,
+        }));
+        let stop_handle = runner.stop_handle();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            runner.run_until_stopped();
+            done_tx.send(()).unwrap();
+        });
+
+        // Well after the restart.
+        thread::sleep(Duration::from_millis(200));
+        stop_handle.stop();
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "run_until_stopped should return once the handle stops it"
+        );
+    }
+
+    #[test]
+    fn a_stop_handle_stop_is_final_even_with_a_restart_requested() {
+        let mut runner = Runner::new();
+        runner.add_executor(Box::new(CountingExecutor {
+            id: 0,
+            iterations: Arc::new(AtomicUsize::new(0)),
+            finished: Arc::new(AtomicBool::new(false)),
+            restart_after: None,
+            stop_after: None,
+        }));
+        // Both land before anything runs: the stop wins, no restart.
+        runner.captain.request_restart();
+        runner.stop_handle().stop();
+        assert_eq!(runner.run_until_stopped().len(), 1);
     }
 
     #[test]

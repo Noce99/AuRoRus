@@ -14,8 +14,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Type-erased access to one topic's writer/value, for the debug-recording
 /// [`crate::core::debug_executor::DebugExecutor`] - implemented generically below for every
@@ -90,6 +91,18 @@ impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T>
     }
 }
 
+/// What an executor can ask [`crate::Runner`] to do while everything runs - see
+/// [`Captain::spawn_group`] and [`Captain::stop_group`].
+pub(crate) enum RunnerRequest {
+    /// Start `executors`, as one group called `group`.
+    Spawn {
+        group: String,
+        executors: Vec<Box<dyn crate::Executor>>,
+    },
+    /// Stop every executor of the group called `group`.
+    Stop { group: String },
+}
+
 /// Source of [`Captain::epoch`]: the last epoch handed out, so two captains built within the
 /// same microsecond still get distinct, increasing epochs.
 static LAST_EPOCH: AtomicU64 = AtomicU64::new(0);
@@ -139,11 +152,18 @@ pub struct Captain {
     restart_requested: AtomicBool,
     /// See [`epoch`](Self::epoch).
     epoch: u64,
+    /// Where [`spawn_group`](Self::spawn_group)/[`stop_group`](Self::stop_group) send their
+    /// requests, and where [`crate::Runner`] picks them up (see
+    /// [`next_runner_request`](Self::next_runner_request)). A fresh captain after a restart
+    /// comes with a fresh channel, so a request sent just before one is dropped with it.
+    runner_requests: Sender<RunnerRequest>,
+    runner_requests_rx: Mutex<Receiver<RunnerRequest>>,
 }
 
 impl Captain {
     /// Creates an empty, running captain.
     pub(crate) fn new() -> Self {
+        let (runner_requests, runner_requests_rx) = mpsc::channel();
         Self {
             topics: RwLock::new(HashMap::new()),
             debug_topics: RwLock::new(HashMap::new()),
@@ -153,6 +173,8 @@ impl Captain {
             verbose: AtomicBool::new(false),
             restart_requested: AtomicBool::new(false),
             epoch: next_epoch(),
+            runner_requests,
+            runner_requests_rx: Mutex::new(runner_requests_rx),
         }
     }
 
@@ -481,6 +503,68 @@ impl Captain {
         topic
     }
 
+    /// Removes every topic whose writer is one of `ids` - e.g. those of a group of executors
+    /// that were just stopped for good (see [`stop_group`](Self::stop_group)), so they no longer
+    /// show up in the Topics panel or the debug recording. Anyone still holding one of them keeps
+    /// a working, but now orphaned, handle.
+    pub(crate) fn unregister_topics_written_by(&self, ids: &[u16]) {
+        let mut topics = self.topics.write().unwrap();
+        let mut debug_topics = self.debug_topics.write().unwrap();
+        debug_topics.retain(|name, topic| {
+            let keep = topic.writer().is_none_or(|writer| !ids.contains(&writer));
+            if !keep {
+                topics.remove(name);
+                self.log_if_verbose(LogColor::Pink, format!("unregistered topic {name:?}"));
+            }
+            keep
+        });
+    }
+
+    /// Asks [`crate::Runner`] to start `executors` while everything else keeps running, as one
+    /// group called `group` - stopped together later by [`stop_group`](Self::stop_group). Every
+    /// one of them claims its topics before any of them starts, like at startup (see
+    /// [`crate::Runner::run_all`]), so they may read each other's topics right away.
+    ///
+    /// Only acted on by [`crate::Runner::run_until_stopped`], within a few tens of
+    /// milliseconds - not by a bare [`crate::Runner::run_all`]. A group is never brought back by
+    /// a restart ([`request_restart`](Self::request_restart)): only the executors added before
+    /// running are. A second group under a name already running is refused (logged, dropped).
+    /// Each executor gets a new id: ids are never reused.
+    pub fn spawn_group(&self, group: impl Into<String>, executors: Vec<Box<dyn crate::Executor>>) {
+        // The receiver lives as long as `self`, so sending can't fail.
+        let _ = self.runner_requests.send(RunnerRequest::Spawn {
+            group: group.into(),
+            executors,
+        });
+    }
+
+    /// Asks [`crate::Runner`] to stop every executor of the group `group` started by
+    /// [`spawn_group`](Self::spawn_group), wait for them, and unregister every topic they wrote
+    /// (see [`unregister_topics_written_by`](Self::unregister_topics_written_by)). Every other
+    /// executor is unaffected. Asking for a group that isn't running does nothing.
+    pub fn stop_group(&self, group: impl Into<String>) {
+        let _ = self.runner_requests.send(RunnerRequest::Stop {
+            group: group.into(),
+        });
+    }
+
+    /// The next [`RunnerRequest`] sent via [`spawn_group`](Self::spawn_group) or
+    /// [`stop_group`](Self::stop_group), waiting up to `timeout` for one. Only
+    /// [`crate::Runner`] calls it.
+    pub(crate) fn next_runner_request(&self, timeout: Duration) -> Option<RunnerRequest> {
+        self.runner_requests_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(timeout)
+            .ok()
+    }
+
+    /// Whether every executor hasn't been told to stop yet via [`stop`](Self::stop) (or
+    /// [`request_restart`](Self::request_restart)).
+    pub(crate) fn is_running_at_all(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
     /// Whether the executor with this `id` should keep running: true only if
     /// executors haven't all been told to stop via [`stop`](Self::stop), and this
     /// particular id wasn't individually stopped (e.g. for a
@@ -556,6 +640,28 @@ mod tests {
             .expect("drawing topic should be registered");
         assert_eq!(topic.writer(), Some(3));
         assert!(Arc::ptr_eq(&topic, &captain.drawing(3)));
+    }
+
+    #[test]
+    fn unregistering_removes_only_the_given_writers_topics() {
+        let captain = Captain::new();
+        captain.set_name(1, "Gone".to_string());
+        captain.set_name(2, "Kept".to_string());
+        captain.claim_writer::<u32>("gone", 1, || 0);
+        captain.claim_drawing(1);
+        captain.claim_writer::<u32>("kept", 2, || 0);
+
+        captain.unregister_topics_written_by(&[1]);
+
+        assert!(captain.try_topic::<u32>("gone").is_none());
+        assert!(captain.try_topic::<Drawing>("draw/Gone").is_none());
+        assert!(captain.try_topic::<u32>("kept").is_some());
+        let names: Vec<String> = captain
+            .debug_topics_snapshot()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names, vec!["kept".to_string()]);
     }
 
     #[test]
