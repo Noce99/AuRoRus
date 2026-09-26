@@ -28,14 +28,23 @@ impl Executor for Probe {
         while c.is_running(self.id) && t0.elapsed() < Duration::from_secs(9) {
             let t = t0.elapsed().as_secs_f64();
             // Speed ramps like a real lap, steering constant-ish: a circle.
-            let steer: f64 = std::env::var("STEER").ok().and_then(|s| s.parse().ok()).unwrap_or(0.25);
-            let speed: f64 = std::env::var("SPEED").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+            let steer: f64 = std::env::var("STEER")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.25);
+            let speed: f64 = std::env::var("SPEED")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2.0);
             cmd.write(self.id, VescCommand::new(steer, speed)).unwrap();
             let s = status.read().value;
             let mut o = odom.read().value;
             let a = c.topic::<StartState>(START_STATE_TOPIC_NAME).read().value;
             let (sn, cs) = a.heading_rad.sin_cos();
-            (o.x_m, o.y_m) = (a.x_m + o.x_m * cs - o.y_m * sn, a.y_m + o.x_m * sn + o.y_m * cs);
+            (o.x_m, o.y_m) = (
+                a.x_m + o.x_m * cs - o.y_m * sn,
+                a.y_m + o.x_m * sn + o.y_m * cs,
+            );
             o.heading_rad += a.heading_rad;
             let err = (o.x_m - s.x_m).hypot(o.y_m - s.y_m);
             max_err = max_err.max(err);
@@ -43,8 +52,14 @@ impl Executor for Probe {
                 last_print = Instant::now();
                 println!(
                     "t={t:5.2} truth=({:6.2},{:6.2},{:6.1}°) odom=({:6.2},{:6.2},{:6.1}°) err={:.3} m  dist_from_start={:.2}",
-                    s.x_m, s.y_m, s.heading_rad.to_degrees(), o.x_m, o.y_m, o.heading_rad.to_degrees(),
-                    err, (s.x_m-a.x_m).hypot(s.y_m-a.y_m)
+                    s.x_m,
+                    s.y_m,
+                    s.heading_rad.to_degrees(),
+                    o.x_m,
+                    o.y_m,
+                    o.heading_rad.to_degrees(),
+                    err,
+                    (s.x_m - a.x_m).hypot(s.y_m - a.y_m)
                 );
             }
             std::thread::sleep(Duration::from_millis(2));
@@ -67,13 +82,51 @@ fn main() {
     let vc = SimulatedVehicleConfig::default();
     let mut runner = Runner::new();
     runner.register_topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, VescCommand::default);
-    runner.register_topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME, || VehicleModelSelection { kind: match std::env::var("MODEL").as_deref() { Ok("dyn") => VehicleModelKind::DynamicBicycle, Ok("pac") => VehicleModelKind::PacejkaBicycle, Ok("nl") => VehicleModelKind::NonlinearBicycle, _ => VehicleModelKind::Bicycle } });
-    runner.register_topic::<StartState>(START_STATE_TOPIC_NAME, || StartState { x_m: 5.0, y_m: -3.0, heading_rad: 2.0, speed_mps: 0.0 });
+    runner.register_topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME, || {
+        VehicleModelSelection {
+            kind: match std::env::var("MODEL").as_deref() {
+                Ok("dyn") => VehicleModelKind::DynamicBicycle,
+                Ok("pac") => VehicleModelKind::PacejkaBicycle,
+                Ok("nl") => VehicleModelKind::NonlinearBicycle,
+                _ => VehicleModelKind::Bicycle,
+            },
+        }
+    });
+    runner.register_topic::<StartState>(START_STATE_TOPIC_NAME, || StartState {
+        x_m: 5.0,
+        y_m: -3.0,
+        heading_rad: 2.0,
+        speed_mps: 0.0,
+    });
     runner.register_topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME, PlaceAtStart::default);
     runner.add_executor(Probe { id: 0 }.boxed());
     runner.add_executor(SimulatedImu::new("Imu", SimulatedImuConfig::default()).boxed());
-    runner.add_executor(DeadReckoning::new("DR", DeadReckoningConfig { draw: false, ..DeadReckoningConfig::default() }).boxed());
-    runner.add_executor(SimulatedVehicle::new("Veh", default_model(match std::env::var("MODEL").as_deref() { Ok("dyn") => VehicleModelKind::DynamicBicycle, Ok("pac") => VehicleModelKind::PacejkaBicycle, Ok("nl") => VehicleModelKind::NonlinearBicycle, _ => VehicleModelKind::Bicycle }, &vc), vc).boxed());
+    runner.add_executor(
+        DeadReckoning::new(
+            "DR",
+            DeadReckoningConfig {
+                draw: false,
+                ..DeadReckoningConfig::default()
+            },
+        )
+        .boxed(),
+    );
+    runner.add_executor(
+        SimulatedVehicle::new(
+            "Veh",
+            default_model(
+                match std::env::var("MODEL").as_deref() {
+                    Ok("dyn") => VehicleModelKind::DynamicBicycle,
+                    Ok("pac") => VehicleModelKind::PacejkaBicycle,
+                    Ok("nl") => VehicleModelKind::NonlinearBicycle,
+                    _ => VehicleModelKind::Bicycle,
+                },
+                &vc,
+            ),
+            vc,
+        )
+        .boxed(),
+    );
     runner.run_all();
     runner.join_all();
 }

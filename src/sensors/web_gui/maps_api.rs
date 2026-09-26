@@ -364,8 +364,8 @@ pub fn decode_tiff(request: &mut Request) -> ResponseBox {
 /// like the browser-side decoding does. Grayscale and RGB, with or without alpha, at
 /// 1, 8 or 16 bits per sample.
 fn tiff_to_grayscale(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
-    use tiff::decoder::{Decoder, DecodingResult};
     use tiff::ColorType;
+    use tiff::decoder::{Decoder, DecodingResult};
 
     let mut decoder = Decoder::new(std::io::Cursor::new(bytes)).map_err(|err| err.to_string())?;
     let (width, height) = decoder.dimensions().map_err(|err| err.to_string())?;
@@ -390,7 +390,11 @@ fn tiff_to_grayscale(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
                 (0..samples_per_row)
                     .map(|i| {
                         let byte = packed.get(y * row_bytes + i / 8).copied().unwrap_or(0);
-                        if byte & (0x80 >> (i % 8)) != 0 { 255 } else { 0 }
+                        if byte & (0x80 >> (i % 8)) != 0 {
+                            255
+                        } else {
+                            0
+                        }
                     })
                     .collect()
             })
@@ -465,10 +469,8 @@ mod tests {
             source: MapSource::Imported,
             generation: None,
         };
-        let folder = std::env::temp_dir().join(format!(
-            "aurorus_decode_tiff_test_{}",
-            std::process::id()
-        ));
+        let folder =
+            std::env::temp_dir().join(format!("aurorus_decode_tiff_test_{}", std::process::id()));
         environment::save(&folder, &info, &raster).unwrap();
         let bytes = std::fs::read(folder.join("map.tiff")).unwrap();
         std::fs::remove_dir_all(&folder).ok();

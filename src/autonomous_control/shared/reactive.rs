@@ -8,9 +8,9 @@
 //! [`crate::topics::VescCommand::servo_position_rad`], so an angle can be
 //! steered to as is.
 
+use crate::Captain;
 use crate::autonomous_control::shared::race_line::Pose;
 use crate::topics::{Color, LidarScan, Shape, VehicleStatus, VehicleTopics};
-use crate::Captain;
 use std::ops::Range;
 
 /// The indices of `scan`'s readings within `fov_rad` centred straight
@@ -247,7 +247,9 @@ pub(crate) fn potential_field(
         field.potential[cell] = field
             .obstacles
             .iter()
-            .map(|o| o.amplitude * (-(o.angle_rad - angle).powi(2) / (2.0 * o.sigma_rad.powi(2))).exp())
+            .map(|o| {
+                o.amplitude * (-(o.angle_rad - angle).powi(2) / (2.0 * o.sigma_rad.powi(2))).exp()
+            })
             .sum();
     }
     let peak = field.potential.iter().copied().fold(0.0, f32::max);
@@ -276,7 +278,9 @@ pub(crate) fn potential_field(
     let chosen = if config.use_minima_near_attractive {
         minima.into_iter().min_by_key(|&i| i.abs_diff(attractive))
     } else {
-        minima.into_iter().min_by(|&a, &b| potential[a].total_cmp(&potential[b]))
+        minima
+            .into_iter()
+            .min_by(|&a, &b| potential[a].total_cmp(&potential[b]))
     };
     field.chosen_cell = chosen.unwrap_or(attractive);
     Some(field)
@@ -395,7 +399,10 @@ pub(crate) mod tests {
 
     #[test]
     fn distance_gains_brake_near_a_wall() {
-        assert!(speed_steer_and_fov(2.0, &[0.5; 4], 0.0, 2.0) < speed_steer_and_fov(2.0, &[4.0; 4], 0.0, 2.0));
+        assert!(
+            speed_steer_and_fov(2.0, &[0.5; 4], 0.0, 2.0)
+                < speed_steer_and_fov(2.0, &[4.0; 4], 0.0, 2.0)
+        );
         assert_eq!(speed_steer_and_fov(2.0, &[0.1; 4], 0.0, 2.0), 0.0);
     }
 

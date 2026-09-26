@@ -2,11 +2,11 @@
 //! the closed-line geometry shared by the algorithms that follow the
 //! selected map's race line (`pure_pursuit`, `ubm_potential_pursuit`).
 
+use crate::Captain;
 use crate::environment::SpeedPoint;
 use crate::topics::{
     Odometry, SLAM_STATUS_TOPIC_NAME, SlamState, SlamStatus, VehicleStatus, VehicleTopics,
 };
-use crate::Captain;
 use std::f64::consts::PI;
 use std::time::Duration;
 
@@ -61,7 +61,10 @@ impl Pose {
 }
 
 /// The simulator's ground truth, if fresh - else why not.
-pub(crate) fn ground_truth_pose(captain: &Captain, vehicle: &VehicleTopics) -> Result<Pose, String> {
+pub(crate) fn ground_truth_pose(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+) -> Result<Pose, String> {
     let status = captain
         .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
         .ok_or("No ground truth pose (vehicle_status) in this binary.")?
@@ -82,7 +85,10 @@ pub(crate) fn ground_truth_pose(captain: &Captain, vehicle: &VehicleTopics) -> R
 /// on odometry's frame - else why not.
 /// There's only the ego vehicle's localization (`slam_status`): an opponent's
 /// algorithm uses [`POSE_GROUND_TRUTH`] instead.
-pub(crate) fn localization_pose(captain: &Captain, vehicle: &VehicleTopics) -> Result<Pose, String> {
+pub(crate) fn localization_pose(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+) -> Result<Pose, String> {
     let slam = captain
         .try_topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME)
         .ok_or("No localization (slam_status) in this binary.")?
@@ -91,9 +97,7 @@ pub(crate) fn localization_pose(captain: &Captain, vehicle: &VehicleTopics) -> R
     if slam.state != SlamState::Localizing {
         return Err("Localization isn't running - start it in the Localization panel.".into());
     }
-    let [x_m, y_m, heading_rad] = slam
-        .map_to_odom
-        .ok_or("Localization has no pose yet.")?;
+    let [x_m, y_m, heading_rad] = slam.map_to_odom.ok_or("Localization has no pose yet.")?;
     let odometry = captain
         .try_topic::<Odometry>(&vehicle.odometry())
         .ok_or("No odometry in this binary.")?
@@ -104,7 +108,11 @@ pub(crate) fn localization_pose(captain: &Captain, vehicle: &VehicleTopics) -> R
     if odometry.reset_count != slam.odometry_reset_count {
         return Err("Odometry was reset - waiting for localization to catch up.".into());
     }
-    let map_to_odom = Pose { x_m, y_m, heading_rad };
+    let map_to_odom = Pose {
+        x_m,
+        y_m,
+        heading_rad,
+    };
     Ok(map_to_odom.compose(&Pose {
         x_m: odometry.x_m,
         y_m: odometry.y_m,
@@ -164,7 +172,13 @@ impl Line {
     /// there's no `hint`, else only onto those from a couple before `hint` up
     /// to `window_m` of arc length past it - so the vehicle never jumps to
     /// another stretch of track that happens to run close by.
-    pub(crate) fn nearest(&self, x_m: f64, y_m: f64, hint: Option<usize>, window_m: f64) -> Nearest {
+    pub(crate) fn nearest(
+        &self,
+        x_m: f64,
+        y_m: f64,
+        hint: Option<usize>,
+        window_m: f64,
+    ) -> Nearest {
         let n = self.points.len();
         let segments: Box<dyn Iterator<Item = usize>> = match hint {
             None => Box::new(0..n),
@@ -245,10 +259,20 @@ impl Line {
     pub(crate) fn curvature_at(&self, s_m: f64) -> f64 {
         let n = self.points.len();
         let i = self.segment_at(s_m);
-        let (a, b, c) = (self.points[(i + n - 1) % n], self.points[i], self.points[(i + 1) % n]);
+        let (a, b, c) = (
+            self.points[(i + n - 1) % n],
+            self.points[i],
+            self.points[(i + 1) % n],
+        );
         let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-        let sides = (b.x - a.x).hypot(b.y - a.y) * (c.x - b.x).hypot(c.y - b.y) * (c.x - a.x).hypot(c.y - a.y);
-        if sides > 0.0 { 2.0 * cross / sides } else { 0.0 }
+        let sides = (b.x - a.x).hypot(b.y - a.y)
+            * (c.x - b.x).hypot(c.y - b.y)
+            * (c.x - a.x).hypot(c.y - a.y);
+        if sides > 0.0 {
+            2.0 * cross / sides
+        } else {
+            0.0
+        }
     }
 }
 
@@ -271,10 +295,13 @@ pub(crate) fn speed(captain: &Captain, vehicle: &VehicleTopics, source: u8) -> R
     }
 }
 
-
 pub(crate) fn wrap_to_pi(angle_rad: f64) -> f64 {
     let wrapped = (angle_rad + PI).rem_euclid(2.0 * PI) - PI;
-    if wrapped <= -PI { wrapped + 2.0 * PI } else { wrapped }
+    if wrapped <= -PI {
+        wrapped + 2.0 * PI
+    } else {
+        wrapped
+    }
 }
 
 #[cfg(test)]
@@ -288,7 +315,11 @@ mod tests {
             (0..n)
                 .map(|i| {
                     let angle = sign * 2.0 * PI * i as f64 / n as f64;
-                    SpeedPoint { x: radius_m * angle.cos(), y: radius_m * angle.sin(), speed_mps: 2.0 }
+                    SpeedPoint {
+                        x: radius_m * angle.cos(),
+                        y: radius_m * angle.sin(),
+                        speed_mps: 2.0,
+                    }
                 })
                 .collect(),
         )
@@ -304,9 +335,21 @@ mod tests {
     #[test]
     fn a_segment_heads_from_its_start_to_its_end() {
         let line = Line::new(vec![
-            SpeedPoint { x: 0.0, y: 0.0, speed_mps: 1.0 },
-            SpeedPoint { x: 0.0, y: 2.0, speed_mps: 1.0 },
-            SpeedPoint { x: -1.0, y: 1.0, speed_mps: 1.0 },
+            SpeedPoint {
+                x: 0.0,
+                y: 0.0,
+                speed_mps: 1.0,
+            },
+            SpeedPoint {
+                x: 0.0,
+                y: 2.0,
+                speed_mps: 1.0,
+            },
+            SpeedPoint {
+                x: -1.0,
+                y: 1.0,
+                speed_mps: 1.0,
+            },
         ])
         .unwrap();
         assert!((line.segment_heading(0) - PI / 2.0).abs() < 1e-12);

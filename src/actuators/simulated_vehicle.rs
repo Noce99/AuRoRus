@@ -20,9 +20,9 @@ use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
     HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME,
     Shape, StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelParameters, VehicleModelSelection,
-    VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
+    VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VehicleStatus,
+    VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, RwLockTopic, Stamped, Ticker};
 use std::any::Any;
@@ -806,9 +806,11 @@ impl Executor for SimulatedVehicle {
         // Every model kind shares `config.limits`, so a model switch never
         // changes it - only live tuning does, which rewrites it.
         let limits = self.config.limits;
-        captain.claim_writer::<ActuatorLimits>(&self.vehicle.vehicle_limits(), self.id, move || {
-            limits
-        });
+        captain.claim_writer::<ActuatorLimits>(
+            &self.vehicle.vehicle_limits(),
+            self.id,
+            move || limits,
+        );
         captain.claim_drawing(self.id);
     }
 
@@ -817,7 +819,9 @@ impl Executor for SimulatedVehicle {
         let autonomous_topic = captain.topic::<VescCommand>(
             self.opponent
                 .as_ref()
-                .map_or(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, |opponent| &opponent.command_topic),
+                .map_or(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, |opponent| {
+                    &opponent.command_topic
+                }),
         );
         let ego = self.opponent.is_none().then(|| EgoTopics {
             human: captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME),
@@ -830,7 +834,9 @@ impl Executor for SimulatedVehicle {
         let (color, speed_scale) = self
             .opponent
             .as_ref()
-            .map_or((Color::AMBER, 1.0), |opponent| (opponent.color, opponent.speed_scale));
+            .map_or((Color::AMBER, 1.0), |opponent| {
+                (opponent.color, opponent.speed_scale)
+            });
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
         let limits_topic = captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits());
@@ -964,7 +970,10 @@ impl Executor for SimulatedVehicle {
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
             drawing_topic
-                .write(self.id, drawing(&self.model, &state, steering_angle_rad, color))
+                .write(
+                    self.id,
+                    drawing(&self.model, &state, steering_angle_rad, color),
+                )
                 .expect("lost writer authorization for the vehicle's drawing topic");
 
             ticker.wait();

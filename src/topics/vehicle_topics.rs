@@ -76,7 +76,9 @@ impl VehicleTopics {
     pub fn algorithm(&self, algorithm: &str) -> AlgorithmTopics {
         AlgorithmTopics {
             command: self.name(&format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{algorithm}")),
-            info: self.name(&format!("{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{algorithm}")),
+            info: self.name(&format!(
+                "{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{algorithm}"
+            )),
         }
     }
 }
@@ -120,8 +122,15 @@ mod tests {
         assert_eq!(opponent.vehicle_status(), "opponent/3/vehicle_status");
         assert_eq!(opponent.lidar_scan(), "opponent/3/lidar_scan");
         let algorithm = opponent.algorithm("gap_follower");
-        assert_eq!(algorithm.command, "opponent/3/autonomous_control/gap_follower");
+        assert_eq!(
+            algorithm.command,
+            "opponent/3/autonomous_control/gap_follower"
+        );
         // `AutonomousControlsHandler` finds algorithms by this prefix.
-        assert!(!algorithm.info.starts_with(AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX));
+        assert!(
+            !algorithm
+                .info
+                .starts_with(AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX)
+        );
     }
 }
