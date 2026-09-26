@@ -120,6 +120,8 @@ impl Color {
     pub const WHITE: Self = Self::rgb(0xff, 0xff, 0xff);
     pub const BLACK: Self = Self::rgb(0x10, 0x14, 0x18);
     pub const PURPLE: Self = Self::rgb(0x80, 0x00, 0xff);
+    pub const CYAN: Self = Self::rgb(0x2e, 0xd8, 0xe6);
+    pub const PINK: Self = Self::rgb(0xff, 0x6e, 0xc7);
 
     /// A fully opaque color.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {

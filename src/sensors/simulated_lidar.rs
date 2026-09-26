@@ -72,6 +72,19 @@ impl SimulatedLidar {
             vehicle: VehicleTopics::ego(),
         }
     }
+
+    /// A lidar mounted on the opponent whose topics are `vehicle`. Its hits
+    /// aren't drawn unless the user ticks them.
+    pub fn opponent(
+        name: impl Into<String>,
+        config: SimulatedLidarConfig,
+        vehicle: VehicleTopics,
+    ) -> Self {
+        Self {
+            vehicle,
+            ..Self::new(name, config)
+        }
+    }
 }
 
 impl Executor for SimulatedLidar {
@@ -163,7 +176,7 @@ impl Executor for SimulatedLidar {
                                 radius_px: 2.5,
                                 color: Color::RED,
                             }],
-                            true,
+                            self.vehicle.is_ego(),
                         )
                         .stale_after(stale_after)
                         .z_index(5),
@@ -183,7 +196,12 @@ impl Executor for SimulatedLidar {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(SimulatedLidar::new(self.name.clone(), self.config))
+        Box::new(SimulatedLidar {
+            id: 0,
+            name: self.name.clone(),
+            config: self.config,
+            vehicle: self.vehicle.clone(),
+        })
     }
 }
 

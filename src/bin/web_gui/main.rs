@@ -1,6 +1,7 @@
 use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
+use aurorus::opponents::OpponentsManager;
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
     MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
@@ -46,6 +47,15 @@ fn main() {
     runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
     runner.add_executor(Slam::new("Slam", config.maps_root, slam_config).boxed());
     runner.add_executor(Planner::new("Planner", planning_config).boxed());
+    // Opponents copy the ego vehicle's configs - see `OpponentsManager`.
+    runner.add_executor(
+        OpponentsManager::new(
+            "OpponentsManager",
+            vehicle_config.clone(),
+            simulated_lidar_config,
+        )
+        .boxed(),
+    );
     runner.add_executor(
         SimulatedVehicle::new(
             "SimulatedVehicle",

@@ -2,15 +2,18 @@
 //! independently on their own thread against a shared [`crate::Captain`],
 //! whether or not they publish to a topic - a sensor driver publishes
 //! real-world readings onto a topic ([`RandomLidar`], [`SimulatedLidar`],
-//! [`SimulatedImu`], [`MapServer`]), while [`WebGui`] instead serves a local web UI.
+//! [`SimulatedImu`], [`MapServer`], [`RaceLinePublisher`]), while [`WebGui`]
+//! instead serves a local web UI.
 
 mod map_server;
+mod race_line_publisher;
 mod random_lidar;
 mod simulated_imu;
 mod simulated_lidar;
 mod web_gui;
 
 pub use map_server::{MapServer, MapServerConfig};
+pub use race_line_publisher::RaceLinePublisher;
 pub use random_lidar::{RandomLidar, RandomLidarConfig};
 pub use simulated_imu::{SimulatedImu, SimulatedImuConfig};
 pub use simulated_lidar::{SimulatedLidar, SimulatedLidarConfig};

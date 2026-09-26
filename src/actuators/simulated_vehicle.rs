@@ -24,10 +24,11 @@ use crate::topics::{
     VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelParameters, VehicleModelSelection,
     VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand,
 };
-use crate::{Captain, Executor, Stamped, Ticker};
+use crate::{Captain, Executor, RwLockTopic, Stamped, Ticker};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Which vehicle model [`SimulatedVehicle`] should run, and the geometry and
 /// actuator limits it needs to do so. A plain `enum` (rather than a trait)
@@ -609,8 +610,13 @@ fn axles_of(model: &VehicleModel) -> (f64, f64) {
 }
 
 /// What [`SimulatedVehicle`] publishes on its drawing topic every tick: the
-/// vehicle at `state`, front wheels turned by `steering_angle_rad`.
-fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) -> Drawing {
+/// vehicle at `state`, front wheels turned by `steering_angle_rad`, in `color`.
+fn drawing(
+    model: &VehicleModel,
+    state: &VehicleState,
+    steering_angle_rad: f64,
+    color: Color,
+) -> Drawing {
     let (front_axle_m, rear_axle_m) = axles_of(model);
     Drawing::default()
         .element(
@@ -627,7 +633,7 @@ fn drawing(model: &VehicleModel, state: &VehicleState, steering_angle_rad: f64) 
                 width_m: DRAWN_BODY_WIDTH_M,
                 front_axle_m,
                 rear_axle_m,
-                color: Color::AMBER,
+                color,
             }],
             true,
         )
@@ -658,6 +664,43 @@ fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>)
     }
 }
 
+/// The command an opponent acts on this tick: its algorithm's `command`, with
+/// the speed scaled by `speed_scale`, if fresh - else a stationary, centered
+/// one, like [`select_command`].
+fn opponent_command(command: Stamped<VescCommand>, speed_scale: f64) -> VescCommand {
+    if is_fresh(&command) {
+        VescCommand {
+            speed_mps: command.value.speed_mps * speed_scale,
+            ..command.value
+        }
+    } else {
+        VescCommand::default()
+    }
+}
+
+/// What makes a [`SimulatedVehicle`] an opponent rather than the ego vehicle
+/// - see [`SimulatedVehicle::opponent`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpponentVehicle {
+    /// The only command it acts on: its autonomous algorithm's own.
+    pub command_topic: String,
+    /// Multiplies every commanded speed, in `0..=1`.
+    pub speed_scale: f64,
+    /// What it's drawn in.
+    pub color: Color,
+}
+
+/// The ego vehicle's topics that an opponent doesn't have: the human's
+/// commands and the live model switching and tuning.
+struct EgoTopics {
+    human: Arc<RwLockTopic<VescCommand>>,
+    model_selection: Arc<RwLockTopic<VehicleModelSelection>>,
+    model_status: Arc<RwLockTopic<VehicleModelStatus>>,
+    /// Nothing may publish parameter requests at all (e.g. a binary without
+    /// `web_gui`) - then the config stays as loaded.
+    parameters: Option<Arc<RwLockTopic<VehicleModelParameters>>>,
+}
+
 /// Runs `model` forward in time at [`SimulatedVehicleConfig::tick_rate_hz`], reading
 /// [`AUTONOMOUS_VESC_COMMAND_TOPIC_NAME`]/[`HUMAN_VESC_COMMAND_TOPIC_NAME`] each tick
 /// (see [`select_command`]) and publishing the resulting [`VehicleStatus`]. Starts at whatever
@@ -670,6 +713,9 @@ fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>)
 /// switches to [`default_model`] of the wanted kind - carrying over shared
 /// state (see [`carry_over_state`]) - whenever it no longer matches the
 /// model currently running.
+///
+/// An opponent (see [`SimulatedVehicle::opponent`]) instead acts only on its
+/// algorithm's command, and keeps the model it was built with.
 pub struct SimulatedVehicle {
     id: u16,
     name: String,
@@ -677,6 +723,8 @@ pub struct SimulatedVehicle {
     config: SimulatedVehicleConfig,
     /// Where its own topics (`vehicle_status`, `vehicle_limits`) live.
     vehicle: VehicleTopics,
+    /// `None` for the ego vehicle.
+    opponent: Option<OpponentVehicle>,
 }
 
 impl SimulatedVehicle {
@@ -693,8 +741,48 @@ impl SimulatedVehicle {
             model,
             config,
             vehicle: VehicleTopics::ego(),
+            opponent: None,
         }
     }
+
+    /// Creates an opponent: a vehicle running `model` - never switched nor
+    /// tuned live - with `config.limits`, publishing on `vehicle`'s topics
+    /// and acting only on `opponent.command_topic`. Like the ego vehicle, it
+    /// starts at, and is placed back at, the `start_state`.
+    pub fn opponent(
+        name: impl Into<String>,
+        model: VehicleModel,
+        config: SimulatedVehicleConfig,
+        vehicle: VehicleTopics,
+        opponent: OpponentVehicle,
+    ) -> Self {
+        Self {
+            id: 0,
+            name: name.into(),
+            model,
+            config,
+            vehicle,
+            opponent: Some(opponent),
+        }
+    }
+}
+
+/// `file_config` with the model the ego vehicle currently runs (`ego`, as it
+/// publishes it on [`VEHICLE_MODEL_STATUS_TOPIC_NAME`]) and `limits` - and
+/// that model - for an opponent (see [`SimulatedVehicle::opponent`]).
+pub fn opponent_model(
+    mut file_config: SimulatedVehicleConfig,
+    ego: &VehicleModelStatus,
+    limits: ActuatorLimits,
+) -> (VehicleModel, SimulatedVehicleConfig) {
+    let wanted: BTreeMap<String, f64> = ego
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.name.clone(), parameter.value))
+        .collect();
+    apply_wanted(ego.kind, &mut file_config, &wanted);
+    file_config.limits = limits;
+    (default_model(ego.kind, &file_config), file_config)
 }
 
 impl Executor for SimulatedVehicle {
@@ -708,11 +796,13 @@ impl Executor for SimulatedVehicle {
             self.id,
             VehicleStatus::default,
         );
-        captain.claim_writer::<VehicleModelStatus>(
-            VEHICLE_MODEL_STATUS_TOPIC_NAME,
-            self.id,
-            VehicleModelStatus::default,
-        );
+        if self.opponent.is_none() {
+            captain.claim_writer::<VehicleModelStatus>(
+                VEHICLE_MODEL_STATUS_TOPIC_NAME,
+                self.id,
+                VehicleModelStatus::default,
+            );
+        }
         // Every model kind shares `config.limits`, so a model switch never
         // changes it - only live tuning does, which rewrites it.
         let limits = self.config.limits;
@@ -724,18 +814,25 @@ impl Executor for SimulatedVehicle {
 
     fn run(&mut self, captain: &Captain) {
         let status_topic = captain.topic::<VehicleStatus>(&self.vehicle.vehicle_status());
-        let autonomous_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
-        let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
-        let model_selection_topic =
-            captain.topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME);
-        let model_status_topic =
-            captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME);
+        let autonomous_topic = captain.topic::<VescCommand>(
+            self.opponent
+                .as_ref()
+                .map_or(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, |opponent| &opponent.command_topic),
+        );
+        let ego = self.opponent.is_none().then(|| EgoTopics {
+            human: captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME),
+            model_selection: captain
+                .topic::<VehicleModelSelection>(VEHICLE_MODEL_SELECTION_TOPIC_NAME),
+            model_status: captain.topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME),
+            parameters: captain
+                .try_topic::<VehicleModelParameters>(VEHICLE_MODEL_PARAMETERS_TOPIC_NAME),
+        });
+        let (color, speed_scale) = self
+            .opponent
+            .as_ref()
+            .map_or((Color::AMBER, 1.0), |opponent| (opponent.color, opponent.speed_scale));
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
-        // Nothing may publish parameter requests at all (e.g. a binary
-        // without `web_gui`) - then the config stays as loaded.
-        let parameters_topic =
-            captain.try_topic::<VehicleModelParameters>(VEHICLE_MODEL_PARAMETERS_TOPIC_NAME);
         let limits_topic = captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits());
         let drawing_topic = captain.drawing(self.id);
 
@@ -747,9 +844,11 @@ impl Executor for SimulatedVehicle {
         let mut seen_parameters_write_count = 0;
 
         let mut applied_kind = kind_of(&self.model);
-        model_status_topic
-            .write(self.id, model_status(applied_kind, &config))
-            .expect("lost writer authorization for the vehicle_model_status topic");
+        if let Some(ego) = &ego {
+            ego.model_status
+                .write(self.id, model_status(applied_kind, &config))
+                .expect("lost writer authorization for the vehicle_model_status topic");
+        }
 
         let mut applied_start = start_state_topic.read().into_value();
         let mut applied_place_request = place_at_start_topic.read().requested;
@@ -769,18 +868,21 @@ impl Executor for SimulatedVehicle {
         let mut ticker = Ticker::new(self.config.tick_rate_hz);
 
         while captain.is_running(self.id) {
-            let wanted_kind = model_selection_topic.read().kind;
-            if wanted_kind != applied_kind {
-                self.model = default_model(wanted_kind, &config);
-                state = carry_over_state(state, wanted_kind);
-                applied_kind = wanted_kind;
-                previous_body_velocity = None;
-                model_status_topic
-                    .write(self.id, model_status(applied_kind, &config))
-                    .expect("lost writer authorization for the vehicle_model_status topic");
+            if let Some(ego) = &ego {
+                let wanted_kind = ego.model_selection.read().kind;
+                if wanted_kind != applied_kind {
+                    self.model = default_model(wanted_kind, &config);
+                    state = carry_over_state(state, wanted_kind);
+                    applied_kind = wanted_kind;
+                    previous_body_velocity = None;
+                    ego.model_status
+                        .write(self.id, model_status(applied_kind, &config))
+                        .expect("lost writer authorization for the vehicle_model_status topic");
+                }
             }
 
-            if let Some(topic) = &parameters_topic
+            if let Some(ego) = &ego
+                && let Some(topic) = &ego.parameters
                 && topic.meta().write_count != seen_parameters_write_count
             {
                 let requests = topic.read();
@@ -803,7 +905,7 @@ impl Executor for SimulatedVehicle {
                 if model_changed || limits_changed {
                     // Same kind, so the state carries over untouched.
                     self.model = default_model(applied_kind, &config);
-                    model_status_topic
+                    ego.model_status
                         .write(self.id, model_status(applied_kind, &config))
                         .expect("lost writer authorization for the vehicle_model_status topic");
                 }
@@ -819,7 +921,10 @@ impl Executor for SimulatedVehicle {
                 previous_body_velocity = None;
             }
 
-            let command = select_command(autonomous_topic.read(), human_topic.read());
+            let command = match &ego {
+                Some(ego) => select_command(autonomous_topic.read(), ego.human.read()),
+                None => opponent_command(autonomous_topic.read(), speed_scale),
+            };
 
             let (next_state, next_steering_rad) = advance(
                 &self.model,
@@ -859,7 +964,7 @@ impl Executor for SimulatedVehicle {
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
             drawing_topic
-                .write(self.id, drawing(&self.model, &state, steering_angle_rad))
+                .write(self.id, drawing(&self.model, &state, steering_angle_rad, color))
                 .expect("lost writer authorization for the vehicle's drawing topic");
 
             ticker.wait();
@@ -875,6 +980,17 @@ impl Executor for SimulatedVehicle {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
+        // An opponent is never restarted (see `crate::Captain::spawn_group`),
+        // but a fresh one would start over with the same model and config.
+        if let Some(opponent) = &self.opponent {
+            return Box::new(SimulatedVehicle::opponent(
+                self.name.clone(),
+                default_model(kind_of(&self.model), &self.config),
+                self.config.clone(),
+                self.vehicle.clone(),
+                opponent.clone(),
+            ));
+        }
         // Rebuilds `model` via `default_model`, rather than cloning `self.model`,
         // so a restart resets the vehicle's simulated state (position, velocity,
         // ...) even if the model kind was switched mid-run via
@@ -1263,6 +1379,38 @@ mod tests {
             VescCommand::default()
         );
         assert_eq!(select_command(seed.clone(), seed), VescCommand::default());
+    }
+
+    #[test]
+    fn opponent_command_scales_only_the_speed_of_a_fresh_command() {
+        let now = std::time::Instant::now();
+        assert_eq!(
+            opponent_command(written(-0.4, 4.0, now), 0.5),
+            VescCommand::new(-0.4, 2.0)
+        );
+        let stale_at = now - VESC_COMMAND_TIMEOUT - std::time::Duration::from_millis(10);
+        assert_eq!(
+            opponent_command(written(-0.4, 4.0, stale_at), 0.5),
+            VescCommand::default()
+        );
+    }
+
+    #[test]
+    fn an_opponent_copies_the_ego_model_with_its_own_limits() {
+        let mut ego_config = SimulatedVehicleConfig::default();
+        ego_config.dynamic_bicycle.mass_kg += 1.0;
+        let ego = model_status(VehicleModelKind::DynamicBicycle, &ego_config);
+        let limits = ActuatorLimits {
+            max_speed_mps: 1.5,
+            ..ego_config.limits
+        };
+
+        let (model, config) = opponent_model(SimulatedVehicleConfig::default(), &ego, limits);
+
+        assert_eq!(kind_of(&model), VehicleModelKind::DynamicBicycle);
+        assert_eq!(config.dynamic_bicycle, ego_config.dynamic_bicycle);
+        assert_eq!(config.limits, limits);
+        assert_eq!(limits_of(&model), limits);
     }
 
     #[test]

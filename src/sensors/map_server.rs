@@ -85,13 +85,8 @@ fn default_race_line(folder: &Path) -> SelectedRaceLine {
 /// The map in `folder`'s race line `file`, or `None` (with a warning) if it
 /// can't be read.
 fn race_line(folder: &Path, file: &str) -> Option<SelectedRaceLine> {
-    match race_lines::read(folder, file) {
-        Ok(points) => Some(SelectedRaceLine {
-            map: Some(folder.to_path_buf()),
-            file: Some(file.to_string()),
-            method: race_lines::meta(folder, file).method,
-            points,
-        }),
+    match SelectedRaceLine::load(folder, file) {
+        Ok(line) => Some(line),
         Err(err) => {
             eprintln!("map_server: failed to load race line {file:?} of {folder:?}: {err}");
             None

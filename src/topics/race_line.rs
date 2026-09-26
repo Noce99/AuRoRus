@@ -6,8 +6,9 @@
 //! planned line of a freshly loaded map (or its centerline, if it has no
 //! planned one), then whatever a new [`RaceLineSelection`] asks for.
 
+use crate::environment::race_lines::{self, RaceLineFileError};
 use crate::environment::{RaceLineMethod, SpeedPoint};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Name of the topic [`SelectedRaceLine`] is published on.
 pub const RACE_LINE_TOPIC_NAME: &str = "race_line";
@@ -26,6 +27,21 @@ pub struct SelectedRaceLine {
     pub method: RaceLineMethod,
     /// The line's points - empty without a `file`.
     pub points: Vec<SpeedPoint>,
+}
+
+impl SelectedRaceLine {
+    /// The map in `folder`'s race line `file` (inside its `race_lines/`).
+    pub fn load(folder: &Path, file: &str) -> Result<Self, RaceLineFileError> {
+        // First, so `file` is known to be a valid name before anything else
+        // reads the folder with it.
+        let points = race_lines::read(folder, file)?;
+        Ok(Self {
+            map: Some(folder.to_path_buf()),
+            file: Some(file.to_string()),
+            method: race_lines::meta(folder, file).method,
+            points,
+        })
+    }
 }
 
 /// Which of a map's race lines a driver (e.g. `web_gui`) wants followed.
