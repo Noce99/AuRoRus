@@ -56,7 +56,9 @@ pub use vehicle_model::{
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
     VehicleModelSelection, VehicleModelStatus,
 };
-pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+pub use vehicle_status::{
+    VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M, VEHICLE_STATUS_TOPIC_NAME, VehicleStatus,
+};
 pub use vehicle_topics::{AlgorithmTopics, OPPONENT_TOPIC_PREFIX, VehicleTopics};
 pub use vesc_command::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT,

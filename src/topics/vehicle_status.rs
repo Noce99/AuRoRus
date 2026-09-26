@@ -6,6 +6,13 @@
 /// Name of the topic a [`VehicleStatus`] is published on.
 pub const VEHICLE_STATUS_TOPIC_NAME: &str = "vehicle_status";
 
+/// Body size of every simulated vehicle - roughly a 1/10-scale RC car,
+/// centered on its [`VehicleStatus`] position and aligned with its heading.
+/// What [`crate::actuators::SimulatedVehicle`] draws, and what every
+/// [`crate::sensors::SimulatedLidar`] sees of the other vehicles.
+pub const VEHICLE_BODY_LENGTH_M: f64 = 0.45;
+pub const VEHICLE_BODY_WIDTH_M: f64 = 0.25;
+
 /// The vehicle's position, heading, and speed at one instant, in the same
 /// world frame (meters) as [`crate::environment::MapInfo`], plus its motion
 /// in the body frame (x forward, y left) - the ground truth a simulated

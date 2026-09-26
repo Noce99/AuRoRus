@@ -1,6 +1,7 @@
 # Configuration for `aurorus::sensors::SimulatedLidar`, a synthetic LIDAR
-# sensor that raycasts against the currently loaded map from the vehicle's
-# real position, for exercising downstream algorithms without real hardware.
+# sensor that raycasts against the currently loaded map (and, see
+# see_vehicles, the other vehicles) from the vehicle's real position, for
+# exercising downstream algorithms without real hardware.
 
 # Rate at which SimulatedLidar publishes a new scan, in Hz.
 rate_hz = 50.0
@@ -21,3 +22,8 @@ seed = 0
 # every hit, in meters (misses keep reporting max_distance_m). 0.0 gives a
 # perfect sensor.
 range_std_m = 0.02
+
+# Whether rays also stop on the other vehicles' bodies (the ego vehicle's and
+# every opponent's), not just on the map's walls. false gives the map alone,
+# e.g. to test SLAM without moving obstacles.
+see_vehicles = true

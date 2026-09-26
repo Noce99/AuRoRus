@@ -13,7 +13,8 @@
 //! - a [`SimulatedLidar::opponent`], if the algorithm reads lidar scans;
 //! - a [`RaceLinePublisher`], if it was given a race line.
 //!
-//! There are no collisions, and no lidar sees another vehicle.
+//! There are no collisions, but lidars see the other vehicles (see
+//! [`SimulatedLidarConfig::see_vehicles`]).
 
 use crate::actuators::{OpponentVehicle, SimulatedVehicle, SimulatedVehicleConfig, opponent_model};
 use crate::autonomous_control::{self, Instance};

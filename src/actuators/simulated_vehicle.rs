@@ -19,7 +19,8 @@ pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
     HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME,
-    Shape, StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    Shape, StartState, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
     VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VehicleStatus,
     VehicleTopics, VescCommand,
@@ -597,11 +598,6 @@ fn body_acceleration(
 const VEHICLE_Z_INDEX: i32 = 10;
 const OPPONENT_Z_INDEX: i32 = 9;
 
-/// Body size [`SimulatedVehicle`] draws the vehicle at - roughly a 1/10-scale
-/// RC car, matching the models' default geometry.
-const DRAWN_BODY_LENGTH_M: f64 = 0.45;
-const DRAWN_BODY_WIDTH_M: f64 = 0.25;
-
 /// The distances from the model's reference point to its front and rear
 /// axles - what [`drawing`] turns the front wheels about.
 fn axles_of(model: &VehicleModel) -> (f64, f64) {
@@ -634,8 +630,8 @@ fn drawing(
                 // the vehicle between samples moves it backward while reversing.
                 speed_mps: state.longitudinal_speed_mps(),
                 steering_rad: steering_angle_rad,
-                length_m: DRAWN_BODY_LENGTH_M,
-                width_m: DRAWN_BODY_WIDTH_M,
+                length_m: VEHICLE_BODY_LENGTH_M,
+                width_m: VEHICLE_BODY_WIDTH_M,
                 front_axle_m,
                 rear_axle_m,
                 color,
