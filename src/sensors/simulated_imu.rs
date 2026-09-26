@@ -50,7 +50,7 @@ impl Default for SimulatedImuConfig {
 /// body-frame motion on [`VEHICLE_STATUS_TOPIC_NAME`] as corrupted by a
 /// [`NoiseModel`].
 pub struct SimulatedImu {
-    id: u8,
+    id: u16,
     name: String,
     config: SimulatedImuConfig,
 }
@@ -66,7 +66,7 @@ impl SimulatedImu {
 }
 
 impl Executor for SimulatedImu {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

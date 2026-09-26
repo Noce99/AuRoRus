@@ -15,24 +15,30 @@
 //!
 //! Add one file, `src/autonomous_control/<name>.rs`, and rebuild - nothing
 //! else. `build.rs` declares it as a module of this one and adds it to
-//! [`all`], which the binaries run. The file must define
+//! [`all`], which the binaries run, and to [`build`]. The file must define
 //!
 //! ```ignore
-//! pub fn new(name: &str) -> Box<dyn crate::Executor>
+//! pub fn new(instance: crate::autonomous_control::Instance) -> Box<dyn crate::Executor>
 //! ```
 //!
-//! returning an executor whose [`Executor::name`] is `name` (the file stem),
-//! which:
+//! returning an executor whose [`Executor::name`] is `instance.name`, which:
+//! - loads its config with [`load_config`]`(&instance.config_name)`;
 //! - claims its topics in [`Executor::claim_writing_topics`] via
-//!   [`Captain::claim_autonomous_control`], describing itself with an
-//!   [`crate::topics::AutonomousAlgorithmInfo`] for the picker;
+//!   [`Captain::claim_autonomous_control`] with [`Instance::algorithm_topics`],
+//!   describing itself with an [`crate::topics::AutonomousAlgorithmInfo`] for
+//!   the picker - including what it [requires](crate::topics::AlgorithmRequirements);
 //! - publishes its commands in [`Executor::run`] on
 //!   [`Captain::autonomous_control`] - more often than
 //!   [`crate::topics::VESC_COMMAND_TIMEOUT`], or the vehicle stops;
-//! - reads whatever else it needs, e.g. the actuator limits on
-//!   [`crate::topics::VEHICLE_LIMITS_TOPIC_NAME`];
+//! - reads every topic of the vehicle it drives through
+//!   [`Instance::vehicle`] (e.g. the actuator limits on
+//!   [`crate::topics::VehicleTopics::vehicle_limits`]) - the same algorithm
+//!   also drives opponents (see [`Instance::opponent`]), each through its own
+//!   topics;
 //! - if it's expensive to run, can idle while
-//!   [`Captain::is_selected_algorithm`] says it isn't selected;
+//!   [`Captain::is_selected_algorithm`] says it isn't selected - but only
+//!   when [`Instance::is_opponent`] is `false`: an opponent is never
+//!   "selected", it always drives;
 //! - optionally, lets its parameters be tuned live - see [`ParameterTuner`];
 //! - optionally, tells the driver what's going on (e.g. why it holds the
 //!   vehicle stopped) - see [`report_message`].
@@ -47,8 +53,9 @@ use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter,
-    AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
-    AutonomousParameters, AvailableAlgorithm, VESC_COMMAND_TIMEOUT, VescCommand,
+    AlgorithmTopics, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection,
+    AutonomousAlgorithmStatus, AutonomousParameters, AvailableAlgorithm, VESC_COMMAND_TIMEOUT,
+    VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use serde::Serialize;
@@ -60,6 +67,54 @@ use std::path::{Path, PathBuf};
 include!(concat!(env!("OUT_DIR"), "/autonomous_algorithms.rs"));
 
 pub(crate) mod shared;
+
+/// Which vehicle one running copy of an algorithm drives, and under what
+/// name - what every algorithm file's `new` is built from (see the
+/// [module docs](self)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Instance {
+    /// The executor's name - e.g. `gap_follower` for the ego vehicle's copy,
+    /// `opponent/1/gap_follower` for opponent 1's.
+    pub name: String,
+    /// The algorithm's file stem, e.g. `gap_follower`: which config file it
+    /// loads (see [`config_path`]) and what its topics are named after.
+    pub config_name: String,
+    /// The topics of the vehicle it drives.
+    pub vehicle: VehicleTopics,
+}
+
+impl Instance {
+    /// The copy driving the ego vehicle, named after its file stem.
+    pub fn ego(stem: &str) -> Self {
+        Self {
+            name: stem.to_string(),
+            config_name: stem.to_string(),
+            vehicle: VehicleTopics::ego(),
+        }
+    }
+
+    /// The copy driving opponent `n`. Same config file as the ego's copy,
+    /// but it always drives - it's never "selected" in the picker, nor tuned
+    /// live, and it uses the simulator's ground truth pose, never
+    /// localization.
+    pub fn opponent(n: u32, stem: &str) -> Self {
+        let vehicle = VehicleTopics::opponent(n);
+        Self {
+            name: format!("{}{stem}", vehicle.prefix()),
+            config_name: stem.to_string(),
+            vehicle,
+        }
+    }
+
+    pub fn is_opponent(&self) -> bool {
+        !self.vehicle.is_ego()
+    }
+
+    /// This copy's own command and info topics.
+    pub fn algorithm_topics(&self) -> AlgorithmTopics {
+        self.vehicle.algorithm(&self.config_name)
+    }
+}
 
 /// How often [`AutonomousControlsHandler`] forwards the selected command, in
 /// Hz - matched to `SimulatedVehicle`'s default tick rate, so forwarding adds
@@ -74,7 +129,7 @@ const HANDLER_RATE_HZ: f64 = 100.0;
 /// [`VESC_COMMAND_TIMEOUT`] (see [`resolve_command`]). Reports what it did on
 /// [`AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME`].
 pub struct AutonomousControlsHandler {
-    id: u8,
+    id: u16,
     name: String,
 }
 
@@ -108,6 +163,7 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
                 description: info.description,
                 parameters: info.parameters,
                 message: info.message,
+                requires: info.requires,
             })
         })
         .collect();
@@ -127,6 +183,7 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
 /// ```ignore
 /// captain.claim_autonomous_control(
 ///     self.id,
+///     &self.instance.algorithm_topics(),
 ///     AutonomousAlgorithmInfo::new("Gap follower", "...").with_parameters(
 ///         &self.config,
 ///         [AlgorithmParameter::float("t_m", 0.5, 12.0, 0.1).unit("m").description("...")],
@@ -135,25 +192,33 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
 /// ```
 ///
 /// then calls [`update`](Self::update) once per tick in [`Executor::run`].
+/// An opponent's copy (see [`Instance::opponent`]) is never tuned live:
+/// `update` leaves its config as loaded.
 /// The config must be [`Serialize`] + [`DeserializeOwned`] - a value is set
 /// by patching its JSON form - so no per-parameter code is needed. Anything
 /// the algorithm derives from its config (e.g. a [`Ticker`] built from a
 /// rate) must be rebuilt whenever `update` returns `true`.
 pub struct ParameterTuner {
-    executor_id: u8,
+    executor_id: u16,
+    /// What [`AutonomousParameters`] knows the algorithm as - its executor
+    /// name.
     name: String,
+    topics: AlgorithmTopics,
+    opponent: bool,
     /// [`crate::WriteMeta::write_count`] of the last [`AutonomousParameters`]
     /// looked at, so an unchanged request costs one counter read per tick.
     seen_write_count: u64,
 }
 
 impl ParameterTuner {
-    /// A tuner for the algorithm running as `executor_id`, which must have
+    /// A tuner for `instance`, running as `executor_id`, which must have
     /// claimed its topics via [`Captain::claim_autonomous_control`].
-    pub fn new(captain: &Captain, executor_id: u8) -> Self {
+    pub fn new(executor_id: u16, instance: &Instance) -> Self {
         Self {
             executor_id,
-            name: captain.name_of(executor_id),
+            name: instance.name.clone(),
+            topics: instance.algorithm_topics(),
+            opponent: instance.is_opponent(),
             seen_write_count: 0,
         }
     }
@@ -173,6 +238,9 @@ impl ParameterTuner {
         captain: &Captain,
         config: &mut C,
     ) -> bool {
+        if self.opponent {
+            return false;
+        }
         // Nothing may publish requests at all (e.g. a binary without
         // `web_gui`) - then the config stays as loaded.
         let Some(requests) =
@@ -189,7 +257,7 @@ impl ParameterTuner {
             return false;
         };
 
-        let info_topic = captain.autonomous_control_info(self.executor_id);
+        let info_topic = captain.autonomous_control_info(&self.topics);
         let mut info = info_topic.read().into_value();
         if !crate::config::apply_parameters(config, &info.parameters, &wanted) {
             return false;
@@ -202,12 +270,17 @@ impl ParameterTuner {
     }
 }
 
-/// Sets the algorithm running as `executor_id`'s
+/// Sets `instance`'s (running as `executor_id`)
 /// [`AutonomousAlgorithmInfo::message`] - shown in `web_gui`'s autonomous
 /// algorithms panel - rewriting its info only if the message changed, so it
 /// can be called every tick.
-pub fn report_message(captain: &Captain, executor_id: u8, message: Option<String>) {
-    let info_topic = captain.autonomous_control_info(executor_id);
+pub fn report_message(
+    captain: &Captain,
+    executor_id: u16,
+    instance: &Instance,
+    message: Option<String>,
+) {
+    let info_topic = captain.autonomous_control_info(&instance.algorithm_topics());
     let mut info = info_topic.read().into_value();
     if info.message == message {
         return;
@@ -286,7 +359,7 @@ fn resolve_command(command: Option<Stamped<VescCommand>>) -> (VescCommand, bool)
 }
 
 impl Executor for AutonomousControlsHandler {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

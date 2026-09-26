@@ -238,7 +238,7 @@ const DRAWN_Z_INDEX: i32 = -50;
 /// and the map is never changed. That's refused while SLAM has a map of its
 /// own in memory: clear or save it first.
 pub struct Slam {
-    id: u8,
+    id: u16,
     name: String,
     maps_root: PathBuf,
     config: SlamConfig,
@@ -257,7 +257,7 @@ impl Slam {
 }
 
 impl Executor for Slam {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

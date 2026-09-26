@@ -102,7 +102,7 @@ impl<T> Deref for Stamped<T> {
 /// tradeoff should be revisited.
 pub struct RwLockTopic<T> {
     data: RwLock<Stamped<T>>,
-    writer_id: OnceLock<u8>,
+    writer_id: OnceLock<u16>,
 }
 
 impl<T: Send + Sync + 'static> RwLockTopic<T> {
@@ -121,7 +121,7 @@ impl<T: Send + Sync + 'static> RwLockTopic<T> {
     /// no writer is claimed yet, or if `executor_id` already holds the slot (e.g.
     /// after being restarted by `Runner::switch_executor`). Fails only if a
     /// *different* `executor_id` already holds it.
-    pub fn set_writer(&self, executor_id: u8) -> Result<(), TopicError> {
+    pub fn set_writer(&self, executor_id: u16) -> Result<(), TopicError> {
         match self.writer_id.set(executor_id) {
             Ok(()) => Ok(()),
             Err(_) if self.writer_id.get() == Some(&executor_id) => Ok(()),
@@ -130,7 +130,7 @@ impl<T: Send + Sync + 'static> RwLockTopic<T> {
     }
 
     /// The currently registered writer, if any.
-    pub fn writer(&self) -> Option<u8> {
+    pub fn writer(&self) -> Option<u16> {
         self.writer_id.get().copied()
     }
 
@@ -146,7 +146,7 @@ impl<T: Clone + Send + Sync + 'static> RwLockTopic<T> {
     /// topic's registered writer, stamping it with the current time and bumping
     /// [`WriteMeta::write_count`]. Value and stamp are swapped under the same lock,
     /// so a reader can never see one without the other.
-    pub fn write(&self, executor_id: u8, value: T) -> Result<(), TopicError> {
+    pub fn write(&self, executor_id: u16, value: T) -> Result<(), TopicError> {
         if self.writer_id.get() == Some(&executor_id) {
             // Read the clocks before taking the lock, to keep its hold time minimal.
             let written_at = Instant::now();

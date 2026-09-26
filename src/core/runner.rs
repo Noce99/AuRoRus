@@ -31,7 +31,7 @@ impl StopHandle {
 pub enum SwitchExecutorError {
     /// No executor is currently running under this id - either it was never
     /// registered, or [`Runner::run_all`] hasn't started it yet.
-    NotRunning(u8),
+    NotRunning(u16),
 }
 
 impl fmt::Display for SwitchExecutorError {
@@ -59,9 +59,9 @@ type TopicRegistration = Box<dyn Fn(&Captain) + Send + Sync>;
 /// whatever is still running.
 pub struct Runner {
     captain: Arc<Captain>,
-    next_id: u8,
-    pending: Vec<(u8, Box<dyn Executor>)>,
-    running: HashMap<u8, thread::JoinHandle<Box<dyn Executor>>>,
+    next_id: u16,
+    pending: Vec<(u16, Box<dyn Executor>)>,
+    running: HashMap<u16, thread::JoinHandle<Box<dyn Executor>>>,
     registered_topics: Vec<TopicRegistration>,
     verbose: bool,
     /// Set by [`debug_mode`](Self::debug_mode); `None` means debug recording is off.
@@ -179,12 +179,12 @@ impl Runner {
     /// Registers `executor`, assigning it a unique id (in registration order,
     /// starting at 0). The id is passed to the executor's [`Executor::init`]
     /// once it starts running, and returned here in case the caller needs it.
-    pub fn add_executor(&mut self, executor: Box<dyn Executor>) -> u8 {
+    pub fn add_executor(&mut self, executor: Box<dyn Executor>) -> u16 {
         let id = self.next_id;
         self.next_id = self
             .next_id
             .checked_add(1)
-            .expect("Runner: exceeded u8::MAX executors (id space exhausted)");
+            .expect("Runner: exceeded u16::MAX executors (id space exhausted)");
         self.log(
             LogColor::Orange,
             format!("added executor {:?} (id {id})", executor.name()),
@@ -228,7 +228,7 @@ impl Runner {
     /// inspect its final state. Fails if no executor is currently running under `id`.
     pub fn switch_executor(
         &mut self,
-        id: u8,
+        id: u16,
         new_executor: Box<dyn Executor>,
     ) -> Result<Box<dyn Executor>, SwitchExecutorError> {
         let old_handle = self
@@ -298,7 +298,7 @@ impl Runner {
     /// Like [`join_all`](Self::join_all), but keeps each executor's id
     /// alongside it - needed by [`run_until_stopped`](Self::run_until_stopped)
     /// to respawn restarted executors under their original ids.
-    fn join_all_with_ids(&mut self) -> Vec<(u8, Box<dyn Executor>)> {
+    fn join_all_with_ids(&mut self) -> Vec<(u16, Box<dyn Executor>)> {
         let executors: Vec<_> = self
             .running
             .drain()
@@ -310,7 +310,7 @@ impl Runner {
 
     fn spawn(
         captain: &Arc<Captain>,
-        id: u8,
+        id: u16,
         executor: Box<dyn Executor>,
         debug_frequency_hz: Option<f64>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
@@ -322,7 +322,7 @@ impl Runner {
     /// assigns its id and name, and has it claim its writing topics.
     fn prepare(
         captain: &Captain,
-        id: u8,
+        id: u16,
         mut executor: Box<dyn Executor>,
         debug_frequency_hz: Option<f64>,
     ) -> Box<dyn Executor> {
@@ -371,7 +371,7 @@ mod tests {
     /// that many iterations - just enough to observe `switch_executor` and
     /// `run_until_stopped`'s effects.
     struct CountingExecutor {
-        id: u8,
+        id: u16,
         iterations: Arc<AtomicUsize>,
         finished: Arc<AtomicBool>,
         restart_after: Option<usize>,
@@ -379,7 +379,7 @@ mod tests {
     }
 
     impl Executor for CountingExecutor {
-        fn init(&mut self, id: u8) {
+        fn init(&mut self, id: u16) {
             self.id = id;
         }
 
@@ -418,11 +418,11 @@ mod tests {
     /// Claims `topic` - taking its time about it, so an executor already running
     /// by then would get to read it first - and does nothing else.
     struct Writer {
-        id: u8,
+        id: u16,
     }
 
     impl Executor for Writer {
-        fn init(&mut self, id: u8) {
+        fn init(&mut self, id: u16) {
             self.id = id;
         }
 
@@ -450,7 +450,7 @@ mod tests {
     struct Reader;
 
     impl Executor for Reader {
-        fn init(&mut self, _id: u8) {}
+        fn init(&mut self, _id: u16) {}
 
         fn run(&mut self, captain: &Captain) {
             captain.topic::<u32>("topic").read();

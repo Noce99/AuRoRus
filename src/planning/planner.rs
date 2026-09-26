@@ -27,7 +27,7 @@ const PROGRESS_Z_INDEX: i32 = -90;
 /// can be tuned before starting - and reports the values in effect. Draws
 /// the optimization's progress while planning.
 pub struct Planner {
-    id: u8,
+    id: u16,
     name: String,
     config: PlanningConfig,
 }
@@ -238,7 +238,7 @@ fn progress_drawing(reference: &[Point2], solution: &[Point2], color: Color) -> 
 }
 
 impl Executor for Planner {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

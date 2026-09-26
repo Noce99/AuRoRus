@@ -70,7 +70,7 @@ struct SelectBody {
 
 /// `POST /api/race_line_selection` - body `{"file": "..."}` - asks
 /// `MapServer` to follow that race line of the loaded map.
-pub fn select(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn select(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let body: SelectBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,

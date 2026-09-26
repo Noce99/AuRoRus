@@ -41,7 +41,7 @@ impl Default for RandomLidarConfig {
 /// [`RandomLidarConfig::rate_hz`], useful for exercising downstream
 /// algorithms without real hardware.
 pub struct RandomLidar {
-    id: u8,
+    id: u16,
     name: String,
     config: RandomLidarConfig,
 }
@@ -57,7 +57,7 @@ impl RandomLidar {
 }
 
 impl Executor for RandomLidar {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

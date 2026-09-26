@@ -3,8 +3,9 @@
 //! algorithm is only a matter of adding its file - nothing else has to name
 //! it.
 //!
-//! Writes `$OUT_DIR/autonomous_algorithms.rs`: one `mod` per file, and an
-//! `all()` building one executor per file, named after its file stem.
+//! Writes `$OUT_DIR/autonomous_algorithms.rs`: one `mod` per file, an
+//! `all()` building one executor per file for the ego vehicle, named after
+//! its file stem, and a `build(stem, instance)` building any one of them.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -51,13 +52,25 @@ fn main() {
     }
     out.push_str(
         "\n/// One fresh executor per algorithm file in `src/autonomous_control/`, each\n\
-         /// named after its file stem - see the [module docs](self).\n\
+         /// driving the ego vehicle and named after its file stem - see the\n\
+         /// [module docs](self).\n\
          pub fn all() -> Vec<Box<dyn crate::Executor>> {\n    vec![\n",
     );
     for (stem, _) in &algorithms {
-        writeln!(out, "        {stem}::new({stem:?}),").unwrap();
+        writeln!(out, "        {stem}::new(Instance::ego({stem:?})),").unwrap();
     }
     out.push_str("    ]\n}\n");
+
+    out.push_str(
+        "\n/// A fresh executor of the algorithm in `src/autonomous_control/<stem>.rs`,\n\
+         /// running as `instance` - or `None` if there's no such file.\n\
+         pub fn build(stem: &str, instance: Instance) -> Option<Box<dyn crate::Executor>> {\n    \
+         match stem {\n",
+    );
+    for (stem, _) in &algorithms {
+        writeln!(out, "        {stem:?} => Some({stem}::new(instance)),").unwrap();
+    }
+    out.push_str("        _ => None,\n    }\n}\n");
 
     let out_path = Path::new(&env::var("OUT_DIR").expect("cargo always sets OUT_DIR"))
         .join("autonomous_algorithms.rs");

@@ -76,7 +76,7 @@ impl Default for WebGuiConfig {
 /// Serves the map browser/generator web UI. Reads and writes map folders
 /// under `maps_root` directly off disk.
 pub struct WebGui {
-    id: u8,
+    id: u16,
     name: String,
     maps_root: PathBuf,
     config: WebGuiConfig,
@@ -99,7 +99,7 @@ impl WebGui {
 }
 
 impl Executor for WebGui {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

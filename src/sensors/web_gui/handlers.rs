@@ -20,7 +20,7 @@ pub fn handle(
     mut request: Request,
     maps_root: &Path,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
     config: &WebGuiConfig,
 ) {
     let method = request.method().clone();

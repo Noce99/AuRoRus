@@ -17,7 +17,7 @@ pub const TOPIC_NAME: &str = "shared_data";
 /// Claims the topic's writer slot for its own id in [`Executor::claim_writing_topics`],
 /// so it must be the first (and only) executor that ever writes that topic.
 pub struct WriterExecutor {
-    id: u8,
+    id: u16,
     rate_hz: f64,
     topic_size: usize,
     report: Arc<Mutex<Option<Report>>>,
@@ -40,7 +40,7 @@ impl WriterExecutor {
 }
 
 impl Executor for WriterExecutor {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
@@ -116,7 +116,7 @@ impl Executor for WriterExecutor {
 /// other reader at the same target rate - so [`crate::main`] can fold all of them
 /// into one combined report per rate tier.
 pub struct ReaderExecutor {
-    id: u8,
+    id: u16,
     rate_hz: f64,
     sink: Arc<Mutex<Vec<u64>>>,
 }
@@ -132,7 +132,7 @@ impl ReaderExecutor {
 }
 
 impl Executor for ReaderExecutor {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

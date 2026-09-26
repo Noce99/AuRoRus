@@ -13,7 +13,7 @@ use std::any::Any;
 pub trait Executor: Send {
     /// Called once, before [`run`](Self::run), with this executor's identity. Used
     /// e.g. to claim a topic's writer slot or to tag published values.
-    fn init(&mut self, id: u8);
+    fn init(&mut self, id: u16);
 
     /// Called once, after [`init`](Self::init) and before this executor's thread is
     /// spawned. Executors that write to a topic must claim it here, via

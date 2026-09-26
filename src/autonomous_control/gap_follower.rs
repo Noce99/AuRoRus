@@ -1,21 +1,21 @@
 //! This file implement the Gap Follower algorithm as presented in the
 //! f1tenth documentation: https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html
 
-use crate::autonomous_control::{ParameterTuner, load_config};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, Shape, Color, VescCommand};
 // use crate::topics::{VEHICLE_LIMITS_TOPIC_NAME, ActuatorLimits};
-use crate::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
-use crate::topics::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+use crate::topics::LidarScan;
+use crate::topics::VehicleStatus;
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::Duration;
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
+pub fn new(instance: Instance) -> Box<dyn Executor> {
     Box::new(GapFollower {
         id: 0,
-        name: name.to_string(),
-        config: load_config(name),
+        config: load_config(&instance.config_name),
+        instance,
     })
 }
 
@@ -69,32 +69,34 @@ fn parameters() -> [AlgorithmParameter; 5] {
 }
 
 struct GapFollower {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     config: GapFollowerConfig,
 }
 
 impl Executor for GapFollower {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
+            &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new("Gap follower", "The simplest reactive algorithm")
+                .requires_lidar()
                 .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        // let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
-        let scan_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
-        let vehicle_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        // let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
+        let vehicle_topic = captain.topic::<VehicleStatus>(&self.instance.vehicle.vehicle_status());
         let drawing_topic = captain.drawing(self.id);
-        let mut tuner = ParameterTuner::new(captain, self.id);
+        let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
         // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
@@ -264,7 +266,7 @@ impl Executor for GapFollower {
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -272,7 +274,7 @@ impl Executor for GapFollower {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 

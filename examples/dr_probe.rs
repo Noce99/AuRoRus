@@ -9,10 +9,10 @@ use std::any::Any;
 use std::time::{Duration, Instant};
 
 struct Probe {
-    id: u8,
+    id: u16,
 }
 impl Executor for Probe {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
     fn claim_writing_topics(&mut self, c: &Captain) {

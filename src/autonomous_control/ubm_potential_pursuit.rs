@@ -11,24 +11,25 @@
 //! `documentation/autonomous_algorithms.md`.
 
 use super::ubm_potential_field::{UbmPotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters};
-use crate::autonomous_control::shared::race_line::{Line, Nearest, Pose, pose, wrap_to_pi};
+use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi};
 use crate::autonomous_control::shared::reactive::{Field, potential_field};
-use crate::autonomous_control::{ParameterTuner, load_config, report_message};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::environment::SpeedPoint;
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LIDAR_SCAN_TOPIC_NAME,
-    LidarScan, RACE_LINE_TOPIC_NAME, SelectedRaceLine, Shape, VEHICLE_LIMITS_TOPIC_NAME, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
+    SelectedRaceLine, Shape, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
-    Box::new(UbmPotentialPursuit {
-        id: 0,
-        name: name.to_string(),
-        config: load_config(name),
-    })
+pub fn new(instance: Instance) -> Box<dyn Executor> {
+    let mut config: UbmPotentialPursuitConfig = load_config(&instance.config_name);
+    // An opponent has no localization of its own - see `Instance::opponent`.
+    if instance.is_opponent() {
+        config.pose_source = POSE_GROUND_TRUTH;
+    }
+    Box::new(UbmPotentialPursuit { id: 0, instance, config })
 }
 
 /// Every tunable parameter [`UbmPotentialPursuit`] needs - loaded from
@@ -128,34 +129,37 @@ fn parameters() -> Vec<AlgorithmParameter> {
 }
 
 struct UbmPotentialPursuit {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     config: UbmPotentialPursuitConfig,
 }
 
 impl Executor for UbmPotentialPursuit {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
+            &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
                 "UBM Potential pursuit",
                 "A potential field attracted toward a point ahead on the race line",
             )
+            .requires_race_line()
+            .requires_lidar()
             .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
-        let scan_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
-        let mut tuner = ParameterTuner::new(captain, self.id);
+        let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
         // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
@@ -173,7 +177,7 @@ impl Executor for UbmPotentialPursuit {
             }
 
             // Nothing may publish a race line at all (e.g. a binary without `MapServer`).
-            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(RACE_LINE_TOPIC_NAME) {
+            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line()) {
                 let write_count = topic.meta().write_count;
                 if line.as_ref().is_none_or(|(seen, _)| *seen != write_count) {
                     line = Some((write_count, Line::new(topic.read().into_value().points)));
@@ -181,7 +185,7 @@ impl Executor for UbmPotentialPursuit {
                 }
             }
             let line = line.as_ref().and_then(|(_, line)| line.as_ref());
-            let pose = pose(captain, self.config.pose_source);
+            let pose = pose(captain, &self.instance.vehicle, self.config.pose_source);
             let scan = scan_topic.read().into_value();
 
             // A stationary command, and why, unless driving.
@@ -205,14 +209,14 @@ impl Executor for UbmPotentialPursuit {
                             command(&self.config.potential_field(), &scan, &control.field, &limits_topic.read());
                         (
                             VescCommand::new(steering_rad as f64, speed_mps as f64),
-                            control.drawing(captain),
+                            control.drawing(captain, &self.instance.vehicle),
                             None,
                         )
                     }
                 },
             };
 
-            report_message(captain, self.id, message);
+            report_message(captain, self.id, &self.instance, message);
             command_topic
                 .write(self.id, command)
                 .expect("lost writer authorization for this algorithm's command topic");
@@ -224,7 +228,7 @@ impl Executor for UbmPotentialPursuit {
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -232,7 +236,7 @@ impl Executor for UbmPotentialPursuit {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 
@@ -287,8 +291,9 @@ fn control(
 }
 
 impl Control {
-    /// The field's drawing, plus the nearest and pursuit points.
-    fn drawing(&self, captain: &Captain) -> Drawing {
+    /// The field's drawing, plus the nearest and pursuit points, for the
+    /// vehicle whose topics are `vehicle`.
+    fn drawing(&self, captain: &Captain, vehicle: &VehicleTopics) -> Drawing {
         let nearest = Shape::Circle {
             x_m: self.nearest.x_m,
             y_m: self.nearest.y_m,
@@ -303,7 +308,7 @@ impl Control {
             filled: true,
             color: Color::GREEN,
         };
-        field_drawing(captain, &self.field)
+        field_drawing(captain, vehicle, &self.field)
             .element("Nearest point", [nearest], false)
             .element("Pursuit point", [target], false)
     }

@@ -10,21 +10,21 @@ use crate::autonomous_control::shared::reactive::{
     Field, FieldConfig, field_shapes, fov_window, potential_field, scan_origin, speed_proportional_steering,
     speed_steer_and_fov,
 };
-use crate::autonomous_control::{ParameterTuner, load_config};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan,
-    VEHICLE_LIMITS_TOPIC_NAME, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan,
+    VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::Duration;
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
+pub fn new(instance: Instance) -> Box<dyn Executor> {
     Box::new(UbmPotentialField {
         id: 0,
-        name: name.to_string(),
-        config: load_config(name),
+        config: load_config(&instance.config_name),
+        instance,
     })
 }
 
@@ -169,9 +169,10 @@ pub(crate) fn command(
     (steering_rad, speed.clamp(0.0, limits.max_speed_mps as f32))
 }
 
-/// The drawing of `field`, seen from the vehicle, if there's a pose to draw it from.
-pub(crate) fn field_drawing(captain: &Captain, field: &Field) -> Drawing {
-    let Some(origin) = scan_origin(captain) else {
+/// The drawing of `field`, seen from the vehicle whose topics are `vehicle`,
+/// if there's a pose to draw it from.
+pub(crate) fn field_drawing(captain: &Captain, vehicle: &VehicleTopics, field: &Field) -> Drawing {
+    let Some(origin) = scan_origin(captain, vehicle) else {
         return Drawing::default();
     };
     let (obstacles, potential, chosen) = field_shapes(origin, field);
@@ -182,34 +183,36 @@ pub(crate) fn field_drawing(captain: &Captain, field: &Field) -> Drawing {
 }
 
 struct UbmPotentialField {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     config: UbmPotentialFieldConfig,
 }
 
 impl Executor for UbmPotentialField {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
+            &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
                 "UBM Potential field",
                 "Obstacles repel, the longest reading attracts: steers toward a minimum of the potential",
             )
+            .requires_lidar()
             .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
-        let scan_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
-        let mut tuner = ParameterTuner::new(captain, self.id);
+        let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
         // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
@@ -232,14 +235,14 @@ impl Executor for UbmPotentialField {
                 .write(self.id, VescCommand::new(steering_rad as f64, speed_mps as f64))
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
-                .write(self.id, field_drawing(captain, &field).stale_after(stale_after))
+                .write(self.id, field_drawing(captain, &self.instance.vehicle, &field).stale_after(stale_after))
                 .expect("lost writer authorization for the potential field drawing topic");
             ticker.wait();
         }
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -247,7 +250,7 @@ impl Executor for UbmPotentialField {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 

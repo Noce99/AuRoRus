@@ -125,7 +125,7 @@ struct SelectMapBody {
 pub fn select_map(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
     maps_root: &Path,
 ) -> ResponseBox {
     let body: SelectMapBody = match read_json(request) {
@@ -162,7 +162,7 @@ struct HumanVescCommandBody {
 /// `POST /api/human_vesc_command` - body `{"servo_position_rad": ...,
 /// "speed_mps": ...}` - writes a freshly timestamped [`VescCommand`] to
 /// `human_vesc_command`, e.g. from `web_gui`'s WASD control.
-pub fn human_vesc_command(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn human_vesc_command(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let body: HumanVescCommandBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -235,7 +235,7 @@ struct SelectVehicleModelBody {
 pub fn select_vehicle_model(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SelectVehicleModelBody = match read_json(request) {
         Ok(body) => body,
@@ -273,7 +273,7 @@ static VEHICLE_MODEL_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
 pub fn set_vehicle_model_parameter(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SetVehicleModelParameterBody = match read_json(request) {
         Ok(body) => body,
@@ -352,7 +352,7 @@ struct SetVehicleLimitBody {
 /// [`crate::actuators::SimulatedVehicle`] to apply whichever model is
 /// running, which reports the value in effect in `vehicle_model_status` and
 /// republishes `vehicle_limits`.
-pub fn set_vehicle_limit(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn set_vehicle_limit(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let body: SetVehicleLimitBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -405,7 +405,7 @@ pub fn save_vehicle_limits(captain: &Captain) -> ResponseBox {
 pub fn load_vehicle_model_parameters(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SaveVehicleModelParametersBody = match read_json(request) {
         Ok(body) => body,
@@ -428,7 +428,7 @@ pub fn load_vehicle_model_parameters(
 /// `POST /api/vehicle_limits_load` - asks the vehicle to run with the
 /// actuator limits the `[limits]` table of its config file holds again,
 /// undoing any unsaved tuning. Responds with the file's path.
-pub fn load_vehicle_limits(captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn load_vehicle_limits(captain: &Captain, writer_id: u16) -> ResponseBox {
     let (values, path) = match actuators::saved_vehicle_limits(&ActuatorLimits::tunable_parameters())
     {
         Ok(saved) => saved,
@@ -442,7 +442,7 @@ pub fn load_vehicle_limits(captain: &Captain, writer_id: u8) -> ResponseBox {
 /// [`VEHICLE_MODEL_PARAMETERS_LOCK`].
 fn write_vehicle_parameters(
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
     change: impl FnOnce(&mut VehicleModelParameters),
 ) {
     let _guard = VEHICLE_MODEL_PARAMETERS_LOCK
@@ -505,7 +505,7 @@ struct SelectAutonomousAlgorithmBody {
 pub fn select_autonomous_algorithm(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SelectAutonomousAlgorithmBody = match read_json(request) {
         Ok(body) => body,
@@ -565,7 +565,7 @@ static AUTONOMOUS_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
 pub fn set_autonomous_parameter(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SetAutonomousParameterBody = match read_json(request) {
         Ok(body) => body,
@@ -652,7 +652,7 @@ pub fn save_autonomous_parameters(request: &mut Request, captain: &Captain) -> R
 pub fn load_autonomous_parameters(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SaveAutonomousParametersBody = match read_json(request) {
         Ok(body) => body,
@@ -739,7 +739,7 @@ pub fn restart(captain: &Captain) -> ResponseBox {
 /// off: the vehicle jumps, and dead reckoning - whose frame the map is built
 /// in - resets with it. Localization carries on: SLAM restarts it from the
 /// start by itself when dead reckoning resets.
-pub fn place_at_start(captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn place_at_start(captain: &Captain, writer_id: u16) -> ResponseBox {
     let topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
     let requested = topic.read().requested.wrapping_add(1);
     topic
@@ -776,7 +776,7 @@ struct SlamCommandBody {
 /// `POST /api/slam_command` - body `{"state": "running" | "waiting" |
 /// "off" | "localizing" | "localization_paused"}` - writes the wanted state to `slam_command`, for
 /// [`crate::localization::Slam`] to pick up. `"off"` clears SLAM's map.
-pub fn slam_command(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn slam_command(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let body: SlamCommandBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -804,7 +804,7 @@ struct SlamSaveResponse {
 /// [`crate::localization::Slam`] to save its map as a new map folder named
 /// `name`. SLAM saves it on its next tick, and reports how it went on
 /// `slam_status`'s `last_save`, under the returned request number.
-pub fn slam_save(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn slam_save(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let body: SlamSaveBody = match read_json(request) {
         Ok(body) => body,
         Err(response) => return response,
@@ -827,7 +827,7 @@ pub fn slam_save(request: &mut Request, captain: &Captain, writer_id: u8) -> Res
 /// [`SlamCommand::clear_requested`] when it's [`SlamState::Off`] - so SLAM
 /// clears its map even if it never sees `Off` itself, e.g. when Play follows
 /// within one of its ticks.
-fn write_slam_command(captain: &Captain, writer_id: u8, state: SlamState) {
+fn write_slam_command(captain: &Captain, writer_id: u16, state: SlamState) {
     let topic = captain.topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME);
     let mut command = topic.read().into_value();
     command.state = state;
@@ -874,7 +874,7 @@ static PLANNING_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
 /// [`PLANNING_PARAMETERS_LOCK`].
 fn write_planning_parameters(
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
     change: impl FnOnce(&mut PlanningParameters),
 ) {
     let _guard = PLANNING_PARAMETERS_LOCK
@@ -902,7 +902,7 @@ struct SetPlanningParameterBody {
 pub fn set_planning_parameter(
     request: &mut Request,
     captain: &Captain,
-    writer_id: u8,
+    writer_id: u16,
 ) -> ResponseBox {
     let body: SetPlanningParameterBody = match read_json(request) {
         Ok(body) => body,
@@ -949,7 +949,7 @@ pub fn save_planning_parameters(captain: &Captain) -> ResponseBox {
 /// values its config file holds again (see [`planning::saved_values`]),
 /// undoing any unsaved tuning, by writing them to `planning_parameters`
 /// like a slider would. Responds with the file's path.
-pub fn load_planning_parameters(captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn load_planning_parameters(captain: &Captain, writer_id: u16) -> ResponseBox {
     let parameters = match planning_parameters(captain) {
         Ok(parameters) => parameters,
         Err(response) => return response,
@@ -982,7 +982,7 @@ struct PlanningStartBody {
 /// progress and outcome on `planning_status`, the outcome under the
 /// returned request number. Refused while it's already planning, or with
 /// no map selected.
-pub fn planning_start(request: &mut Request, captain: &Captain, writer_id: u8) -> ResponseBox {
+pub fn planning_start(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
     let mut text = String::new();
     if let Err(err) = request.as_reader().read_to_string(&mut text) {
         return bad_request(&format!("failed to read the request body: {err}"));

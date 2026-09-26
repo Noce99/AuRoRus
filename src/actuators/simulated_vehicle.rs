@@ -2,8 +2,8 @@
 //! [`AUTONOMOUS_VESC_COMMAND_TOPIC_NAME`], overridden by
 //! [`HUMAN_VESC_COMMAND_TOPIC_NAME`] whenever a human is driving (see
 //! [`select_command`]), publishing the result on
-//! [`VEHICLE_STATUS_TOPIC_NAME`] and its actuator limits on
-//! [`VEHICLE_LIMITS_TOPIC_NAME`]. Also watches
+//! its [`VehicleTopics::vehicle_status`] and its actuator limits on its
+//! [`VehicleTopics::vehicle_limits`]. Also watches
 //! [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] for a live model switch (e.g. from
 //! `web_gui`), publishing the currently running model on
 //! [`VEHICLE_MODEL_STATUS_TOPIC_NAME`] (along with its live-tunable
@@ -19,10 +19,10 @@ pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
     HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME,
-    Shape, StartState, VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME,
+    Shape, StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME,
     VESC_COMMAND_TIMEOUT, VehicleModelKind, VehicleModelParameters, VehicleModelSelection,
-    VehicleModelStatus, VehicleStatus, VescCommand,
+    VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Stamped, Ticker};
 use std::any::Any;
@@ -671,10 +671,12 @@ fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>)
 /// state (see [`carry_over_state`]) - whenever it no longer matches the
 /// model currently running.
 pub struct SimulatedVehicle {
-    id: u8,
+    id: u16,
     name: String,
     model: VehicleModel,
     config: SimulatedVehicleConfig,
+    /// Where its own topics (`vehicle_status`, `vehicle_limits`) live.
+    vehicle: VehicleTopics,
 }
 
 impl SimulatedVehicle {
@@ -690,18 +692,19 @@ impl SimulatedVehicle {
             name: name.into(),
             model,
             config,
+            vehicle: VehicleTopics::ego(),
         }
     }
 }
 
 impl Executor for SimulatedVehicle {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<VehicleStatus>(
-            VEHICLE_STATUS_TOPIC_NAME,
+            &self.vehicle.vehicle_status(),
             self.id,
             VehicleStatus::default,
         );
@@ -713,12 +716,14 @@ impl Executor for SimulatedVehicle {
         // Every model kind shares `config.limits`, so a model switch never
         // changes it - only live tuning does, which rewrites it.
         let limits = self.config.limits;
-        captain.claim_writer::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME, self.id, move || limits);
+        captain.claim_writer::<ActuatorLimits>(&self.vehicle.vehicle_limits(), self.id, move || {
+            limits
+        });
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let status_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
+        let status_topic = captain.topic::<VehicleStatus>(&self.vehicle.vehicle_status());
         let autonomous_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
         let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
         let model_selection_topic =
@@ -731,7 +736,7 @@ impl Executor for SimulatedVehicle {
         // without `web_gui`) - then the config stays as loaded.
         let parameters_topic =
             captain.try_topic::<VehicleModelParameters>(VEHICLE_MODEL_PARAMETERS_TOPIC_NAME);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits());
         let drawing_topic = captain.drawing(self.id);
 
         // Tuned live, so kept apart from `self.config`: a restart rereads the

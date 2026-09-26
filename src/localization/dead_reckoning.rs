@@ -99,7 +99,7 @@ const DRAWN_Z_INDEX: i32 = 11;
 /// [`PLACE_AT_START_TOPIC_NAME`] is bumped, the same events
 /// [`crate::actuators::SimulatedVehicle`] places the vehicle on.
 pub struct DeadReckoning {
-    id: u8,
+    id: u16,
     name: String,
     config: DeadReckoningConfig,
 }
@@ -115,7 +115,7 @@ impl DeadReckoning {
 }
 
 impl Executor for DeadReckoning {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

@@ -4,7 +4,7 @@ use aurorus::{Captain, Executor, Ticker};
 use std::any::Any;
 
 pub struct Reader {
-    pub id: u8,
+    pub id: u16,
     pub rate_hz: f64,
     pub name: String,
 }
@@ -20,7 +20,7 @@ impl Reader {
 }
 
 impl Executor for Reader {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id
     }
     fn run(&mut self, captain: &Captain) {

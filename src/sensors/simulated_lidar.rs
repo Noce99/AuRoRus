@@ -7,8 +7,7 @@
 use super::simulated_imu::gaussian;
 use crate::environment::MapInfo;
 use crate::topics::{
-    Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleStatus,
+    Color, Drawing, LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use rand::rngs::StdRng;
@@ -47,16 +46,21 @@ impl Default for SimulatedLidarConfig {
     }
 }
 
-/// A synthetic LIDAR sensor: claims [`LIDAR_SCAN_TOPIC_NAME`] and publishes a
+/// A synthetic LIDAR sensor: claims its vehicle's
+/// [`VehicleTopics::lidar_scan`] and publishes a
 /// [`LidarScan`] built by raycasting [`SimulatedLidarConfig::num_points`]
 /// rays - equally spaced across [`SimulatedLidarConfig::fov_rad`], centered
 /// on the vehicle's forward direction - against the map published on
 /// [`MAP_TOPIC_NAME`], from the position published on
-/// [`VEHICLE_STATUS_TOPIC_NAME`], at [`SimulatedLidarConfig::rate_hz`].
+/// its vehicle's [`VehicleTopics::vehicle_status`], at
+/// [`SimulatedLidarConfig::rate_hz`].
 pub struct SimulatedLidar {
-    id: u8,
+    id: u16,
     name: String,
     config: SimulatedLidarConfig,
+    /// Where the vehicle it's mounted on publishes its pose, and where its
+    /// scans go.
+    vehicle: VehicleTopics,
 }
 
 impl SimulatedLidar {
@@ -65,18 +69,19 @@ impl SimulatedLidar {
             id: 0,
             name: name.into(),
             config,
+            vehicle: VehicleTopics::ego(),
         }
     }
 }
 
 impl Executor for SimulatedLidar {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let config = self.config;
-        captain.claim_writer::<LidarScan>(LIDAR_SCAN_TOPIC_NAME, self.id, move || {
+        captain.claim_writer::<LidarScan>(&self.vehicle.lidar_scan(), self.id, move || {
             LidarScan::new(
                 Vec::new(),
                 Vec::new(),
@@ -89,8 +94,8 @@ impl Executor for SimulatedLidar {
     }
 
     fn run(&mut self, captain: &Captain) {
-        let lidar_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
-        let vehicle_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
+        let lidar_topic = captain.topic::<LidarScan>(&self.vehicle.lidar_scan());
+        let vehicle_topic = captain.topic::<VehicleStatus>(&self.vehicle.vehicle_status());
         let map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
         // Three missed scans in a row - but never tighter than the default, so

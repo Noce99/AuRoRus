@@ -10,10 +10,10 @@
 use crate::autonomous_control::shared::reactive::{
     fov_window, ray, ray_step_rad, scan_origin, speed_proportional_steering, world_point,
 };
-use crate::autonomous_control::{ParameterTuner, load_config};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LIDAR_SCAN_TOPIC_NAME,
-    LidarScan, Shape, VEHICLE_LIMITS_TOPIC_NAME, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
+    Shape, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -21,11 +21,11 @@ use std::ops::Range;
 use std::time::Duration;
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
+pub fn new(instance: Instance) -> Box<dyn Executor> {
     Box::new(UbmDisparityExtender {
         id: 0,
-        name: name.to_string(),
-        config: load_config(name),
+        config: load_config(&instance.config_name),
+        instance,
     })
 }
 
@@ -110,34 +110,36 @@ fn parameters() -> [AlgorithmParameter; 11] {
 }
 
 struct UbmDisparityExtender {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     config: UbmDisparityExtenderConfig,
 }
 
 impl Executor for UbmDisparityExtender {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
+            &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
                 "UBM Disparity extender",
                 "Extends the edges of obstacles by the car's width, then steers toward the farthest reading",
             )
+            .requires_lidar()
             .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
-        let scan_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
-        let mut tuner = ParameterTuner::new(captain, self.id);
+        let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
         // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
@@ -161,7 +163,7 @@ impl Executor for UbmDisparityExtender {
                 .expect("lost writer authorization for this algorithm's command topic");
 
             let mut drawing = Drawing::default();
-            if let Some(origin) = scan_origin(captain) {
+            if let Some(origin) = scan_origin(captain, &self.instance.vehicle) {
                 let processed = control
                     .window
                     .clone()
@@ -187,7 +189,7 @@ impl Executor for UbmDisparityExtender {
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -195,7 +197,7 @@ impl Executor for UbmDisparityExtender {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 

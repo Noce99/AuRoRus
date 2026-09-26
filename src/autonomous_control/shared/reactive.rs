@@ -9,7 +9,7 @@
 //! steered to as is.
 
 use crate::autonomous_control::shared::race_line::Pose;
-use crate::topics::{Color, LidarScan, Shape, VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+use crate::topics::{Color, LidarScan, Shape, VehicleStatus, VehicleTopics};
 use crate::Captain;
 use std::ops::Range;
 
@@ -282,11 +282,12 @@ pub(crate) fn potential_field(
     Some(field)
 }
 
-/// Where the scan was taken from, for drawing: the simulator's ground truth
-/// (which the simulated LIDAR casts from), if there is one.
-pub(crate) fn scan_origin(captain: &Captain) -> Option<Pose> {
+/// Where the scan of the vehicle whose topics are `vehicle` was taken from,
+/// for drawing: the simulator's ground truth (which the simulated LIDAR casts
+/// from), if there is one.
+pub(crate) fn scan_origin(captain: &Captain, vehicle: &VehicleTopics) -> Option<Pose> {
     let status = captain
-        .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)?
+        .try_topic::<VehicleStatus>(&vehicle.vehicle_status())?
         .read();
     status.meta.written_at?;
     Some(Pose {

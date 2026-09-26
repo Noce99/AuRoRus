@@ -16,14 +16,15 @@ mod start_state;
 mod vehicle_limits;
 mod vehicle_model;
 mod vehicle_status;
+mod vehicle_topics;
 mod vesc_command;
 
 pub use autonomous_control::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmInfo,
-    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
-    AvailableAlgorithm, ParameterKind,
+    AlgorithmRequirements, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
+    AutonomousParameters, AvailableAlgorithm, ParameterKind,
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, DrawingElement, Shape};
 pub use imu::{IMU_TOPIC_NAME, ImuReading};
@@ -51,6 +52,7 @@ pub use vehicle_model::{
     VehicleModelSelection, VehicleModelStatus,
 };
 pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
+pub use vehicle_topics::{AlgorithmTopics, OPPONENT_TOPIC_PREFIX, VehicleTopics};
 pub use vesc_command::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
     VescCommand,

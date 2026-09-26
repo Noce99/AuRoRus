@@ -3,7 +3,7 @@ use aurorus::{Captain, Executor, Ticker};
 use std::any::Any;
 
 pub struct Lidar {
-    pub id: u8,
+    pub id: u16,
     pub rate_hz: f64,
     pub name: String,
 }
@@ -19,7 +19,7 @@ impl Lidar {
 }
 
 impl Executor for Lidar {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id
     }
     fn claim_writing_topics(&mut self, captain: &Captain) {

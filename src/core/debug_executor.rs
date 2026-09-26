@@ -35,7 +35,7 @@ const RATE_WARNING_COOLDOWN: Duration = Duration::from_secs(10);
 /// as a topic's writer itself - it therefore never records itself, with no special
 /// casing needed.
 pub(crate) struct DebugExecutor {
-    id: u8,
+    id: u16,
     path: PathBuf,
     frequency_hz: f64,
     /// `false` for the original instance [`crate::Runner::debug_mode`] creates
@@ -57,7 +57,7 @@ impl DebugExecutor {
 }
 
 impl Executor for DebugExecutor {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

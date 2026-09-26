@@ -220,7 +220,7 @@ fn start_state(map: &Map) -> StartState {
 /// published map's, and to the newest one whenever
 /// [`PLANNING_STATUS_TOPIC_NAME`] reports one saved for it.
 pub struct MapServer {
-    id: u8,
+    id: u16,
     name: String,
     config: MapServerConfig,
 }
@@ -236,7 +236,7 @@ impl MapServer {
 }
 
 impl Executor for MapServer {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 

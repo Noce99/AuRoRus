@@ -4,8 +4,7 @@
 
 use crate::environment::SpeedPoint;
 use crate::topics::{
-    ODOMETRY_TOPIC_NAME, Odometry, SLAM_STATUS_TOPIC_NAME, SlamState, SlamStatus,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleStatus,
+    Odometry, SLAM_STATUS_TOPIC_NAME, SlamState, SlamStatus, VehicleStatus, VehicleTopics,
 };
 use crate::Captain;
 use std::f64::consts::PI;
@@ -19,12 +18,12 @@ pub(crate) const POSE_LOCALIZATION: u8 = 0;
 /// A `pose_source` value: the simulator's `vehicle_status`.
 pub(crate) const POSE_GROUND_TRUTH: u8 = 1;
 
-/// The pose from `source` ([`POSE_LOCALIZATION`] or [`POSE_GROUND_TRUTH`]),
-/// or why there's none.
-pub(crate) fn pose(captain: &Captain, source: u8) -> Result<Pose, String> {
+/// The pose of the vehicle whose topics are `vehicle` from `source`
+/// ([`POSE_LOCALIZATION`] or [`POSE_GROUND_TRUTH`]), or why there's none.
+pub(crate) fn pose(captain: &Captain, vehicle: &VehicleTopics, source: u8) -> Result<Pose, String> {
     match source {
-        POSE_LOCALIZATION => localization_pose(captain),
-        POSE_GROUND_TRUTH => ground_truth_pose(captain),
+        POSE_LOCALIZATION => localization_pose(captain, vehicle),
+        POSE_GROUND_TRUTH => ground_truth_pose(captain, vehicle),
         // Unreachable when tuned: the tuner keeps it in range.
         _ => Err(format!("Unknown pose source {source}.")),
     }
@@ -62,9 +61,9 @@ impl Pose {
 }
 
 /// The simulator's ground truth, if fresh - else why not.
-pub(crate) fn ground_truth_pose(captain: &Captain) -> Result<Pose, String> {
+pub(crate) fn ground_truth_pose(captain: &Captain, vehicle: &VehicleTopics) -> Result<Pose, String> {
     let status = captain
-        .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)
+        .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
         .ok_or("No ground truth pose (vehicle_status) in this binary.")?
         .read();
     if status.age().is_none_or(|age| age > POSE_TIMEOUT) {
@@ -81,7 +80,9 @@ pub(crate) fn ground_truth_pose(captain: &Captain) -> Result<Pose, String> {
 /// the map at odometry's rate - while SLAM is localizing (not paused, where
 /// the pose would only be dead-reckoned), odometry is fresh, and both agree
 /// on odometry's frame - else why not.
-pub(crate) fn localization_pose(captain: &Captain) -> Result<Pose, String> {
+/// There's only the ego vehicle's localization (`slam_status`): an opponent's
+/// algorithm uses [`POSE_GROUND_TRUTH`] instead.
+pub(crate) fn localization_pose(captain: &Captain, vehicle: &VehicleTopics) -> Result<Pose, String> {
     let slam = captain
         .try_topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME)
         .ok_or("No localization (slam_status) in this binary.")?
@@ -94,7 +95,7 @@ pub(crate) fn localization_pose(captain: &Captain) -> Result<Pose, String> {
         .map_to_odom
         .ok_or("Localization has no pose yet.")?;
     let odometry = captain
-        .try_topic::<Odometry>(ODOMETRY_TOPIC_NAME)
+        .try_topic::<Odometry>(&vehicle.odometry())
         .ok_or("No odometry in this binary.")?
         .read();
     if odometry.age().is_none_or(|age| age > POSE_TIMEOUT) {
@@ -251,17 +252,18 @@ impl Line {
     }
 }
 
-/// The vehicle's speed from `source` ([`POSE_LOCALIZATION`]: odometry's,
-/// [`POSE_GROUND_TRUTH`]: the simulator's), or why there's none.
-pub(crate) fn speed(captain: &Captain, source: u8) -> Result<f64, String> {
+/// The speed of the vehicle whose topics are `vehicle` from `source`
+/// ([`POSE_LOCALIZATION`]: odometry's, [`POSE_GROUND_TRUTH`]: the
+/// simulator's), or why there's none.
+pub(crate) fn speed(captain: &Captain, vehicle: &VehicleTopics, source: u8) -> Result<f64, String> {
     match source {
         POSE_LOCALIZATION => Ok(captain
-            .try_topic::<Odometry>(ODOMETRY_TOPIC_NAME)
+            .try_topic::<Odometry>(&vehicle.odometry())
             .ok_or("No odometry in this binary.")?
             .read()
             .speed_mps),
         POSE_GROUND_TRUTH => Ok(captain
-            .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)
+            .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
             .ok_or("No ground truth pose (vehicle_status) in this binary.")?
             .read()
             .speed_mps),

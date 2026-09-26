@@ -4,9 +4,8 @@
 use crate::core::log::LogColor;
 use crate::core::topic::{RwLockTopic, WriteMeta};
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX,
-    AUTONOMOUS_CONTROL_TOPIC_PREFIX, AutonomousAlgorithmInfo, AutonomousAlgorithmSelection,
-    DRAW_TOPIC_PREFIX, Drawing, VescCommand,
+    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AlgorithmTopics, AutonomousAlgorithmInfo,
+    AutonomousAlgorithmSelection, DRAW_TOPIC_PREFIX, Drawing, VescCommand,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -26,7 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) trait DebugTopic: Send + Sync {
     /// See [`RwLockTopic::writer`]. Named identically on purpose - there's no ambiguity in practice,
     /// since this is only ever called through `Arc<dyn DebugTopic>`, never on a concrete `RwLockTopic<T>`.
-    fn writer(&self) -> Option<u8>;
+    fn writer(&self) -> Option<u16>;
     /// See [`RwLockTopic::meta`] - lets [`crate::core::debug_executor::DebugExecutor`] tell whether
     /// anything new was written without encoding the value.
     fn meta(&self) -> WriteMeta;
@@ -63,7 +62,7 @@ impl Write for LimitedWriter {
 }
 
 impl<T: Clone + Send + Sync + Serialize + 'static> DebugTopic for RwLockTopic<T> {
-    fn writer(&self) -> Option<u8> {
+    fn writer(&self) -> Option<u16> {
         RwLockTopic::writer(self)
     }
 
@@ -132,8 +131,10 @@ pub struct Captain {
     /// without knowing each one's concrete type.
     debug_topics: RwLock<HashMap<String, Arc<dyn DebugTopic>>>,
     running: AtomicBool,
-    executor_running: [AtomicBool; 256],
-    names: Mutex<HashMap<u8, String>>,
+    /// One flag per possible executor id - indexed directly, so the check every
+    /// executor makes each tick in [`is_running`](Self::is_running) stays lock-free.
+    executor_running: Box<[AtomicBool]>,
+    names: Mutex<HashMap<u16, String>>,
     verbose: AtomicBool,
     restart_requested: AtomicBool,
     /// See [`epoch`](Self::epoch).
@@ -147,7 +148,7 @@ impl Captain {
             topics: RwLock::new(HashMap::new()),
             debug_topics: RwLock::new(HashMap::new()),
             running: AtomicBool::new(true),
-            executor_running: std::array::from_fn(|_| AtomicBool::new(true)),
+            executor_running: (0..=u16::MAX).map(|_| AtomicBool::new(true)).collect(),
             names: Mutex::new(HashMap::new()),
             verbose: AtomicBool::new(false),
             restart_requested: AtomicBool::new(false),
@@ -209,14 +210,14 @@ impl Captain {
     /// name it in a diagnostic without the caller having to pass it every time.
     /// Called by [`crate::Runner`] once per (re)spawned executor, before its
     /// thread starts.
-    pub(crate) fn set_name(&self, id: u8, name: String) {
+    pub(crate) fn set_name(&self, id: u16, name: String) {
         self.names.lock().unwrap().insert(id, name);
     }
 
     /// The name previously recorded for `id` via [`set_name`](Self::set_name), or
     /// a placeholder if none was (which shouldn't happen for any id an executor
     /// is actually running under).
-    pub(crate) fn name_of(&self, id: u8) -> String {
+    pub(crate) fn name_of(&self, id: u16) -> String {
         self.names
             .lock()
             .unwrap()
@@ -308,7 +309,7 @@ impl Captain {
 
     /// The name of `executor_id`'s drawing topic: [`DRAW_TOPIC_PREFIX`] followed by the
     /// executor's name, e.g. `draw/SimulatedVehicle`.
-    fn drawing_topic_name(&self, executor_id: u8) -> String {
+    fn drawing_topic_name(&self, executor_id: u16) -> String {
         format!("{DRAW_TOPIC_PREFIX}{}", self.name_of(executor_id))
     }
 
@@ -317,7 +318,7 @@ impl Captain {
     /// from [`crate::Executor::claim_writing_topics`] like any other
     /// [`claim_writer`](Self::claim_writer), then get the handle back in
     /// [`crate::Executor::run`] via [`drawing`](Self::drawing).
-    pub fn claim_drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
+    pub fn claim_drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
         self.claim_writer::<Drawing>(
             &self.drawing_topic_name(executor_id),
             executor_id,
@@ -328,62 +329,54 @@ impl Captain {
     /// `executor_id`'s own [`Drawing`] topic, previously claimed via
     /// [`claim_drawing`](Self::claim_drawing). Terminates the program, like
     /// [`topic`](Self::topic), if it wasn't.
-    pub fn drawing(&self, executor_id: u8) -> Arc<RwLockTopic<Drawing>> {
+    pub fn drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
         self.topic::<Drawing>(&self.drawing_topic_name(executor_id))
     }
 
-    /// Claims `executor_id`'s own autonomous command topic -
-    /// [`AUTONOMOUS_CONTROL_TOPIC_PREFIX`] followed by the executor's name, e.g.
-    /// `autonomous_control/always_left` - seeded with a stationary, centered command, plus its
-    /// [`AutonomousAlgorithmInfo`] topic ([`AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX`] followed by the
-    /// same name), written with `info` right away since it never changes. What makes an executor an
+    /// Claims an autonomous algorithm instance's own `topics` for `executor_id`: its command
+    /// topic, seeded with a stationary, centered command, plus its [`AutonomousAlgorithmInfo`]
+    /// topic, written with `info` right away. For the ego vehicle (see
+    /// [`crate::topics::VehicleTopics::algorithm`]) these are
+    /// [`crate::topics::AUTONOMOUS_CONTROL_TOPIC_PREFIX`] and
+    /// [`crate::topics::AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX`] followed by
+    /// the algorithm's name, e.g. `autonomous_control/always_left` - what makes an executor an
     /// autonomous algorithm that [`crate::autonomous_control::AutonomousControlsHandler`] can pick -
     /// see [`crate::autonomous_control`]. Call it from [`crate::Executor::claim_writing_topics`],
     /// then get the command topic back in [`crate::Executor::run`] via
     /// [`autonomous_control`](Self::autonomous_control).
     pub fn claim_autonomous_control(
         &self,
-        executor_id: u8,
+        executor_id: u16,
+        topics: &AlgorithmTopics,
         info: AutonomousAlgorithmInfo,
     ) -> Arc<RwLockTopic<VescCommand>> {
-        let name = self.name_of(executor_id);
         let info_topic = self.claim_writer::<AutonomousAlgorithmInfo>(
-            &format!("{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{name}"),
+            &topics.info,
             executor_id,
             AutonomousAlgorithmInfo::default,
         );
         info_topic
             .write(executor_id, info)
             .expect("claim_writer just made this executor the info topic's writer");
-        self.claim_writer::<VescCommand>(
-            &format!("{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{name}"),
-            executor_id,
-            VescCommand::default,
-        )
+        self.claim_writer::<VescCommand>(&topics.command, executor_id, VescCommand::default)
     }
 
-    /// `executor_id`'s own autonomous command topic, previously claimed via
+    /// An algorithm instance's command topic, previously claimed via
     /// [`claim_autonomous_control`](Self::claim_autonomous_control). Terminates the program, like
     /// [`topic`](Self::topic), if it wasn't.
-    pub fn autonomous_control(&self, executor_id: u8) -> Arc<RwLockTopic<VescCommand>> {
-        self.topic::<VescCommand>(&format!(
-            "{AUTONOMOUS_CONTROL_TOPIC_PREFIX}{}",
-            self.name_of(executor_id)
-        ))
+    pub fn autonomous_control(&self, topics: &AlgorithmTopics) -> Arc<RwLockTopic<VescCommand>> {
+        self.topic::<VescCommand>(&topics.command)
     }
 
-    /// `executor_id`'s own [`AutonomousAlgorithmInfo`] topic, previously claimed via
+    /// An algorithm instance's [`AutonomousAlgorithmInfo`] topic, previously claimed via
     /// [`claim_autonomous_control`](Self::claim_autonomous_control) - for rewriting its parameters'
     /// values (see [`crate::autonomous_control::ParameterTuner`]). Terminates the program, like
     /// [`topic`](Self::topic), if it wasn't.
     pub fn autonomous_control_info(
         &self,
-        executor_id: u8,
+        topics: &AlgorithmTopics,
     ) -> Arc<RwLockTopic<AutonomousAlgorithmInfo>> {
-        self.topic::<AutonomousAlgorithmInfo>(&format!(
-            "{AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX}{}",
-            self.name_of(executor_id)
-        ))
+        self.topic::<AutonomousAlgorithmInfo>(&topics.info)
     }
 
     /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
@@ -406,7 +399,7 @@ impl Captain {
     fn topic_or_register<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         name: &str,
-        executor_id: u8,
+        executor_id: u16,
         initial: impl FnOnce() -> T,
     ) -> Arc<RwLockTopic<T>> {
         if let Some(existing) = self.topics.read().unwrap().get(name) {
@@ -468,7 +461,7 @@ impl Captain {
     pub fn claim_writer<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
         &self,
         topic_name: &str,
-        executor_id: u8,
+        executor_id: u16,
         initial: impl FnOnce() -> T,
     ) -> Arc<RwLockTopic<T>> {
         let topic = self.topic_or_register::<T>(topic_name, executor_id, initial);
@@ -494,7 +487,7 @@ impl Captain {
     /// [`switch_executor`]-driven swap).
     ///
     /// [`switch_executor`]: crate::Runner::switch_executor
-    pub fn is_running(&self, id: u8) -> bool {
+    pub fn is_running(&self, id: u16) -> bool {
         self.running.load(Ordering::Relaxed)
             && self.executor_running[id as usize].load(Ordering::Relaxed)
     }
@@ -525,14 +518,14 @@ impl Captain {
 
     /// Signals just the executor running under `id` to stop, leaving every other
     /// executor unaffected.
-    pub(crate) fn stop_executor(&self, id: u8) {
+    pub(crate) fn stop_executor(&self, id: u16) {
         self.executor_running[id as usize].store(false, Ordering::Relaxed);
     }
 
     /// Clears a prior [`stop_executor`](Self::stop_executor) signal for `id`, so a
     /// newly (re)started executor with that id sees [`is_running`](Self::is_running)
     /// as true again.
-    pub(crate) fn resume_executor(&self, id: u8) {
+    pub(crate) fn resume_executor(&self, id: u16) {
         self.executor_running[id as usize].store(true, Ordering::Relaxed);
     }
 }

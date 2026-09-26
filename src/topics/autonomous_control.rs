@@ -48,6 +48,20 @@ pub struct AutonomousAlgorithmInfo {
     /// holding the vehicle stopped - `None` if nothing. Set with
     /// [`crate::autonomous_control::report_message`].
     pub message: Option<String>,
+    /// What the algorithm needs to drive at all.
+    #[serde(default)]
+    pub requires: AlgorithmRequirements,
+}
+
+/// What an autonomous algorithm needs besides the vehicle's pose - e.g. so an
+/// opponent is only spawned with a race line, and a lidar, when its
+/// algorithm uses them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AlgorithmRequirements {
+    /// Follows the vehicle's race line.
+    pub race_line: bool,
+    /// Reads the vehicle's lidar scans.
+    pub lidar: bool,
 }
 
 impl AutonomousAlgorithmInfo {
@@ -57,7 +71,20 @@ impl AutonomousAlgorithmInfo {
             description: description.into(),
             parameters: Vec::new(),
             message: None,
+            requires: AlgorithmRequirements::default(),
         }
+    }
+
+    /// Declares that the algorithm follows the vehicle's race line.
+    pub fn requires_race_line(mut self) -> Self {
+        self.requires.race_line = true;
+        self
+    }
+
+    /// Declares that the algorithm reads the vehicle's lidar scans.
+    pub fn requires_lidar(mut self) -> Self {
+        self.requires.lidar = true;
+        self
     }
 
     /// Declares `parameters` as tunable, taking each one's current value from
@@ -203,6 +230,8 @@ pub struct AvailableAlgorithm {
     pub parameters: Vec<AlgorithmParameter>,
     /// See [`AutonomousAlgorithmInfo::message`].
     pub message: Option<String>,
+    /// See [`AutonomousAlgorithmInfo::requires`].
+    pub requires: AlgorithmRequirements,
 }
 
 /// What [`crate::autonomous_control::AutonomousControlsHandler`] is

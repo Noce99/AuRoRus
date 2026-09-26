@@ -11,23 +11,24 @@
 //! and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
-use crate::autonomous_control::shared::race_line::{Line, Nearest, Pose, pose, speed, wrap_to_pi};
-use crate::autonomous_control::{ParameterTuner, load_config, report_message};
+use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, RACE_LINE_TOPIC_NAME,
-    SelectedRaceLine, Shape, VEHICLE_LIMITS_TOPIC_NAME, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing,
+    SelectedRaceLine, Shape, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::{Duration, Instant};
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
-    Box::new(UbmPathFollower {
-        id: 0,
-        name: name.to_string(),
-        config: load_config(name),
-    })
+pub fn new(instance: Instance) -> Box<dyn Executor> {
+    let mut config: UbmPathFollowerConfig = load_config(&instance.config_name);
+    // An opponent has no localization of its own - see `Instance::opponent`.
+    if instance.is_opponent() {
+        config.pose_source = POSE_GROUND_TRUTH;
+    }
+    Box::new(UbmPathFollower { id: 0, instance, config })
 }
 
 /// [`UbmPathFollowerConfig::controller`]: PD on the heading error toward the lookahead point.
@@ -170,33 +171,35 @@ fn parameters() -> [AlgorithmParameter; 21] {
 }
 
 struct UbmPathFollower {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     config: UbmPathFollowerConfig,
 }
 
 impl Executor for UbmPathFollower {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_autonomous_control(
             self.id,
+            &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
                 "UBM Path Follower",
                 "Follows the race line with a PD, P-enhanced or Stanley steering law, plus feedforward",
             )
+            .requires_race_line()
             .with_parameters(&self.config, parameters()),
         );
         captain.claim_drawing(self.id);
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
         let drawing_topic = captain.drawing(self.id);
-        let mut tuner = ParameterTuner::new(captain, self.id);
+        let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
         // Both derive from `rate_hz`, so are rebuilt whenever it's tuned.
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
@@ -215,7 +218,7 @@ impl Executor for UbmPathFollower {
             }
 
             // Nothing may publish a race line at all (e.g. a binary without `MapServer`).
-            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(RACE_LINE_TOPIC_NAME) {
+            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line()) {
                 let write_count = topic.meta().write_count;
                 if line.as_ref().is_none_or(|(seen, _)| *seen != write_count) {
                     line = Some((write_count, Line::new(topic.read().into_value().points)));
@@ -224,8 +227,8 @@ impl Executor for UbmPathFollower {
                 }
             }
             let line = line.as_ref().and_then(|(_, line)| line.as_ref());
-            let pose = pose(captain, self.config.pose_source)
-                .and_then(|pose| Ok((pose, speed(captain, self.config.pose_source)?)));
+            let pose = pose(captain, &self.instance.vehicle, self.config.pose_source)
+                .and_then(|pose| Ok((pose, speed(captain, &self.instance.vehicle, self.config.pose_source)?)));
 
             // A stationary command, and why, unless following the line.
             let stopped = |why: String| (VescCommand::new(0.0, 0.0), Drawing::default(), Some(why));
@@ -256,7 +259,7 @@ impl Executor for UbmPathFollower {
                 }
             };
 
-            report_message(captain, self.id, message);
+            report_message(captain, self.id, &self.instance, message);
             command_topic
                 .write(self.id, command)
                 .expect("lost writer authorization for this algorithm's command topic");
@@ -268,7 +271,7 @@ impl Executor for UbmPathFollower {
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -276,7 +279,7 @@ impl Executor for UbmPathFollower {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 
