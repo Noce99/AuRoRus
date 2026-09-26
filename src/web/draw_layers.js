@@ -113,8 +113,35 @@ window.DrawLayers = (() => {
      *  it back keeps which of its elements were shown. */
     const elementChoices = new Map();
 
+    /** Topics whose elements all show until the user unticks one,
+     *  whatever their drawing's `visible_by_default` says - see `focus`. */
+    const shownByDefault = new Set();
+
     function isElementShown(topic, name, visibleByDefault) {
-      return elementChoices.get(elementKey(topic, name)) ?? visibleByDefault;
+      return elementChoices.get(elementKey(topic, name)) ?? (shownByDefault.has(topic) || visibleByDefault);
+    }
+
+    /** Shows `topic` (every element of it, until the user unticks one) and
+     *  hides every other topic of `group` - e.g. the drawings of every
+     *  autonomous algorithm but the selected one. Forgets what the user
+     *  ticked or unticked in `group` before. `topic` may be null (hide the
+     *  whole group), and a topic needn't be drawing yet: the choice is kept
+     *  by name, like the user's. */
+    function focus(topic, group) {
+      for (const member of group) {
+        for (const key of [...elementChoices.keys()]) {
+          if (key.startsWith(`${member}\n`)) elementChoices.delete(key);
+        }
+        if (member === topic) {
+          hidden.delete(member);
+          shownByDefault.add(member);
+        } else {
+          hidden.add(member);
+          shownByDefault.delete(member);
+        }
+      }
+      if (listEl) renderList();
+      MapView.requestRedraw();
     }
 
     /** Topics whose entry in the list is open. */
@@ -492,7 +519,7 @@ window.DrawLayers = (() => {
 
     if (listEl) renderList();
 
-    return { poll, layersAt, worldBounds, homeTarget, speedMps, isAnimating, renderFreshness };
+    return { poll, layersAt, worldBounds, homeTarget, speedMps, isAnimating, renderFreshness, focus };
   }
 
   return { create };

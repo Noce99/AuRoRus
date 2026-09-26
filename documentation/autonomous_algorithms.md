@@ -54,6 +54,13 @@ flowchart LR
   **Pause** takes control back. Switching algorithms while running hands
   control straight to the new one, and switching while paused keeps it
   paused.
+- **Drawings follow the selection.** Every algorithm publishes its drawing
+  (`draw/<name>`) with all elements `visible_by_default = false`, so a page
+  that knows nothing about algorithms shows none of them. `web_gui` shows
+  the selected algorithm's drawing (every element) and hides every other
+  algorithm's, each time the selection changes (see `focus` in
+  `src/web/draw_layers.js`). Between changes, the Layers list is yours to
+  tick and untick. The next selection change resets it.
 - **`build.rs`** scans `src/autonomous_control/*.rs` at compile time. It
   generates one `mod` per file plus `autonomous_control::all()`, which returns
   one executor per file. `web_gui`'s `main.rs` adds everything `all()`
@@ -145,6 +152,7 @@ impl Executor for PurePursuit {
             AutonomousAlgorithmInfo::new("Pure pursuit", "Follows the race line with pure pursuit."),
         );
         // Optional: shapes to show on the map (e.g. the planned path) - see topics/drawing.rs.
+        // Publish its elements with `visible_by_default = false`: web_gui shows them while it's selected.
         // captain.claim_drawing(self.id);
     }
 
@@ -344,6 +352,120 @@ The drawing shows:
   `lookahead_gain_s` or `lookahead_min_m`.
 - If it cuts corners, shorten the lookahead.
 
+## Reactive algorithms
+
+`ubm_disparity_extender.rs`, `ubm_potential_field.rs` and `ubm_potential_pursuit.rs` are
+ported from ubm's `simple_control_algos`, hence the `ubm_` prefix on their
+names (topics `autonomous_control/ubm_…`, configs
+`config/autonomous_control/ubm_….toml`) and "UBM" in their labels in
+`web_gui`. The first two need only the LIDAR
+scan (`lidar_scan`), with no map and no pose. Their building blocks (FOV
+window, speed laws, potential field, drawing helpers) live in
+`src/autonomous_control/shared/reactive.rs`.
+
+All three share these conventions:
+
+- **Angles** are in the sensor frame: 0 is straight ahead, and positive is
+  toward increasing heading (right, on screen). That is the same convention
+  as `servo_position_rad`, so a direction in the scan is steered to as is.
+  ubm ran on ROS, where angles grow to the left, so "left" in ubm's
+  parameters means negative angles here.
+- **`desired_fov_deg`** is clamped to the LIDAR's field of view (ubm
+  refused a FOV at least as wide as the sensor's).
+- **Speed** falls linearly from `max_speed` when driving straight to
+  `min_speed` at full lock (`vehicle_limits.max_steering_angle_rad`). The
+  result is clamped to the vehicle's `max_speed_mps`.
+- **Flags** are `int` parameters: 0 means off and 1 means on.
+- **The drawing** is placed with the simulator's `vehicle_status`, which the
+  simulated LIDAR casts from. Without it, nothing is drawn, but the
+  algorithm still drives.
+
+### UBM Disparity extender
+
+Based on [Nathan Otterness' write-up](https://www.nathanotterness.com/2019/04/the-disparity-extender-algorithm-and.html).
+Each tick:
+
+1. Readings are clipped to `max_range_m`.
+2. **Disparities.** Two neighbouring readings in the FOV further apart than
+   `disparity_threshold_m` are a disparity. Take the nearer one, at distance
+   `d`. It overwrites (where it's nearer) `round(atan(car_width_m/2 / d) / Δθ) · r_multiplier`
+   readings on the farther side, starting from the farther reading. Those
+   are the readings the car would clip if it aimed there.
+3. **Target.**
+   - With `ray_eq_thr_m = 0`, it is the farthest reading. Ties go to
+     `angle_priority` (0 = negative/left, 1 = right).
+   - Otherwise, every reading within `ray_eq_thr_m` of the farthest is
+     equally good, and the one nearest to straight ahead wins. Readings
+     within `angle_eq_thr_rad` of that one tie, and `angle_priority` picks
+     among them.
+4. Steering is the target's angle.
+
+The drawing shows the extended ranges in green and the chosen direction in
+purple.
+
+### UBM Potential field
+
+Based on "A Real-Time Obstacle Avoidance Method for Autonomous Vehicles
+Using an Obstacle-Dependent Gaussian Potential Field"
+([doi:10.1155/2018/5041401](https://doi.org/10.1155/2018/5041401)). Each tick:
+
+1. **Obstacles.** An obstacle is a run of readings nearer than
+   `obstacle_threshold_gain` × the mean reading in the FOV. A run is entered
+   below the threshold − `hysteresis_m` and left above it + `hysteresis_m`.
+   Single readings are dropped as noise.
+2. **Repulsion.** Each obstacle adds a Gaussian centred on it:
+   - its spread is `σ = atan2(d·tan(φ/2) + car_width_m/2, d)`, where `φ` is
+     the obstacle's angular width and `d` its mean distance;
+   - its height is `(farthest reading − d)·√e`.
+   The sum is sampled every `field_resolution_deg` and normalized to a peak
+   of 1.
+3. **Attraction.** `attractive_power · |cell − attractive cell| / cells` is
+   added. The attractive cell is the direction of the longest reading.
+4. **Choice.** The chosen cell is a strict local minimum of the field
+   (plus the global minimum if `include_global_minima`). It is the lowest
+   one, or the one nearest the attractive cell if
+   `use_minima_near_attractive`. If there is no minimum, the attractive
+   cell is used.
+5. **Steering** is `steering_gain ×` the chosen direction.
+6. **Speed.** With `use_speed_distance_gains`, the speed also gains
+   `speed_distance_gain × mean(front)` and loses `brake_gain / mean(front)`,
+   where `front` is the readings within `front_fov_deg` straight ahead.
+
+The drawing shows:
+- the obstacles as red sectors, each as wide as its `±σ`;
+- the field as an amber polar curve, farther out where the potential is
+  higher;
+- the chosen direction in purple.
+
+The obstacle threshold is relative to the mean reading. A scan where every
+reading is nearly equal (e.g. a round room) therefore holds no obstacles.
+On a track, the walls beside the car are the obstacles.
+
+### UBM Potential pursuit
+
+This is the potential field, attracted toward
+`(1 − max_distance_weight) ·` the pursuit direction `+ max_distance_weight ·`
+the longest reading's direction.
+
+- The pursuit point is on the selected map's race line, the same one
+  `pure_pursuit` follows. It is `max(min_look_ahead_m, look_ahead_gain_s · v_ref)`
+  metres ahead of the nearest point.
+- The nearest-point search is windowed after the first tick, as in
+  `pure_pursuit`.
+- The pose comes from `pose_source` (0 = localization, 1 = ground truth).
+  The code for this is shared with `pure_pursuit` in
+  `src/autonomous_control/shared/race_line.rs`.
+
+**The vehicle is held stopped**, with the reason in the panel, in any of
+these cases:
+- there is no race line;
+- there is no trustworthy pose;
+- there is no LIDAR scan;
+- the car is farther than `max_cross_track_m` from the line.
+
+The drawing is the potential field's, plus the nearest point (blue) and the
+pursuit point (green).
+
 ## Conventions and pitfalls
 
 - **Publish at least once per second.** The handler treats anything older than
@@ -372,6 +494,7 @@ The drawing shows:
 | `build.rs` | Generates the module list and `autonomous_control::all()` |
 | `src/autonomous_control.rs` | `AutonomousControlsHandler`, module docs |
 | `src/autonomous_control/*.rs` | One algorithm per file |
+| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
 | `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
 | `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `load_config`/`save_parameters` |

@@ -1,0 +1,36 @@
+# Configuration for `aurorus::autonomous_control::ubm_potential_pursuit`: the
+# potential field, attracted toward a blend of the longest LIDAR reading and
+# a point ahead on the selected map's race line.
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 50.0
+# Where the vehicle's pose comes from: 0 = localization (odometry composed
+# onto SLAM's map_to_odom, only while localizing), 1 = ground truth
+# (vehicle_status, simulation only).
+pose_source = 0
+# Lookahead distance: look_ahead_gain_s * the race line's reference speed,
+# but at least min_look_ahead_m, in meters.
+min_look_ahead_m = 0.4
+# Lookahead growth with the race line's reference speed, in seconds.
+look_ahead_gain_s = 0.2
+# Attractive direction: 0 = the pursuit point, 1 = the longest reading.
+max_distance_weight = 0.5
+# Farther than this from the line, the vehicle stops, in meters.
+max_cross_track_m = 1.0
+
+# The potential field - see ubm_potential_field.toml.
+desired_fov_deg = 200.0
+field_resolution_deg = 0.5
+obstacle_threshold_gain = 1.0
+hysteresis_m = 0.2
+attractive_power = 0.01
+car_width_m = 0.34
+steering_gain = 0.7
+include_global_minima = 0
+use_minima_near_attractive = 0
+use_speed_distance_gains = 0
+front_fov_deg = 10.0
+brake_gain = 2.0
+speed_distance_gain = 2.0
+max_speed = 3.0
+min_speed = 1.0

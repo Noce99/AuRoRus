@@ -1,0 +1,30 @@
+# Configuration for `aurorus::autonomous_control::ubm_disparity_extender`, a
+# reactive algorithm: extends the edges of obstacles in the LIDAR scan by the
+# car's width, then steers toward the farthest reading left.
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 50.0
+# Part of the scan looked at, centred straight ahead, in degrees (clamped to
+# the LIDAR's field of view).
+desired_fov_deg = 180.0
+# Readings are clipped to this, in meters.
+max_range_m = 10.0
+# Vehicle width plus a safety margin: how far a disparity is extended, in
+# meters. ubm used 0.30, which scrapes the walls in simulation.
+car_width_m = 0.6
+# Two neighbouring readings further apart than this are a disparity, in meters.
+disparity_threshold_m = 0.5
+# Multiplies the number of readings a disparity is extended over, pure number.
+r_multiplier = 2.0
+# Readings within this of the farthest are equally good, and the one nearest
+# to straight ahead wins; 0 picks the farthest, in meters.
+ray_eq_thr_m = 0.3
+# Equally good directions within this of the straightest one tie, and
+# angle_priority picks, in radians.
+angle_eq_thr_rad = 0.0
+# Which way a tie goes: 0 = left (negative angles), 1 = right.
+angle_priority = 0
+# Speed when driving straight, in m/s.
+max_speed = 3.0
+# Speed at full steering lock, in m/s.
+min_speed = 1.0

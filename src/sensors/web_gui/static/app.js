@@ -316,6 +316,22 @@ async function pollAlgorithms() {
   algorithmMessageEl.textContent = message ?? "";
 
   syncAlgorithmParameters(status.selected);
+  focusAlgorithmDrawing(status.selected, status.available);
+}
+
+/** What `focusAlgorithmDrawing` last applied - the selected algorithm and
+ *  every available one - so it only acts when that changes. */
+let focusedAlgorithmDrawing = null;
+
+/** Shows the selected algorithm's drawing (`draw/<name>`) and hides every
+ *  other algorithm's, whenever the selection (or the set of algorithms)
+ *  changes. In between, the layer list is the user's to tick and untick. */
+function focusAlgorithmDrawing(selected, available) {
+  const topics = available.map((algorithm) => `draw/${algorithm.name}`);
+  const signature = JSON.stringify([selected, topics]);
+  if (signature === focusedAlgorithmDrawing) return;
+  focusedAlgorithmDrawing = signature;
+  drawLayers.focus(selected === null ? null : `draw/${selected}`, topics);
 }
 
 // ---------------------------------------------------------------------

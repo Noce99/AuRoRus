@@ -1,0 +1,38 @@
+# Configuration for `aurorus::autonomous_control::ubm_potential_field`, a
+# reactive algorithm: obstacles in the LIDAR scan repel with Gaussian
+# potentials, the longest reading attracts, and the vehicle steers toward a
+# minimum of the sum.
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 50.0
+# Part of the scan looked at, centred straight ahead, in degrees (clamped to
+# the LIDAR's field of view).
+desired_fov_deg = 200.0
+# Angle between two cells of the field, in degrees.
+field_resolution_deg = 0.5
+# Readings nearer than this times the mean reading are obstacles, pure number.
+obstacle_threshold_gain = 1.0
+# Hysteresis around the obstacle threshold, in meters.
+hysteresis_m = 0.2
+# Weight of the pull toward the longest reading, pure number.
+attractive_power = 0.01
+# Vehicle width, which widens every obstacle's potential, in meters.
+car_width_m = 0.34
+# Multiplies the chosen direction to get the steering angle, pure number.
+steering_gain = 0.7
+# 1 = also consider the field's global minimum, not only local ones.
+include_global_minima = 0
+# 1 = pick the minimum nearest to the attractive direction, 0 = the lowest.
+use_minima_near_attractive = 0
+# 1 = the speed also grows with the room ahead and drops near a wall.
+use_speed_distance_gains = 0
+# Part of the scan the room ahead is measured over, in degrees.
+front_fov_deg = 10.0
+# Speed lost per 1/m of room ahead, in m^2/s.
+brake_gain = 2.0
+# Speed gained per meter of room ahead, in 1/s.
+speed_distance_gain = 2.0
+# Speed when driving straight, in m/s.
+max_speed = 3.0
+# Speed at full steering lock, in m/s.
+min_speed = 1.0

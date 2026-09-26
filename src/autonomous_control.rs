@@ -39,6 +39,9 @@
 //!
 //! See `always_left.rs` for the smallest possible example, and
 //! `gap_follower.rs` for one with tunable parameters.
+//!
+//! Code several algorithms share goes in [`shared`] - a directory, since
+//! every `.rs` file directly in `src/autonomous_control/` is an algorithm.
 
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
@@ -55,6 +58,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 include!(concat!(env!("OUT_DIR"), "/autonomous_algorithms.rs"));
+
+pub(crate) mod shared;
 
 /// How often [`AutonomousControlsHandler`] forwards the selected command, in
 /// Hz - matched to `SimulatedVehicle`'s default tick rate, so forwarding adds
