@@ -592,6 +592,11 @@ fn body_acceleration(
     )
 }
 
+/// [`Drawing::z_index`] of the ego vehicle's drawing, and of an opponent's
+/// (see [`SimulatedVehicle::opponent`]) - underneath it.
+const VEHICLE_Z_INDEX: i32 = 10;
+const OPPONENT_Z_INDEX: i32 = 9;
+
 /// Body size [`SimulatedVehicle`] draws the vehicle at - roughly a 1/10-scale
 /// RC car, matching the models' default geometry.
 const DRAWN_BODY_LENGTH_M: f64 = 0.45;
@@ -638,7 +643,7 @@ fn drawing(
             true,
         )
         .stale_after(Drawing::DEFAULT_STALE_AFTER)
-        .z_index(10)
+        .z_index(VEHICLE_Z_INDEX)
 }
 
 /// Whether `command` was written, and recently enough to act on - see
@@ -837,6 +842,13 @@ impl Executor for SimulatedVehicle {
             .map_or((Color::AMBER, 1.0), |opponent| {
                 (opponent.color, opponent.speed_scale)
             });
+        // Opponents are painted just underneath the ego vehicle, which a
+        // viewer takes as the vehicle - to follow, and to show the speed of.
+        let z_index = if self.opponent.is_some() {
+            OPPONENT_Z_INDEX
+        } else {
+            VEHICLE_Z_INDEX
+        };
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
         let limits_topic = captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits());
@@ -972,7 +984,7 @@ impl Executor for SimulatedVehicle {
             drawing_topic
                 .write(
                     self.id,
-                    drawing(&self.model, &state, steering_angle_rad, color),
+                    drawing(&self.model, &state, steering_angle_rad, color).z_index(z_index),
                 )
                 .expect("lost writer authorization for the vehicle's drawing topic");
 

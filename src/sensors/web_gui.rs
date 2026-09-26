@@ -5,10 +5,11 @@
 //! `human_vesc_command`, `map_selection`, `vehicle_model_selection`,
 //! `autonomous_algorithm_selection`, `autonomous_parameters`,
 //! `place_at_start`, `slam_command`, `slam_save`, `planning_parameters`,
-//! `planning_request` (see [`live_api`]) and `race_line_selection` (see
-//! [`race_lines_api`]); reads `map`, `vehicle_model_status`,
-//! `autonomous_algorithm_status`, `slam_status`, `planning_status` and
-//! `race_line` to reflect the current selections.
+//! `planning_request` (see [`live_api`]), `race_line_selection` (see
+//! [`race_lines_api`]) and `opponent_requests` (see [`opponents_api`]);
+//! reads `map`, `vehicle_model_status`, `autonomous_algorithm_status`,
+//! `slam_status`, `planning_status`, `race_line` and `opponents` to reflect
+//! the current selections.
 //!
 //! Everything on the map canvas comes from drawing topics (see
 //! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
@@ -22,13 +23,15 @@ mod draw_api;
 mod handlers;
 mod live_api;
 mod maps_api;
+mod opponents_api;
 mod race_lines_api;
 mod topics_api;
 
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
     AutonomousAlgorithmSelection, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    MAP_SELECTION_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    MAP_SELECTION_TOPIC_NAME, MapSelection, OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests,
+    PLACE_AT_START_TOPIC_NAME,
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
     PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RaceLineSelection, SLAM_COMMAND_TOPIC_NAME,
     SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
@@ -159,6 +162,11 @@ impl Executor for WebGui {
             RACE_LINE_SELECTION_TOPIC_NAME,
             self.id,
             RaceLineSelection::default,
+        );
+        captain.claim_writer::<OpponentRequests>(
+            OPPONENT_REQUESTS_TOPIC_NAME,
+            self.id,
+            OpponentRequests::default,
         );
     }
 

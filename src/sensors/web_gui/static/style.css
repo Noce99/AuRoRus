@@ -499,3 +499,160 @@
 #planning-outcome {
   overflow-wrap: anywhere;
 }
+
+/* ---------- opponents ---------- */
+
+#opponent-add-btn {
+  flex: 0 0 auto;
+  font-size: 32px;
+  line-height: 1;
+  padding: 10px 0;
+  background: #3f6dc9;
+  border-color: #3f6dc9;
+}
+
+#opponent-add-btn:hover {
+  background: #4a7ad9;
+}
+
+#opponents-error {
+  margin: 0;
+}
+
+#opponent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#opponent-list li {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #22272e;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#opponent-list .empty {
+  color: #6b7280;
+  font-style: italic;
+  background: none;
+}
+
+.opponent-swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.opponent-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opponent-name {
+  font-weight: 600;
+}
+
+.opponent-stats {
+  color: #9aa4b2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.opponent-delete-btn {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+}
+
+.opponent-delete-btn:hover {
+  background: #c94f3f;
+  border-color: #c94f3f;
+}
+
+.field-grid select {
+  background: #101418;
+  border: 1px solid #303640;
+  border-radius: 5px;
+  color: #e8e8e8;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.opponent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.opponent-field-label {
+  font-size: 12px;
+  color: #9aa4b2;
+}
+
+#opponent-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A palette color: its radio hidden, the swatch showing which is picked. */
+#opponent-colors label {
+  cursor: pointer;
+  display: flex;
+}
+
+#opponent-colors input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#opponent-colors .opponent-swatch {
+  width: 26px;
+  height: 26px;
+  border-width: 2px;
+  border-color: transparent;
+}
+
+#opponent-colors input:checked + .opponent-swatch {
+  border-color: #e8e8e8;
+  box-shadow: 0 0 0 2px #1b1f24 inset;
+}
+
+#opponent-colors input:focus-visible + .opponent-swatch {
+  outline: 2px solid #3f6dc9;
+  outline-offset: 2px;
+}
+
+#opponent-form .parameter-list {
+  margin-top: 14px;
+}
+
+/* Its rows, spaced like the rest of the list they sit in. */
+#opponent-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#opponent-form-hint {
+  margin-top: 12px;
+  color: #f59e0b;
+}
+
+#opponent-form-hint[hidden] {
+  display: none;
+}

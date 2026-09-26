@@ -923,6 +923,311 @@ document.querySelector('.panel-nav-btn[data-panel="race-lines"]').addEventListen
 });
 
 // ---------------------------------------------------------------------
+// Opponents panel - the other autonomous vehicles `OpponentsManager` runs
+// (`/api/opponents`), each deletable, and a "+" opening a form to add one.
+// Adding or deleting only queues a request: the list shows the outcome once
+// the manager has handled it, a poll later.
+// ---------------------------------------------------------------------
+
+const opponentListEl = document.getElementById("opponent-list");
+const opponentsErrorEl = document.getElementById("opponents-error");
+const opponentOverlay = document.getElementById("opponent-overlay");
+const opponentForm = document.getElementById("opponent-form");
+const opponentColorsEl = document.getElementById("opponent-colors");
+const opponentAlgorithmEl = document.getElementById("opponent-algorithm");
+const opponentRaceLineEl = document.getElementById("opponent-race-line");
+const opponentSpeedEl = document.getElementById("opponent-speed");
+const opponentSpeedValueEl = document.getElementById("opponent-speed-value");
+const opponentLimitsEl = document.getElementById("opponent-limits");
+const opponentHintEl = document.getElementById("opponent-form-hint");
+const opponentFormErrorEl = document.getElementById("opponent-form-error");
+const opponentConfirmBtn = document.getElementById("opponent-confirm-btn");
+
+/** The algorithm a new opponent runs unless the user picks another. */
+const DEFAULT_OPPONENT_ALGORITHM = "gap_follower";
+/** The color a new opponent gets unless the user picks another. */
+const DEFAULT_OPPONENT_COLOR = "red";
+
+/** What the list last showed, so it's only rebuilt when that changes. */
+let opponentsSignature = null;
+/** The number of the latest request queued from this page, whose outcome
+ *  is reported once `last_outcome` answers it. */
+let awaitedOpponentRequest = null;
+/** The latest `/api/opponents` response - what the form offers. */
+let opponentChoices = null;
+/** Whether the user picked a race line in the open form - until then, it
+ *  follows the picked algorithm (see `defaultOpponentRaceLine`). */
+let opponentRaceLinePicked = false;
+
+function opponentsPanelVisible() {
+  return !document.getElementById("panel-opponents").hidden;
+}
+
+function showOpponentsError(message) {
+  opponentsErrorEl.textContent = message;
+  opponentsErrorEl.hidden = message === null;
+}
+
+function paletteCss(response, name) {
+  return response.palette.find((color) => color.name === name)?.css ?? "#888";
+}
+
+async function deleteOpponent(id) {
+  showOpponentsError(null);
+  try {
+    const { request } = await fetchJSON("/api/opponents/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    awaitedOpponentRequest = request;
+  } catch (err) {
+    showOpponentsError(err.message);
+  }
+  await pollOpponents();
+}
+
+function renderOpponents(response) {
+  opponentListEl.innerHTML = "";
+  if (response.list.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No opponents - add one with +";
+    opponentListEl.appendChild(li);
+  }
+  for (const opponent of response.list) {
+    const { spec } = opponent;
+    const li = document.createElement("li");
+    const swatch = document.createElement("span");
+    swatch.className = "opponent-swatch";
+    swatch.style.background = paletteCss(response, spec.color);
+    const text = document.createElement("span");
+    text.className = "opponent-text";
+    const name = document.createElement("span");
+    name.className = "opponent-name";
+    name.textContent = `#${opponent.id} ${opponent.algorithm_label}`;
+    const stats = document.createElement("span");
+    stats.className = "opponent-stats";
+    stats.textContent = [
+      spec.race_line === null ? "No race line" : spec.race_line.replace(/\.csv$/, ""),
+      `speed ×${spec.speed_scale.toFixed(2)}`,
+      `max ${spec.limits.max_speed_mps.toFixed(1)} m/s`,
+    ].join(" · ");
+    text.append(name, stats);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "opponent-delete-btn";
+    deleteBtn.textContent = "✕";
+    deleteBtn.title = `Delete opponent #${opponent.id}`;
+    deleteBtn.setAttribute("aria-label", deleteBtn.title);
+    deleteBtn.addEventListener("click", () => {
+      deleteBtn.disabled = true;
+      deleteOpponent(opponent.id);
+    });
+    li.append(swatch, text, deleteBtn);
+    opponentListEl.appendChild(li);
+  }
+}
+
+async function pollOpponents() {
+  if (!opponentsPanelVisible()) return;
+  const response = await fetchJSON("/api/opponents");
+  opponentChoices = response;
+  const outcome = response.last_outcome;
+  if (outcome !== null && outcome.request === awaitedOpponentRequest) {
+    awaitedOpponentRequest = null;
+    showOpponentsError(outcome.error);
+  }
+  const signature = JSON.stringify([response.list, response.palette]);
+  if (signature === opponentsSignature) return;
+  opponentsSignature = signature;
+  renderOpponents(response);
+}
+
+document.querySelector('.panel-nav-btn[data-panel="opponents"]').addEventListener("click", () => {
+  opponentsSignature = null;
+  setTimeout(() => pollOpponents().catch((err) => console.error(err)), 0);
+});
+
+// --- the "add" form ---
+
+function optionEl(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+/** The algorithm picked in the form, as `/api/opponents` describes it. */
+function pickedOpponentAlgorithm() {
+  return opponentChoices?.algorithms.find((a) => a.name === opponentAlgorithmEl.value) ?? null;
+}
+
+/** Why the form can't be submitted as it is, or null if it can - the same
+ *  rule the server enforces. */
+function opponentFormProblem() {
+  const algorithm = pickedOpponentAlgorithm();
+  if (algorithm === null) return "There's no autonomous algorithm to run.";
+  if (opponentLimitsEl.childElementCount === 0) return "There's no ego vehicle to copy the model of.";
+  if (algorithm.requires.race_line && opponentRaceLineEl.value === "") {
+    return opponentChoices.race_lines.files.length === 0
+      ? `${algorithm.label} follows a race line, and this map has none - plan one in the Planning panel.`
+      : `${algorithm.label} follows a race line: pick one.`;
+  }
+  return null;
+}
+
+/** The race line a new opponent running the picked algorithm follows unless
+ *  the user picks one: the ego vehicle's, for an algorithm that follows a
+ *  race line - none for a reactive one, which doesn't. */
+function defaultOpponentRaceLine() {
+  return pickedOpponentAlgorithm()?.requires.race_line
+    ? (opponentChoices.race_lines.selected ?? "")
+    : "";
+}
+
+function updateOpponentForm() {
+  opponentSpeedValueEl.textContent = `×${Number(opponentSpeedEl.value).toFixed(2)}`;
+  const problem = opponentFormProblem();
+  opponentHintEl.textContent = problem ?? "";
+  opponentHintEl.hidden = problem === null;
+  opponentConfirmBtn.disabled = problem !== null;
+}
+
+function buildOpponentForm(response) {
+  opponentColorsEl.innerHTML = "";
+  for (const color of response.palette) {
+    const label = document.createElement("label");
+    label.title = color.name[0].toUpperCase() + color.name.slice(1);
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "opponent-color";
+    input.value = color.name;
+    input.checked = color.name === DEFAULT_OPPONENT_COLOR;
+    input.setAttribute("aria-label", label.title);
+    const swatch = document.createElement("span");
+    swatch.className = "opponent-swatch";
+    swatch.style.background = color.css;
+    label.append(input, swatch);
+    opponentColorsEl.appendChild(label);
+  }
+
+  opponentAlgorithmEl.innerHTML = "";
+  for (const algorithm of response.algorithms) {
+    opponentAlgorithmEl.appendChild(optionEl(algorithm.name, algorithm.label));
+  }
+  if (response.algorithms.some((a) => a.name === DEFAULT_OPPONENT_ALGORITHM)) {
+    opponentAlgorithmEl.value = DEFAULT_OPPONENT_ALGORITHM;
+  }
+
+  opponentRaceLineEl.innerHTML = "";
+  opponentRaceLineEl.appendChild(optionEl("", "None"));
+  for (const file of response.race_lines.files) {
+    opponentRaceLineEl.appendChild(optionEl(file, file.replace(/\.csv$/, "")));
+  }
+  opponentRaceLinePicked = false;
+  opponentRaceLineEl.value = defaultOpponentRaceLine();
+
+  opponentSpeedEl.value = 1;
+
+  opponentLimitsEl.innerHTML = "";
+  for (const parameter of response.limits) {
+    const { min, max, step } = parameterRange(parameter);
+    const rowEl = document.createElement("div");
+    rowEl.className = "parameter-row";
+    const headEl = document.createElement("div");
+    headEl.className = "parameter-head";
+    const nameEl = document.createElement("span");
+    nameEl.className = "parameter-name";
+    nameEl.textContent = parameter.name;
+    const valueEl = document.createElement("span");
+    valueEl.className = "parameter-value";
+    headEl.append(nameEl, valueEl);
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = min;
+    input.max = max;
+    input.step = step;
+    input.value = parameter.value;
+    input.dataset.name = parameter.name;
+    const show = () => (valueEl.textContent = formatParameterValue(parameter, input.value));
+    input.addEventListener("input", show);
+    show();
+    const descriptionEl = document.createElement("p");
+    descriptionEl.className = "parameter-description";
+    descriptionEl.textContent = parameter.description;
+    rowEl.append(headEl, input, descriptionEl);
+    opponentLimitsEl.appendChild(rowEl);
+  }
+  updateOpponentForm();
+}
+
+function showOpponentFormError(message) {
+  opponentFormErrorEl.textContent = message ?? "";
+  opponentFormErrorEl.hidden = message === null;
+}
+
+async function openOpponentForm() {
+  showOpponentFormError(null);
+  try {
+    opponentChoices = await fetchJSON("/api/opponents");
+    buildOpponentForm(opponentChoices);
+    opponentOverlay.hidden = false;
+  } catch (err) {
+    showOpponentsError(`Couldn't open the form: ${err.message}`);
+  }
+}
+
+function closeOpponentForm() {
+  opponentOverlay.hidden = true;
+}
+
+document.getElementById("opponent-add-btn").addEventListener("click", openOpponentForm);
+document.getElementById("opponent-cancel-btn").addEventListener("click", closeOpponentForm);
+opponentAlgorithmEl.addEventListener("change", () => {
+  if (!opponentRaceLinePicked) opponentRaceLineEl.value = defaultOpponentRaceLine();
+  updateOpponentForm();
+});
+opponentRaceLineEl.addEventListener("change", () => {
+  opponentRaceLinePicked = true;
+  updateOpponentForm();
+});
+opponentSpeedEl.addEventListener("input", updateOpponentForm);
+
+opponentForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (opponentFormProblem() !== null) return;
+  showOpponentFormError(null);
+  opponentConfirmBtn.disabled = true;
+  const limits = {};
+  for (const input of opponentLimitsEl.querySelectorAll("input")) {
+    limits[input.dataset.name] = Number(input.value);
+  }
+  const spec = {
+    color: opponentColorsEl.querySelector("input:checked")?.value ?? DEFAULT_OPPONENT_COLOR,
+    race_line: opponentRaceLineEl.value === "" ? null : opponentRaceLineEl.value,
+    algorithm: opponentAlgorithmEl.value,
+    speed_scale: Number(opponentSpeedEl.value),
+    limits,
+  };
+  try {
+    const { request } = await fetchJSON("/api/opponents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec),
+    });
+    awaitedOpponentRequest = request;
+    showOpponentsError(null);
+    closeOpponentForm();
+    await pollOpponents();
+  } catch (err) {
+    showOpponentFormError(err.message);
+  } finally {
+    updateOpponentForm();
+  }
+});
+
+// ---------------------------------------------------------------------
 // Topics panel - inspects any registered topic, generically: the list
 // comes from `/api/topics`, the picked topic's value from `/api/topic`.
 // ---------------------------------------------------------------------
@@ -1502,8 +1807,15 @@ const HUMAN_COMMAND_HEARTBEAT_MS = 250;
 
 const keys = { w: false, a: false, s: false, d: false };
 
+/** Whether a key pressed on `target` belongs to it rather than to the
+ *  shortcuts: a text field, or anything in an open dialog (e.g. a select
+ *  in the "add opponent" form - "r" there must not restart everything). */
 function isTypingTarget(target) {
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof Element && target.closest(".modal-overlay, #generate-overlay") !== null)
+  );
 }
 
 window.addEventListener("keydown", (event) => {
@@ -1624,6 +1936,7 @@ startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);
+startPolling(pollOpponents, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

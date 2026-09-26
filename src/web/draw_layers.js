@@ -237,10 +237,12 @@ window.DrawLayers = (() => {
       return paintOrder().map((layer) => ({ opacity: opacity(layer, nowMs), shapes: shapesAt(layer, nowMs) }));
     }
 
-    /** The first vehicle any visible layer draws, dead-reckoned to now. */
+    /** The topmost vehicle any visible layer draws - the ego vehicle, when
+     *  opponents are drawn too (they're painted underneath it) - dead-reckoned
+     *  to now. */
     function firstVehicle() {
       const nowMs = clock();
-      for (const layer of paintOrder()) {
+      for (const layer of paintOrder().reverse()) {
         for (const { shape } of visibleShapes(layer)) {
           if (shapeKind(shape) === "vehicle") return extrapolatedVehicle(shape.vehicle, layer, nowMs);
         }
@@ -299,11 +301,15 @@ window.DrawLayers = (() => {
       return !anyVehicle;
     }
 
-    /** Whether the picture changes by itself - a moving vehicle, or a
+    /** Whether the picture changes by itself - any moving vehicle, or a
      *  layer mid-fade - so `MapView` should repaint every frame. */
     function isAnimating() {
-      const vehicle = firstVehicle();
-      if (vehicle && Math.abs(vehicle.speed_mps) > 1e-3) return true;
+      const moving = paintOrder().some((layer) =>
+        visibleShapes(layer).some(
+          ({ shape }) => shapeKind(shape) === "vehicle" && Math.abs(shape.vehicle.speed_mps) > 1e-3,
+        ),
+      );
+      if (moving) return true;
       const nowMs = clock();
       return paintOrder().some((layer) => isFading(layer, nowMs));
     }

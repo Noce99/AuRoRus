@@ -24,6 +24,7 @@
       <button class="panel-nav-btn" data-panel="localization">Localization</button>
       <button class="panel-nav-btn" data-panel="planning">Planning</button>
       <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
+      <button class="panel-nav-btn" data-panel="opponents">Opponents</button>
     </nav>
   </aside>
 
@@ -172,6 +173,13 @@
       <p id="race-lines-details" class="parameter-description"></p>
       <ul id="race-line-list"></ul>
     </section>
+
+    <section id="panel-opponents" class="panel-section" hidden>
+      <h1>Opponents</h1>
+      <button type="button" id="opponent-add-btn" title="Add an opponent" aria-label="Add an opponent">+</button>
+      <p id="opponents-error" class="modal-error" hidden></p>
+      <ul id="opponent-list"></ul>
+    </section>
   </aside>
 
   <div id="generate-overlay" hidden>
@@ -227,6 +235,40 @@
           <button type="button" id="import-cancel-btn">Cancel</button>
           <button type="button" id="import-reload-btn" class="modal-primary" hidden>Reload now</button>
           <button type="submit" id="import-confirm-btn" class="modal-primary" disabled>Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="opponent-overlay" class="modal-overlay" hidden>
+    <div class="modal">
+      <h2>Add opponent</h2>
+      <form id="opponent-form">
+        <div class="field-grid">
+          <div class="field-wide opponent-field">
+            <span class="opponent-field-label">Color</span>
+            <div id="opponent-colors" role="radiogroup" aria-label="Color"></div>
+          </div>
+          <label>Autonomous algorithm <select id="opponent-algorithm"></select></label>
+          <label>Race line <select id="opponent-race-line"></select></label>
+        </div>
+        <div class="parameter-list">
+          <div class="parameter-row">
+            <div class="parameter-head">
+              <span class="parameter-name">Speed multiplier</span>
+              <span class="parameter-value" id="opponent-speed-value"></span>
+            </div>
+            <input type="range" id="opponent-speed" min="0" max="1" step="0.05" value="1" />
+            <p class="parameter-description">Multiplies every speed its algorithm commands.</p>
+          </div>
+          <h3 class="parameter-group-title">Actuator limits</h3>
+          <div id="opponent-limits"></div>
+        </div>
+        <p id="opponent-form-hint" class="parameter-description" hidden></p>
+        <p id="opponent-form-error" class="modal-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" id="opponent-cancel-btn">Cancel</button>
+          <button type="submit" id="opponent-confirm-btn" class="modal-primary">Add</button>
         </div>
       </form>
     </div>

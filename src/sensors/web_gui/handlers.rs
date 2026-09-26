@@ -6,6 +6,7 @@ use super::assets;
 use super::draw_api;
 use super::live_api;
 use super::maps_api;
+use super::opponents_api;
 use super::race_lines_api;
 use super::topics_api;
 use crate::Captain;
@@ -115,6 +116,11 @@ pub fn handle(
             live_api::planning_start(&mut request, captain, writer_id)
         }
         (Method::Get, "/api/race_lines") => race_lines_api::list(captain),
+        (Method::Get, "/api/opponents") => opponents_api::list(captain),
+        (Method::Post, "/api/opponents") => opponents_api::add(&mut request, captain, writer_id),
+        (Method::Post, "/api/opponents/delete") => {
+            opponents_api::delete(&mut request, captain, writer_id)
+        }
         (Method::Post, "/api/race_line_selection") => {
             race_lines_api::select(&mut request, captain, writer_id)
         }
