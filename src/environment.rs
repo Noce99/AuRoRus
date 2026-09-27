@@ -13,6 +13,7 @@ mod race_line;
 pub mod race_lines;
 mod raster;
 pub mod simulator;
+pub mod starting_grid;
 mod tiff;
 
 pub use info::{

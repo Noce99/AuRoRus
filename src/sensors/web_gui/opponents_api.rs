@@ -1,16 +1,21 @@
 //! The Opponents panel's API: the opponents running (the `opponents` topic,
 //! see [`crate::opponents::OpponentsManager`]), everything the "add" form
-//! offers, and adding or deleting one through `opponent_requests`.
+//! offers, adding or deleting one through `opponent_requests`, and starting
+//! a race through `race_start`.
 
+use super::WebGuiConfig;
+use super::live_api::stop_mapping;
 use crate::Captain;
-use crate::environment::race_lines;
+use crate::environment::starting_grid::{self, GridSpacing};
+use crate::environment::{CENTERLINE_FILE_NAME, race_lines};
 use crate::opponents::validate;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AlgorithmParameter, AlgorithmRequirements,
-    AutonomousAlgorithmStatus, AvailableAlgorithm, Color, MAP_TOPIC_NAME,
+    AutonomousAlgorithmStatus, AvailableAlgorithm, Color, GridSlot, MAP_TOPIC_NAME,
     OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor, OpponentOutcome,
-    OpponentRequest, OpponentRequests, OpponentSpec, Opponents, RACE_LINE_TOPIC_NAME, SelectedMap,
-    SelectedRaceLine, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelStatus,
+    OpponentRequest, OpponentRequests, OpponentSpec, Opponents, RACE_LINE_TOPIC_NAME,
+    RACE_START_TOPIC_NAME, RaceStart, Racer, SelectedMap, SelectedRaceLine,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelStatus, now_ms,
 };
 use crate::web::{bad_request, json_response, read_json};
 use std::path::PathBuf;
@@ -54,6 +59,31 @@ struct OpponentsResponse {
     /// Every actuator limit, with its range and the value the ego vehicle
     /// runs with - what a new opponent's limits default to.
     limits: Vec<AlgorithmParameter>,
+    race_start: RaceStartAvailability,
+}
+
+/// Whether a race can be started, for the "Start race" button.
+#[derive(serde::Serialize)]
+struct RaceStartAvailability {
+    available: bool,
+    /// Why not, when it can't.
+    reason: Option<String>,
+}
+
+impl RaceStartAvailability {
+    fn of(map: Option<&PathBuf>, files: &[String]) -> Self {
+        let reason = if map.is_none() {
+            Some("Load a map first.")
+        } else if !files.iter().any(|file| file == CENTERLINE_FILE_NAME) {
+            Some("The map has no centerline - a race needs one to line the grid up on.")
+        } else {
+            None
+        };
+        Self {
+            available: reason.is_none(),
+            reason: reason.map(str::to_string),
+        }
+    }
 }
 
 fn css(color: Color) -> String {
@@ -108,6 +138,7 @@ pub fn list(captain: &Captain) -> ResponseBox {
         .map(|topic| topic.read().into_value().limits)
         .unwrap_or_default();
     let Opponents { list, last_outcome } = opponents(captain);
+    let race_start = RaceStartAvailability::of(map.as_ref(), &files);
     json_response(
         &OpponentsResponse {
             list,
@@ -137,6 +168,7 @@ pub fn list(captain: &Captain) -> ResponseBox {
                 selected,
             },
             limits,
+            race_start,
         },
         200,
     )
@@ -197,4 +229,108 @@ pub fn delete(request: &mut Request, captain: &Captain, writer_id: u16) -> Respo
     }
     let request = queue(captain, writer_id, OpponentRequest::Delete(body.id));
     json_response(&Queued { request }, 200)
+}
+
+#[derive(serde::Deserialize)]
+struct StartRaceBody {
+    /// Every racer - the ego vehicle and each opponent running, once each -
+    /// pole position first.
+    order: Vec<Racer>,
+}
+
+#[derive(serde::Serialize)]
+struct RaceStarted {
+    /// How long until the vehicles are released - the countdown's length.
+    go_in_ms: u64,
+}
+
+/// `POST /api/race/start` - body `{"order": [...]}`, every [`Racer`] once,
+/// pole position first - lines every vehicle up on the loaded map's starting
+/// grid (see [`starting_grid::slots`]) and releases them all at once after
+/// [`WebGuiConfig::race_countdown_ms`]. Like any placement of the ego
+/// vehicle, turns SLAM's mapping off.
+pub fn start_race(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u16,
+    config: &WebGuiConfig,
+) -> ResponseBox {
+    let body: StartRaceBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let mut expected: Vec<Racer> = std::iter::once(Racer::Ego)
+        .chain(
+            opponents(captain)
+                .list
+                .iter()
+                .map(|opponent| Racer::Opponent(opponent.id)),
+        )
+        .collect();
+    let mut given = body.order.clone();
+    expected.sort();
+    given.sort();
+    if given != expected {
+        return bad_request(
+            "The order must list the ego vehicle and every opponent running, once each - \
+             the opponents may have changed, reopen the dialog.",
+        );
+    }
+
+    let map = captain
+        .topic::<SelectedMap>(MAP_TOPIC_NAME)
+        .read()
+        .into_value();
+    let (Some(folder), Some(info)) = (&map.path, &map.info) else {
+        return bad_request("Load a map first.");
+    };
+    let centerline = race_lines::read(folder, CENTERLINE_FILE_NAME).unwrap_or_default();
+    let is_free = |x_m: f64, y_m: f64| {
+        let col = ((x_m - info.origin.x) / info.resolution_m_per_px).floor();
+        let row = ((y_m - info.origin.y) / info.resolution_m_per_px).floor();
+        col >= 0.0
+            && row >= 0.0
+            && col < f64::from(map.width_px)
+            && row < f64::from(map.height_px)
+            && map.pixels[row as usize * map.width_px as usize + col as usize] == 255
+    };
+    let spacing = GridSpacing {
+        gap_m: config.grid_gap_m,
+        margin_m: config.grid_margin_m,
+    };
+    let poses = match starting_grid::slots(
+        &centerline,
+        &info.start_finish_line,
+        body.order.len(),
+        spacing,
+        is_free,
+    ) {
+        Ok(poses) => poses,
+        Err(err) => return bad_request(&err),
+    };
+
+    let topic = captain.topic::<RaceStart>(RACE_START_TOPIC_NAME);
+    let sequence = topic.read().sequence.wrapping_add(1);
+    topic
+        .write(
+            writer_id,
+            RaceStart {
+                sequence,
+                slots: body
+                    .order
+                    .iter()
+                    .zip(poses)
+                    .map(|(&racer, pose)| GridSlot { racer, pose })
+                    .collect(),
+                go_at_ms: now_ms() + config.race_countdown_ms,
+            },
+        )
+        .expect("lost writer authorization for the race_start topic");
+    stop_mapping(captain, writer_id);
+    json_response(
+        &RaceStarted {
+            go_in_ms: config.race_countdown_ms,
+        },
+        200,
+    )
 }

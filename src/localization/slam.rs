@@ -31,10 +31,9 @@ mod scan_matcher;
 use crate::environment;
 use crate::topics::{
     Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
-    Odometry, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, SLAM_COMMAND_TOPIC_NAME,
-    SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, START_STATE_TOPIC_NAME,
-    SelectedMap, Shape, SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState,
-    SlamStatus, StartState,
+    Odometry, Placement, PlacementTopics, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME,
+    SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap,
+    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use localizer::{Localizer, LocalizerParams};
@@ -278,8 +277,7 @@ impl Executor for Slam {
         let command_topic = captain.topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME);
         let save_topic = captain.topic::<SlamSaveRequest>(SLAM_SAVE_TOPIC_NAME);
         let selected_map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
-        let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
-        let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+        let placement_topics = PlacementTopics::new(captain);
         let status_topic = captain.topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME);
         let map_topic = captain.topic::<SlamMap>(SLAM_MAP_TOPIC_NAME);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
@@ -287,10 +285,7 @@ impl Executor for Slam {
         let mut state = State::new(&self.config);
         // Where odometry was last reset: the start line, or wherever the
         // vehicle was placed since.
-        let mut placement = Placement::new(
-            start_state_topic.read().into_value(),
-            place_at_start_topic.read().into_value(),
-        );
+        let mut placement = Placement::new(&placement_topics.read());
         // Start from whatever is there now, so a scan left over from before
         // this executor started isn't taken.
         let mut last_scan_write = lidar_topic.read().meta.write_count;
@@ -304,11 +299,7 @@ impl Executor for Slam {
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
-            placement.update(
-                start_state_topic.read().into_value(),
-                place_at_start_topic.read().into_value(),
-                true,
-            );
+            placement.update(&placement_topics.read(), &VehicleTopics::ego());
             let odometry = odometry_topic.read();
             if last_odometry_write != Some(odometry.meta.write_count) {
                 last_odometry_write = Some(odometry.meta.write_count);

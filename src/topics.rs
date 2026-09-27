@@ -13,6 +13,7 @@ mod opponents;
 mod place_at_start;
 mod planning;
 mod race_line;
+mod race_start;
 mod slam;
 mod start_state;
 mod vehicle_limits;
@@ -38,7 +39,9 @@ pub use opponents::{
     NumberedRequest, OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor,
     OpponentOutcome, OpponentRequest, OpponentRequests, OpponentSpec, Opponents,
 };
-pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement};
+pub use place_at_start::{
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, PlacementInputs, PlacementTopics,
+};
 pub use planning::{
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
     PlanningObjective, PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState,
@@ -47,6 +50,7 @@ pub use planning::{
 pub use race_line::{
     RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection, SelectedRaceLine,
 };
+pub use race_start::{GridSlot, RACE_START_TOPIC_NAME, RaceStart, Racer, now_ms};
 pub use slam::{
     SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
     SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,

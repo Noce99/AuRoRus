@@ -582,6 +582,102 @@
   border-color: #c94f3f;
 }
 
+#race-open-btn {
+  flex: 0 0 auto;
+  padding: 10px 0;
+}
+
+#race-open-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- race start ---------- */
+
+#race-order {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#race-order li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: #101418;
+  border: 1px solid #303640;
+  border-radius: 6px;
+}
+
+.race-position {
+  flex: 0 0 auto;
+  width: 2.2em;
+  color: #9aa4b2;
+  font-variant-numeric: tabular-nums;
+}
+
+.race-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-move-btn {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+}
+
+.race-move-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#race-countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+  font-size: min(28vw, 240px);
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
+}
+
+#race-countdown[hidden] {
+  display: none;
+}
+
+#race-countdown.race-go {
+  color: #4cd964;
+}
+
+#race-countdown.race-tick {
+  animation: race-tick 1s ease-out;
+}
+
+@keyframes race-tick {
+  from {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  20% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    opacity: 0.85;
+  }
+}
+
 .field-grid select {
   background: #101418;
   border: 1px solid #303640;

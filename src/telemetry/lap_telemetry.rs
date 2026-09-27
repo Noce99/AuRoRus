@@ -15,9 +15,8 @@
 
 use crate::autonomous_control::shared::race_line::{Line, POSE_TIMEOUT, Pose, localization_pose};
 use crate::topics::{
-    LAP_TELEMETRY_TOPIC_NAME, LapRecord, LapTelemetry, LapTrace, Odometry,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, RACE_LINE_TOPIC_NAME,
-    START_STATE_TOPIC_NAME, SelectedRaceLine, StartState, VehicleStatus, VehicleTopics,
+    LAP_TELEMETRY_TOPIC_NAME, LapRecord, LapTelemetry, LapTrace, Odometry, Placement,
+    PlacementTopics, RACE_LINE_TOPIC_NAME, SelectedRaceLine, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -413,13 +412,6 @@ fn sample(
     }
 }
 
-/// The ego vehicle's [`Placement`] tracker, if this binary has the topics.
-fn placement(captain: &Captain) -> Option<(StartState, PlaceAtStart)> {
-    let start = captain.try_topic::<StartState>(START_STATE_TOPIC_NAME)?;
-    let place = captain.try_topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME)?;
-    Some((start.read().into_value(), place.read().into_value()))
-}
-
 impl Executor for LapTelemetryRecorder {
     fn init(&mut self, id: u16) {
         self.id = id;
@@ -442,7 +434,11 @@ impl Executor for LapTelemetryRecorder {
 
         let mut tracker: Option<LapTracker> = None;
         let mut race_line_writes = None;
-        let mut placements = placement(captain).map(|(start, place)| Placement::new(start, place));
+        // The ego vehicle's placements, if this binary has the topics.
+        let placement_topics = PlacementTopics::try_new(captain);
+        let mut placements = placement_topics
+            .as_ref()
+            .map(|topics| Placement::new(&topics.read()));
         let mut sample_writes = None;
         let mut last_published: Option<Instant> = None;
 
@@ -463,8 +459,10 @@ impl Executor for LapTelemetryRecorder {
                 last_published = None;
             }
 
-            if let (Some(placements), Some((start, place))) = (&mut placements, placement(captain))
-                && placements.update(start, place, true).is_some()
+            if let (Some(placements), Some(topics)) = (&mut placements, &placement_topics)
+                && placements
+                    .update(&topics.read(), &VehicleTopics::ego())
+                    .is_some()
                 && let Some(tracker) = &mut tracker
             {
                 tracker.place();

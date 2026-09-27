@@ -6,7 +6,8 @@
 //! `autonomous_algorithm_selection`, `autonomous_parameters`,
 //! `place_at_start`, `slam_command`, `slam_save`, `planning_parameters`,
 //! `planning_request` (see [`live_api`]), `race_line_selection` (see
-//! [`race_lines_api`]) and `opponent_requests` (see [`opponents_api`]);
+//! [`race_lines_api`]), `opponent_requests` and `race_start` (see
+//! [`opponents_api`]);
 //! reads `map`, `vehicle_model_status`, `autonomous_algorithm_status`,
 //! `slam_status`, `planning_status`, `race_line` and `opponents` to reflect
 //! the current selections.
@@ -33,9 +34,9 @@ use crate::topics::{
     MAP_SELECTION_TOPIC_NAME, MapSelection, OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests,
     PLACE_AT_START_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
     PlaceAtStart, PlanningParameters, PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME,
-    RaceLineSelection, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest,
-    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VehicleModelParameters, VehicleModelSelection, VescCommand,
+    RACE_START_TOPIC_NAME, RaceLineSelection, RaceStart, SLAM_COMMAND_TOPIC_NAME,
+    SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;
@@ -67,6 +68,16 @@ pub struct WebGuiConfig {
     /// under WASD human control - served to the frontend via
     /// `GET /api/config` so the UI and server never drift apart.
     pub human_max_steering_rad: f64,
+    /// A race's starting grid: added to half a body length between one slot
+    /// and the next, in meters - see
+    /// [`crate::environment::starting_grid::GridSpacing::gap_m`].
+    pub grid_gap_m: f64,
+    /// A race's starting grid: between each vehicle's side and the
+    /// centerline, in meters.
+    pub grid_margin_m: f64,
+    /// How long a race's countdown lasts before the vehicles are released,
+    /// in milliseconds.
+    pub race_countdown_ms: u64,
 }
 
 impl Default for WebGuiConfig {
@@ -168,6 +179,7 @@ impl Executor for WebGui {
             self.id,
             OpponentRequests::default,
         );
+        captain.claim_writer::<RaceStart>(RACE_START_TOPIC_NAME, self.id, RaceStart::default);
     }
 
     fn run(&mut self, captain: &Captain) {

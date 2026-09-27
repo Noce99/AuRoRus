@@ -194,6 +194,7 @@
       <button type="button" id="opponent-add-btn" title="Add an opponent" aria-label="Add an opponent">+</button>
       <p id="opponents-error" class="modal-error" hidden></p>
       <ul id="opponent-list"></ul>
+      <button type="button" id="race-open-btn" title="Line every vehicle up on the starting grid and start them all at once">&#127937; Start race</button>
     </section>
   </aside>
 
@@ -288,6 +289,21 @@
       </form>
     </div>
   </div>
+
+  <div id="race-overlay" class="modal-overlay" hidden>
+    <div class="modal">
+      <h2>Start race</h2>
+      <p class="parameter-description">Starting order, pole position first - lined up behind the start/finish line, alternating left and right of the centerline, pole on the left.</p>
+      <ol id="race-order"></ol>
+      <p id="race-error" class="modal-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" id="race-cancel-btn">Cancel</button>
+        <button type="button" id="race-start-btn" class="modal-primary">Start race</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="race-countdown" hidden aria-live="assertive"></div>
 </div>
 <script src="/map_view.js"></script>
 <script src="/draw_layers.js"></script>

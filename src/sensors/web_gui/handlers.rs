@@ -124,6 +124,9 @@ pub fn handle(
         (Method::Post, "/api/opponents/delete") => {
             opponents_api::delete(&mut request, captain, writer_id)
         }
+        (Method::Post, "/api/race/start") => {
+            opponents_api::start_race(&mut request, captain, writer_id, config)
+        }
         (Method::Post, "/api/race_line_selection") => {
             race_lines_api::select(&mut request, captain, writer_id)
         }

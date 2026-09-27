@@ -9,8 +9,8 @@
 //! compare its drift against the truth.
 
 use crate::topics::{
-    Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, START_STATE_TOPIC_NAME, Shape, StartState,
+    Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry, Placement,
+    PlacementTopics, Shape, StartState, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -130,14 +130,10 @@ impl Executor for DeadReckoning {
     fn run(&mut self, captain: &Captain) {
         let imu_topic = captain.topic::<ImuReading>(IMU_TOPIC_NAME);
         let odometry_topic = captain.topic::<Odometry>(ODOMETRY_TOPIC_NAME);
-        let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
-        let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+        let placement_topics = PlacementTopics::new(captain);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
 
-        let mut placement = Placement::new(
-            start_state_topic.read().into_value(),
-            place_at_start_topic.read().into_value(),
-        );
+        let mut placement = Placement::new(&placement_topics.read());
         let mut odometry = Odometry::default();
         let mut trail = Trail::new(placement.anchor());
         // The write count of the last reading consumed, so a re-read of the
@@ -151,11 +147,8 @@ impl Executor for DeadReckoning {
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
-            if let Some(anchor) = placement.update(
-                start_state_topic.read().into_value(),
-                place_at_start_topic.read().into_value(),
-                true,
-            ) {
+            if let Some(anchor) = placement.update(&placement_topics.read(), &VehicleTopics::ego())
+            {
                 odometry = Odometry {
                     reset_count: odometry.reset_count.wrapping_add(1),
                     ..Odometry::default()

@@ -18,12 +18,11 @@ use crate::environment::simulator::vehicle::{
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
-    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement,
-    START_STATE_TOPIC_NAME, Shape, StartState, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M,
-    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
-    VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VehicleStatus,
-    VehicleTopics, VescCommand,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, Placement, PlacementTopics, Shape, StartState,
+    VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
+    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
+    VehicleModelKind, VehicleModelParameters, VehicleModelSelection, VehicleModelStatus,
+    VehicleStatus, VehicleTopics, VescCommand, now_ms,
 };
 use crate::{Captain, Executor, RwLockTopic, Stamped, Ticker};
 use std::any::Any;
@@ -710,7 +709,9 @@ struct EgoTopics {
 /// with the steering centered, and places the vehicle there again - steering
 /// re-centered - every time [`START_STATE_TOPIC_NAME`] changes (e.g. a map
 /// change) or [`PLACE_AT_START_TOPIC_NAME`] is bumped (e.g. `web_gui`'s "P"
-/// key) - at the pose that request carries, if any (see [`Placement`]). Also watches [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and
+/// key) - at the pose that request carries, if any - or a race starts
+/// (see [`Placement`]), holding it still on its grid slot until the go (see
+/// [`crate::topics::RaceStart`]). Also watches [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and
 /// switches to [`default_model`] of the wanted kind - carrying over shared
 /// state (see [`carry_over_state`]) - whenever it no longer matches the
 /// model currently running.
@@ -845,8 +846,7 @@ impl Executor for SimulatedVehicle {
         } else {
             VEHICLE_Z_INDEX
         };
-        let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
-        let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
+        let placement_topics = PlacementTopics::new(captain);
         let limits_topic = captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits());
         let drawing_topic = captain.drawing(self.id);
 
@@ -864,10 +864,7 @@ impl Executor for SimulatedVehicle {
                 .expect("lost writer authorization for the vehicle_model_status topic");
         }
 
-        let mut placement = Placement::new(
-            start_state_topic.read().into_value(),
-            place_at_start_topic.read().into_value(),
-        );
+        let mut placement = Placement::new(&placement_topics.read());
         let mut state = state_from_start(placement.anchor(), applied_kind);
         let mut steering_angle_rad = 0.0;
         // Last tick's body-frame velocity, to differentiate into
@@ -928,19 +925,22 @@ impl Executor for SimulatedVehicle {
             }
 
             // Only the ego vehicle follows a placement at a pose of its own.
-            if let Some(anchor) = placement.update(
-                start_state_topic.read().into_value(),
-                place_at_start_topic.read().into_value(),
-                ego.is_some(),
-            ) {
+            let placement_inputs = placement_topics.read();
+            if let Some(anchor) = placement.update(&placement_inputs, &self.vehicle) {
                 state = state_from_start(anchor, applied_kind);
                 steering_angle_rad = 0.0;
                 previous_body_velocity = None;
             }
 
-            let command = match &ego {
-                Some(ego) => select_command(autonomous_topic.read(), ego.human.read()),
-                None => opponent_command(autonomous_topic.read(), speed_scale),
+            // On a race's grid, every command - even a human's - waits for
+            // the go.
+            let command = if placement_inputs.race.holds(&self.vehicle, now_ms()) {
+                VescCommand::default()
+            } else {
+                match &ego {
+                    Some(ego) => select_command(autonomous_topic.read(), ego.human.read()),
+                    None => opponent_command(autonomous_topic.read(), speed_scale),
+                }
             };
 
             let (next_state, next_steering_rad) = advance(

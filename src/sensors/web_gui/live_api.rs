@@ -777,6 +777,14 @@ pub fn place_at_start(request: &mut Request, captain: &Captain, writer_id: u16) 
     topic
         .write(writer_id, PlaceAtStart { requested, pose })
         .expect("lost writer authorization for the place_at_start topic");
+    stop_mapping(captain, writer_id);
+    json_response(&(), 200)
+}
+
+/// Turns SLAM's mapping off, as any placement of the ego vehicle must: it
+/// jumps, and dead reckoning - whose frame the map is built in - resets with
+/// it. Localization carries on.
+pub(super) fn stop_mapping(captain: &Captain, writer_id: u16) {
     let slam_state = captain
         .topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME)
         .read()
@@ -784,7 +792,6 @@ pub fn place_at_start(request: &mut Request, captain: &Captain, writer_id: u16) 
     if !slam_state.is_localization() {
         write_slam_command(captain, writer_id, SlamState::Off);
     }
-    json_response(&(), 200)
 }
 
 /// `GET /api/slam` - what [`crate::localization::Slam`] is doing, read from

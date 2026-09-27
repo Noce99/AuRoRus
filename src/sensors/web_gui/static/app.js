@@ -1033,6 +1033,7 @@ async function pollOpponents() {
   if (!opponentsPanelVisible()) return;
   const response = await fetchJSON("/api/opponents");
   opponentChoices = response;
+  updateRace(response);
   const outcome = response.last_outcome;
   if (outcome !== null && outcome.request === awaitedOpponentRequest) {
     awaitedOpponentRequest = null;
@@ -1224,6 +1225,170 @@ opponentForm.addEventListener("submit", async (event) => {
     showOpponentFormError(err.message);
   } finally {
     updateOpponentForm();
+  }
+});
+
+// --- the race start ---
+// "Start race" opens a dialog ordering every racer - the opponents by id,
+// then the ego vehicle - pole position first; starting lines them all up on
+// the grid (`/api/race/start`) and counts down to when the server releases
+// them.
+
+const raceOpenBtn = document.getElementById("race-open-btn");
+const raceOverlay = document.getElementById("race-overlay");
+const raceOrderEl = document.getElementById("race-order");
+const raceErrorEl = document.getElementById("race-error");
+const raceStartBtn = document.getElementById("race-start-btn");
+const raceCountdownEl = document.getElementById("race-countdown");
+
+/** The ego vehicle's color - `Color::AMBER`. */
+const EGO_CSS = "#ffb020";
+
+/** The racers in the open dialog, pole position first - each `"ego"` or
+ *  `{ opponent: id }`, as `/api/race/start` takes them. */
+let raceOrder = [];
+
+function racerKey(racer) {
+  return racer === "ego" ? "ego" : `opponent/${racer.opponent}`;
+}
+
+function defaultRaceOrder(list) {
+  const ids = list.map((opponent) => opponent.id).sort((a, b) => a - b);
+  return [...ids.map((id) => ({ opponent: id })), "ego"];
+}
+
+/** `raceOrder` for the opponents in `list`: the ones still running keep
+ *  their place, new ones are added last. */
+function syncRaceOrder(list) {
+  const running = new Map(defaultRaceOrder(list).map((racer) => [racerKey(racer), racer]));
+  const kept = raceOrder.filter((racer) => running.has(racerKey(racer)));
+  const keptKeys = new Set(kept.map(racerKey));
+  raceOrder = [...kept, ...[...running.values()].filter((racer) => !keptKeys.has(racerKey(racer)))];
+}
+
+function showRaceError(message) {
+  raceErrorEl.textContent = message ?? "";
+  raceErrorEl.hidden = message === null;
+}
+
+function moveRacer(index, by) {
+  const [racer] = raceOrder.splice(index, 1);
+  raceOrder.splice(index + by, 0, racer);
+  renderRaceOrder();
+}
+
+function renderRaceOrder() {
+  raceOrderEl.innerHTML = "";
+  const opponents = new Map((opponentChoices?.list ?? []).map((opponent) => [opponent.id, opponent]));
+  raceOrder.forEach((racer, index) => {
+    const opponent = racer === "ego" ? null : opponents.get(racer.opponent);
+    const li = document.createElement("li");
+    const position = document.createElement("span");
+    position.className = "race-position";
+    position.textContent = `P${index + 1}`;
+    const swatch = document.createElement("span");
+    swatch.className = "opponent-swatch";
+    swatch.style.background =
+      opponent === null ? EGO_CSS : paletteCss(opponentChoices, opponent?.spec.color);
+    const name = document.createElement("span");
+    name.className = "race-name";
+    name.textContent =
+      opponent === null ? "Ego vehicle" : `#${racer.opponent} ${opponent?.algorithm_label ?? ""}`;
+    const moveBtn = (label, by, title) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "race-move-btn";
+      btn.textContent = label;
+      btn.title = title;
+      btn.setAttribute("aria-label", `${title}: ${name.textContent}`);
+      btn.disabled = index + by < 0 || index + by >= raceOrder.length;
+      btn.addEventListener("click", () => moveRacer(index, by));
+      return btn;
+    };
+    li.append(
+      position,
+      swatch,
+      name,
+      moveBtn("▲", -1, "Move up"),
+      moveBtn("▼", 1, "Move down"),
+    );
+    raceOrderEl.appendChild(li);
+  });
+}
+
+/** Called on every `/api/opponents` poll: the button's state, and the open
+ *  dialog's racers. */
+function updateRace(response) {
+  raceOpenBtn.disabled = !response.race_start.available;
+  raceOpenBtn.title =
+    response.race_start.reason ??
+    "Line every vehicle up on the starting grid and start them all at once";
+  if (raceOverlay.hidden) return;
+  const before = raceOrder.map(racerKey).join();
+  syncRaceOrder(response.list);
+  if (raceOrder.map(racerKey).join() !== before) renderRaceOrder();
+}
+
+async function openRaceDialog() {
+  showRaceError(null);
+  try {
+    opponentChoices = await fetchJSON("/api/opponents");
+  } catch (err) {
+    showOpponentsError(`Couldn't open the dialog: ${err.message}`);
+    return;
+  }
+  raceOrder = defaultRaceOrder(opponentChoices.list);
+  renderRaceOrder();
+  raceStartBtn.disabled = false;
+  raceOverlay.hidden = false;
+}
+
+/** Shows 3, 2, 1 - one a second - then "Go!" `goInMs` from now. */
+function countDown(goInMs) {
+  const goAt = performance.now() + goInMs;
+  const show = (text, go) => {
+    raceCountdownEl.textContent = text;
+    raceCountdownEl.classList.toggle("race-go", go);
+    // Restart the animation for every number.
+    raceCountdownEl.classList.remove("race-tick");
+    void raceCountdownEl.offsetWidth;
+    raceCountdownEl.classList.add("race-tick");
+    raceCountdownEl.hidden = false;
+  };
+  const tick = () => {
+    const leftMs = goAt - performance.now();
+    if (leftMs > 0) {
+      show(String(Math.ceil(leftMs / 1000)), false);
+      // Just past each whole second, so a timer firing early never shows
+      // the same number twice.
+      setTimeout(tick, (leftMs % 1000 || 1000) + 5);
+    } else {
+      show("Go!", true);
+      setTimeout(() => (raceCountdownEl.hidden = true), 1000);
+    }
+  };
+  tick();
+}
+
+raceOpenBtn.addEventListener("click", openRaceDialog);
+document.getElementById("race-cancel-btn").addEventListener("click", () => {
+  raceOverlay.hidden = true;
+});
+raceStartBtn.addEventListener("click", async () => {
+  showRaceError(null);
+  raceStartBtn.disabled = true;
+  try {
+    const { go_in_ms } = await fetchJSON("/api/race/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: raceOrder }),
+    });
+    raceOverlay.hidden = true;
+    countDown(go_in_ms);
+  } catch (err) {
+    showRaceError(err.message);
+  } finally {
+    raceStartBtn.disabled = false;
   }
 });
 
