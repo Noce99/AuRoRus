@@ -132,6 +132,18 @@ MapView.init({
 });
 
 // ---------------------------------------------------------------------
+// Bottom panel: the lap telemetry recorded at the playback time (see
+// /lap_panel.js) - not refetched while that time stands still.
+// ---------------------------------------------------------------------
+
+const playbackTimeUs = () => Math.round(window.PlaybackClock.currentTimeUs);
+
+LapPanel.init({
+  fetchTelemetry: () => fetchJSON(`/api/lap_telemetry?t_us=${playbackTimeUs()}`),
+  pollKey: playbackTimeUs,
+});
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 

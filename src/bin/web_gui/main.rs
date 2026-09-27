@@ -7,6 +7,7 @@ use aurorus::sensors::{
     MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
     SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
+use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
 use aurorus::topics::VehicleModelKind;
 use aurorus::{Executor, Runner};
 
@@ -37,6 +38,10 @@ fn main() {
     let planning_config = aurorus::config::load(&config.config_dir.join("planning/race_line.toml"))
         .unwrap_or_else(|_| PlanningConfig::default());
 
+    let lap_telemetry_config =
+        aurorus::config::load(&config.config_dir.join("telemetry/lap_telemetry.toml"))
+            .unwrap_or_else(|_| LapTelemetryConfig::default());
+
     let mut runner = Runner::new();
     runner.activate_verbose();
 
@@ -63,6 +68,9 @@ fn main() {
             vehicle_config,
         )
         .boxed(),
+    );
+    runner.add_executor(
+        LapTelemetryRecorder::new("LapTelemetryRecorder", lap_telemetry_config).boxed(),
     );
     runner.add_executor(AutonomousControlsHandler::new("AutonomousControlsHandler").boxed());
     // Every file in src/autonomous_control/ - see `autonomous_control`'s docs.

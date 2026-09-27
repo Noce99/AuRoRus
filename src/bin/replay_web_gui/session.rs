@@ -1,13 +1,15 @@
 //! [`Session`]: a `.debug` file, loaded into memory for playback - every
 //! topic's change timestamps grouped by executor (for the timeline), and
-//! every drawing topic's recorded [`Drawing`]s (for the main canvas). See
+//! every drawing topic's recorded [`Drawing`]s (for the main canvas), and
+//! the recorded [`LapTelemetry`] (for the bottom panel). See
 //! `aurorus::debug_format` for the file layout this reads.
 //!
-//! Nothing here knows about any particular topic: the canvas shows whatever
-//! the recorded executors drew, exactly like `web_gui` does live.
+//! Besides the lap telemetry, nothing here knows about any particular
+//! topic: the canvas shows whatever the recorded executors drew, exactly
+//! like `web_gui` does live.
 
 use aurorus::debug_format::{DebugFileReader, Sample};
-use aurorus::topics::{DRAW_TOPIC_PREFIX, Drawing};
+use aurorus::topics::{DRAW_TOPIC_PREFIX, Drawing, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry};
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
@@ -70,7 +72,22 @@ pub struct Session {
     /// run of this server - possibly of another file - are never mistaken
     /// for this one's.
     pub epoch: u64,
+    /// `(timestamp_us, index into samples)` of every recorded
+    /// [`LAP_TELEMETRY_TOPIC_NAME`] value, in time order.
+    lap_telemetry: Vec<(u64, usize)>,
     samples: Vec<Sample>,
+}
+
+/// The [`LapTelemetry`] shown at some playback time, as served by
+/// `GET /api/lap_telemetry`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LapTelemetryAt {
+    pub telemetry: LapTelemetry,
+    /// The recorded version's number, counted from `1` - `0` if nothing was
+    /// recorded yet at that time.
+    pub write_count: u64,
+    /// When that version was written, or `None` for `write_count == 0`.
+    pub written_at_us: Option<u64>,
 }
 
 /// A simple, stable hash (FNV-1a) of a topic name into a palette slot - all
@@ -95,6 +112,7 @@ impl Session {
         let mut executor_order: Vec<String> = Vec::new();
         let mut executor_topics: HashMap<String, Vec<TopicEntry>> = HashMap::new();
         let mut drawings = Vec::new();
+        let mut lap_telemetry = Vec::new();
         for (topic_id, meta) in reader.topics.iter().enumerate() {
             let versions: Vec<(u64, usize)> = reader
                 .samples
@@ -104,6 +122,9 @@ impl Session {
                 .map(|(index, sample)| (sample.timestamp_us, index))
                 .collect();
 
+            if meta.name == LAP_TELEMETRY_TOPIC_NAME {
+                lap_telemetry = versions.clone();
+            }
             if meta.name.starts_with(DRAW_TOPIC_PREFIX) {
                 drawings.push(DrawingTrack {
                     topic: meta.name.clone(),
@@ -154,6 +175,7 @@ impl Session {
             executors,
             drawings,
             epoch,
+            lap_telemetry,
             samples: reader.samples,
         })
     }
@@ -184,6 +206,35 @@ impl Session {
         let decoded =
             bincode::serde::decode_from_slice::<Drawing, _>(payload, bincode::config::standard());
         Some(decoded.map(|(drawing, _)| drawing).unwrap_or_default())
+    }
+
+    /// The [`LapTelemetry`] recorded last at or before `t_us` - the default
+    /// (empty) one before the first, or for a sample that doesn't decode.
+    pub fn lap_telemetry_at(&self, t_us: u64) -> LapTelemetryAt {
+        let count = self
+            .lap_telemetry
+            .partition_point(|(written_at_us, _)| *written_at_us <= t_us);
+        let Some(&(written_at_us, sample_index)) =
+            count.checked_sub(1).map(|i| &self.lap_telemetry[i])
+        else {
+            return LapTelemetryAt {
+                telemetry: LapTelemetry::default(),
+                write_count: 0,
+                written_at_us: None,
+            };
+        };
+        let payload = &self.samples[sample_index].payload;
+        let telemetry = bincode::serde::decode_from_slice::<LapTelemetry, _>(
+            payload,
+            bincode::config::standard(),
+        )
+        .map(|(telemetry, _)| telemetry)
+        .unwrap_or_default();
+        LapTelemetryAt {
+            telemetry,
+            write_count: count as u64,
+            written_at_us: Some(written_at_us),
+        }
     }
 
     pub fn track(&self, topic: &str) -> Option<&DrawingTrack> {
@@ -298,8 +349,45 @@ mod tests {
         assert_eq!(session.drawing(track, 2), Some(dot_at(2.0)));
         assert_eq!(session.drawing(track, 3), None);
 
+        // Nothing recorded on the lap telemetry topic.
+        assert_eq!(session.lap_telemetry_at(9_999).write_count, 0);
+
         // A sample that doesn't decode plays back as an empty drawing.
         let map = session.track("draw/MapServer").unwrap();
         assert_eq!(session.drawing(map, 1), Some(Drawing::default()));
+    }
+
+    #[test]
+    fn lap_telemetry_plays_back_holding_the_last_value() {
+        let path = temp_path("lap_telemetry.debug");
+        let mut writer = DebugFileWriter::create(&path, 100.0).unwrap();
+        let topic_id = writer
+            .topic_id(LAP_TELEMETRY_TOPIC_NAME, "LapTelemetryRecorder")
+            .unwrap();
+        let first = LapTelemetry {
+            lap_length_m: 10.0,
+            ..LapTelemetry::default()
+        };
+        let second = LapTelemetry {
+            lap_length_m: 20.0,
+            ..LapTelemetry::default()
+        };
+        writer
+            .write_sample(topic_id, 1_000, &encode(&first))
+            .unwrap();
+        writer
+            .write_sample(topic_id, 2_000, &encode(&second))
+            .unwrap();
+        writer.flush().unwrap();
+
+        let session = Session::load(&path).unwrap();
+        let before = session.lap_telemetry_at(999);
+        assert_eq!(before.write_count, 0);
+        assert_eq!(before.telemetry, LapTelemetry::default());
+        let at = session.lap_telemetry_at(1_500);
+        assert_eq!(at.write_count, 1);
+        assert_eq!(at.written_at_us, Some(1_000));
+        assert_eq!(at.telemetry, first);
+        assert_eq!(session.lap_telemetry_at(5_000).telemetry, second);
     }
 }

@@ -2068,3 +2068,9 @@ refreshMapList()
 populateVehicleModelOptions()
   .then(() => pollVehicleModel())
   .catch((err) => console.error(err));
+
+// ---------------------------------------------------------------------
+// Bottom panel: lap telemetry (see /lap_panel.js)
+// ---------------------------------------------------------------------
+
+LapPanel.init({ fetchTelemetry: () => fetchJSON("/api/lap_telemetry") });

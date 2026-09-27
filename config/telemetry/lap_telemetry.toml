@@ -1,0 +1,28 @@
+# Configuration for `aurorus::telemetry::LapTelemetryRecorder`.
+
+# How often the vehicle's pose is sampled, in Hz - no faster than the
+# simulated vehicle ticks, since a sample is only used once.
+sample_rate_hz = 100.0
+# How often the lap_telemetry topic is published, in Hz - a completed lap
+# is published right away.
+publish_rate_hz = 10.0
+# Where the pose and speed come from: "ground_truth" (the simulator's
+# vehicle_status) or "localization" (SLAM's pose and odometry's speed).
+pose_source = "ground_truth"
+# How many bins one lap's errors are stored in, along the race line.
+bins = 500
+# How far along the line, in meters, the vehicle's projection is searched
+# from where it was the previous sample - so it never jumps to another
+# stretch of track that happens to run close by.
+search_window_m = 3.0
+# A pose farther than this, in meters, from the previous sample is a
+# teleport, not driving: the lap in progress is dropped.
+max_jump_m = 1.0
+# A vehicle placed within this distance, in meters, past the start/finish
+# line starts a timed lap as soon as it moves - a standing start.
+# Anywhere else, the first lap is an untimed out lap up to the line.
+start_tolerance_m = 0.5
+# Fraction of the line's length the vehicle must have progressed along it
+# for a crossing of the start/finish line to complete a lap - so reversing
+# over the line and back doesn't.
+min_lap_fraction = 0.9

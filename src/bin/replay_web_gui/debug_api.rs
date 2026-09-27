@@ -4,11 +4,12 @@
 //! canvas renders a recording with the very same frontend code.
 
 use crate::session::Session;
+use aurorus::topics::LapTelemetry;
 use aurorus::web::draw::{
     DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster,
     without_raster_pixels,
 };
-use aurorus::web::{json_response, not_found, read_json};
+use aurorus::web::{bad_request, json_response, not_found, query_param, read_json};
 use tiny_http::{Request, ResponseBox};
 
 #[derive(serde::Serialize)]
@@ -131,4 +132,33 @@ pub fn draw_raster(url: &str, session: &Session) -> ResponseBox {
         return not_found();
     };
     raster_response(&drawing, query.shape)
+}
+
+/// What `GET /api/lap_telemetry` serves - the same shape as `web_gui`'s
+/// live endpoint, so the bottom panel reads both alike.
+#[derive(serde::Serialize)]
+struct LapTelemetryBody<'a> {
+    value: &'a LapTelemetry,
+    write_count: u64,
+    /// How long before the playback time it was recorded.
+    age_ms: Option<f64>,
+}
+
+/// `GET /api/lap_telemetry?t_us=...` - the lap telemetry recorded last at or
+/// before playback time `t_us`.
+pub fn lap_telemetry(url: &str, session: &Session) -> ResponseBox {
+    let Some(t_us) = query_param(url, "t_us").and_then(|t_us| t_us.parse::<u64>().ok()) else {
+        return bad_request("missing or invalid t_us");
+    };
+    let at = session.lap_telemetry_at(t_us);
+    json_response(
+        &LapTelemetryBody {
+            value: &at.telemetry,
+            write_count: at.write_count,
+            age_ms: at
+                .written_at_us
+                .map(|written_at_us| t_us.saturating_sub(written_at_us) as f64 / 1000.0),
+        },
+        200,
+    )
 }

@@ -5,6 +5,7 @@
 mod autonomous_control;
 mod drawing;
 mod imu;
+mod lap_telemetry;
 mod lidar_scan;
 mod map;
 mod odometry;
@@ -29,6 +30,7 @@ pub use autonomous_control::{
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, DrawingElement, Shape};
 pub use imu::{IMU_TOPIC_NAME, ImuReading};
+pub use lap_telemetry::{LAP_TELEMETRY_TOPIC_NAME, LapRecord, LapTelemetry, LapTrace};
 pub use lidar_scan::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 pub use map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
 pub use odometry::{ODOMETRY_TOPIC_NAME, Odometry};

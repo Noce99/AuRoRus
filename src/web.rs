@@ -5,9 +5,10 @@
 //! Both `web_gui` (driving live) and `replay_web_gui` (replaying a
 //! recording) show the same map canvas, fed the same way - through the
 //! drawing protocol in [`draw`] - so the JavaScript that paints it
-//! ([`MAP_VIEW_JS`]), the client of that protocol ([`DRAW_LAYERS_JS`]), and
-//! the CSS that frames them ([`BASE_CSS`]) live here once and are served by
-//! both, ahead of each binary's own `app.js` and `style.css`.
+//! ([`MAP_VIEW_JS`]), the client of that protocol ([`DRAW_LAYERS_JS`]), the
+//! lap telemetry bottom panel under it ([`LAP_PANEL_JS`]), and the CSS that
+//! frames them ([`BASE_CSS`]) live here once and are served by both, ahead
+//! of each binary's own `app.js` and `style.css`.
 
 pub mod draw;
 
@@ -20,6 +21,8 @@ use tiny_http::{Method, Request, Response, ResponseBox};
 pub const MAP_VIEW_JS: &str = include_str!("web/map_view.js");
 /// The shared drawing-protocol client, served at `/draw_layers.js`.
 pub const DRAW_LAYERS_JS: &str = include_str!("web/draw_layers.js");
+/// The shared bottom panel (lap telemetry), served at `/lap_panel.js`.
+pub const LAP_PANEL_JS: &str = include_str!("web/lap_panel.js");
 /// The shared page/canvas styles, served at `/base.css`.
 pub const BASE_CSS: &str = include_str!("web/base.css");
 
@@ -130,6 +133,7 @@ pub fn shared_asset(path: &str) -> Option<ResponseBox> {
     let (body, content_type) = match path {
         "/map_view.js" => (MAP_VIEW_JS, "text/javascript; charset=utf-8"),
         "/draw_layers.js" => (DRAW_LAYERS_JS, "text/javascript; charset=utf-8"),
+        "/lap_panel.js" => (LAP_PANEL_JS, "text/javascript; charset=utf-8"),
         "/base.css" => (BASE_CSS, "text/css; charset=utf-8"),
         _ => return None,
     };

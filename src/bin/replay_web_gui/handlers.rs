@@ -33,6 +33,7 @@ pub fn handle(mut request: Request, session: &Session, file_name: &str) {
         (Method::Get, "/api/timeline") => debug_api::timeline(session),
         (Method::Post, "/api/draw") => debug_api::draw(&mut request, session),
         (Method::Get, "/api/draw/raster") => debug_api::draw_raster(&url, session),
+        (Method::Get, "/api/lap_telemetry") => debug_api::lap_telemetry(&url, session),
         _ => not_found(),
     };
 

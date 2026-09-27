@@ -117,6 +117,7 @@ pub fn handle(
         (Method::Post, "/api/planning_start") => {
             live_api::planning_start(&mut request, captain, writer_id)
         }
+        (Method::Get, "/api/lap_telemetry") => live_api::lap_telemetry(captain),
         (Method::Get, "/api/race_lines") => race_lines_api::list(captain),
         (Method::Get, "/api/opponents") => opponents_api::list(captain),
         (Method::Post, "/api/opponents") => opponents_api::add(&mut request, captain, writer_id),

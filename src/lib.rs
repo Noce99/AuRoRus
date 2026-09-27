@@ -37,5 +37,6 @@ pub mod localization;
 pub mod opponents;
 pub mod planning;
 pub mod sensors;
+pub mod telemetry;
 pub mod topics;
 pub mod web;

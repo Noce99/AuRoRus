@@ -17,12 +17,13 @@ use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
-    HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
-    PLACE_AT_START_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
-    PLANNING_STATUS_TOPIC_NAME, PlaceAtStart, PlanningObjective, PlanningParameters,
-    PlanningRequest, PlanningState, PlanningStatus, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
-    SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus,
-    StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry,
+    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
+    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
+    PlaceAtStart, PlanningObjective, PlanningParameters, PlanningRequest, PlanningState,
+    PlanningStatus, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
+    SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus, StartState,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
     VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
@@ -796,6 +797,20 @@ pub fn slam(captain: &Captain) -> ResponseBox {
             stamped_json(&status.value, status.meta)
         }
         None => stamped_json(&SlamStatus::default(), WriteMeta::default()),
+    }
+}
+
+/// `GET /api/lap_telemetry` - the ego vehicle's laps, read from the
+/// `lap_telemetry` topic (see [`crate::telemetry::LapTelemetryRecorder`]),
+/// as a [`StampedBody`]. The default (empty) telemetry if nothing publishes
+/// that topic.
+pub fn lap_telemetry(captain: &Captain) -> ResponseBox {
+    match captain.try_topic::<LapTelemetry>(LAP_TELEMETRY_TOPIC_NAME) {
+        Some(topic) => {
+            let telemetry = topic.read();
+            stamped_json(&telemetry.value, telemetry.meta)
+        }
+        None => stamped_json(&LapTelemetry::default(), WriteMeta::default()),
     }
 }
 
