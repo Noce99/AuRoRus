@@ -1886,8 +1886,118 @@ function sendHumanCommandIfChanged() {
 setInterval(() => sendHumanCommand(currentHumanCommand()), HUMAN_COMMAND_HEARTBEAT_MS);
 
 // ---------------------------------------------------------------------
+// Place-vehicle tool (the button under the zoom slider): the first click
+// on the map picks where the vehicle goes, the second where it faces - an
+// arrow follows the mouse in between - then the ego vehicle is placed
+// there at rest, like RViz's "2D Pose Estimate".
+// ---------------------------------------------------------------------
+
+const placePoseBtn = document.getElementById("place-pose-btn");
+
+/** Clicks closer than this to the first one (in CSS pixels) are too short
+ *  to give a heading, and are ignored. */
+const PLACE_POSE_MIN_ARROW_PX = 5;
+const PLACE_POSE_COLOR = "#ff8ae8";
+
+/** `"idle"`, `"position"` (waiting for the first click) or `"heading"`
+ *  (waiting for the second), plus the world points picked so far. */
+const placePose = { stage: "idle", start: null, current: null };
+
+const placePoseTool = {
+  cursor: "crosshair",
+
+  onClick(world) {
+    if (placePose.stage === "position") {
+      placePose.start = world;
+      placePose.current = world;
+      placePose.stage = "heading";
+      MapView.requestRedraw();
+      return;
+    }
+    const { start } = placePose;
+    const lengthPx = Math.hypot(world.x - start.x, world.y - start.y) * MapView.scalePxPerMeter();
+    if (lengthPx < PLACE_POSE_MIN_ARROW_PX * (window.devicePixelRatio || 1)) return;
+    // Same axes as the `vehicle` painter, which rotates by the heading
+    // straight in screen space.
+    const pose = { x_m: start.x, y_m: start.y, heading_rad: Math.atan2(world.y - start.y, world.x - start.x) };
+    disarmPlacePose();
+    fetch("/api/place_at_start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pose),
+    }).catch((err) => console.error(err));
+  },
+
+  onMove(world) {
+    if (placePose.stage !== "heading") return;
+    placePose.current = world;
+    MapView.requestRedraw();
+  },
+
+  onCancel() {
+    resetPlacePose();
+  },
+
+  drawOverlay(ctx, { worldToScreen, dpr }) {
+    if (placePose.stage !== "heading") return;
+    const scale = dpr();
+    const from = worldToScreen(placePose.start.x, placePose.start.y);
+    const to = worldToScreen(placePose.current.x, placePose.current.y);
+    ctx.fillStyle = PLACE_POSE_COLOR;
+    ctx.strokeStyle = PLACE_POSE_COLOR;
+
+    ctx.beginPath();
+    ctx.arc(from.x, from.y, 4 * scale, 0, 2 * Math.PI);
+    ctx.fill();
+
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length < 1) return;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const headLength = Math.min(14 * scale, length);
+    ctx.lineWidth = 3 * scale;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x - headLength * 0.8 * Math.cos(angle), to.y - headLength * 0.8 * Math.sin(angle));
+    ctx.stroke();
+
+    ctx.translate(to.x, to.y);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-headLength, -headLength * 0.5);
+    ctx.lineTo(-headLength, headLength * 0.5);
+    ctx.closePath();
+    ctx.fill();
+  },
+};
+
+function resetPlacePose() {
+  placePose.stage = "idle";
+  placePose.start = null;
+  placePose.current = null;
+  placePoseBtn.classList.remove("active");
+}
+
+function disarmPlacePose() {
+  resetPlacePose();
+  MapView.setPointerTool(null);
+}
+
+placePoseBtn.addEventListener("click", () => {
+  if (placePose.stage !== "idle") {
+    disarmPlacePose();
+    return;
+  }
+  placePose.stage = "position";
+  placePoseBtn.classList.add("active");
+  MapView.setPointerTool(placePoseTool);
+});
+
+// ---------------------------------------------------------------------
 // "R" -> restart everything, then reload this page
 // "P" -> place the vehicle at the start line
+// "Esc" -> cancel the place-vehicle tool
 // ---------------------------------------------------------------------
 
 window.addEventListener("keydown", (event) => {
@@ -1908,6 +2018,12 @@ window.addEventListener("keydown", (event) => {
     case "p":
       event.preventDefault();
       fetch("/api/place_at_start", { method: "POST" }).catch((err) => console.error(err));
+      break;
+    case "escape":
+      if (placePose.stage !== "idle") {
+        event.preventDefault();
+        disarmPlacePose();
+      }
       break;
   }
 });

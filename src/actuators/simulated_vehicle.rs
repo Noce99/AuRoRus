@@ -18,8 +18,8 @@ use crate::environment::simulator::vehicle::{
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
-    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME,
-    Shape, StartState, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement,
+    START_STATE_TOPIC_NAME, Shape, StartState, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M,
     VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleModelKind,
     VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VehicleStatus,
@@ -710,7 +710,7 @@ struct EgoTopics {
 /// with the steering centered, and places the vehicle there again - steering
 /// re-centered - every time [`START_STATE_TOPIC_NAME`] changes (e.g. a map
 /// change) or [`PLACE_AT_START_TOPIC_NAME`] is bumped (e.g. `web_gui`'s "P"
-/// key). Also watches [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and
+/// key) - at the pose that request carries, if any (see [`Placement`]). Also watches [`VEHICLE_MODEL_SELECTION_TOPIC_NAME`] each tick and
 /// switches to [`default_model`] of the wanted kind - carrying over shared
 /// state (see [`carry_over_state`]) - whenever it no longer matches the
 /// model currently running.
@@ -864,9 +864,11 @@ impl Executor for SimulatedVehicle {
                 .expect("lost writer authorization for the vehicle_model_status topic");
         }
 
-        let mut applied_start = start_state_topic.read().into_value();
-        let mut applied_place_request = place_at_start_topic.read().requested;
-        let mut state = state_from_start(applied_start, applied_kind);
+        let mut placement = Placement::new(
+            start_state_topic.read().into_value(),
+            place_at_start_topic.read().into_value(),
+        );
+        let mut state = state_from_start(placement.anchor(), applied_kind);
         let mut steering_angle_rad = 0.0;
         // Last tick's body-frame velocity, to differentiate into
         // `VehicleStatus`'s accelerations. `None` whenever the state was just
@@ -925,13 +927,14 @@ impl Executor for SimulatedVehicle {
                 }
             }
 
-            let wanted_start = start_state_topic.read().into_value();
-            let wanted_place_request = place_at_start_topic.read().requested;
-            if wanted_start != applied_start || wanted_place_request != applied_place_request {
-                state = state_from_start(wanted_start, applied_kind);
+            // Only the ego vehicle follows a placement at a pose of its own.
+            if let Some(anchor) = placement.update(
+                start_state_topic.read().into_value(),
+                place_at_start_topic.read().into_value(),
+                ego.is_some(),
+            ) {
+                state = state_from_start(anchor, applied_kind);
                 steering_angle_rad = 0.0;
-                applied_start = wanted_start;
-                applied_place_request = wanted_place_request;
                 previous_body_velocity = None;
             }
 

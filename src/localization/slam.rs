@@ -10,8 +10,10 @@
 //! on it - [`MAP_TOPIC_NAME`]; publishes
 //! [`SLAM_STATUS_TOPIC_NAME`],
 //! [`SLAM_MAP_TOPIC_NAME`], and - optionally - a drawing of the map, the
-//! trajectory, and the estimated vehicle, anchored at
-//! [`START_STATE_TOPIC_NAME`] so it overlays the true map.
+//! trajectory, and the estimated vehicle, anchored where odometry was last
+//! reset - [`START_STATE_TOPIC_NAME`], or the pose a
+//! [`PLACE_AT_START_TOPIC_NAME`] request placed the vehicle at (see
+//! [`Placement`]) - so it overlays the true map.
 
 mod correlation_grid;
 mod localizer;
@@ -29,9 +31,10 @@ mod scan_matcher;
 use crate::environment;
 use crate::topics::{
     Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
-    Odometry, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
-    SLAM_STATUS_TOPIC_NAME, START_STATE_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap,
-    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState,
+    Odometry, PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, SLAM_COMMAND_TOPIC_NAME,
+    SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, START_STATE_TOPIC_NAME,
+    SelectedMap, Shape, SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState,
+    SlamStatus, StartState,
 };
 use crate::{Captain, Executor, Ticker};
 use localizer::{Localizer, LocalizerParams};
@@ -276,11 +279,18 @@ impl Executor for Slam {
         let save_topic = captain.topic::<SlamSaveRequest>(SLAM_SAVE_TOPIC_NAME);
         let selected_map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let start_state_topic = captain.topic::<StartState>(START_STATE_TOPIC_NAME);
+        let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
         let status_topic = captain.topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME);
         let map_topic = captain.topic::<SlamMap>(SLAM_MAP_TOPIC_NAME);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
 
         let mut state = State::new(&self.config);
+        // Where odometry was last reset: the start line, or wherever the
+        // vehicle was placed since.
+        let mut placement = Placement::new(
+            start_state_topic.read().into_value(),
+            place_at_start_topic.read().into_value(),
+        );
         // Start from whatever is there now, so a scan left over from before
         // this executor started isn't taken.
         let mut last_scan_write = lidar_topic.read().meta.write_count;
@@ -294,6 +304,11 @@ impl Executor for Slam {
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
+            placement.update(
+                start_state_topic.read().into_value(),
+                place_at_start_topic.read().into_value(),
+                true,
+            );
             let odometry = odometry_topic.read();
             if last_odometry_write != Some(odometry.meta.write_count) {
                 last_odometry_write = Some(odometry.meta.write_count);
@@ -329,7 +344,7 @@ impl Executor for Slam {
                 state.update_localization(
                     &selected_map.value,
                     selected_map.meta.write_count,
-                    &start_state_topic.read(),
+                    &placement.anchor(),
                     self.config.localizer_params(),
                 );
             } else {
@@ -387,7 +402,7 @@ impl Executor for Slam {
                                 &map,
                                 state.mapper.pose(),
                                 &state.mapper.loop_edges(),
-                                &start_state_topic.read(),
+                                &placement.anchor(),
                             ),
                         )
                         .expect("lost writer authorization for SLAM's drawing topic");

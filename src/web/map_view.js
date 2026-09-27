@@ -10,8 +10,9 @@
 // What's drawn, and when, comes from the host - through `/draw_layers.js`
 // in both - as hooks supplied to `MapView.init`. Everything else (canvas
 // sizing, world <-> screen transforms, painting every shape kind of a
-// `Drawing` topic, wheel/drag/slider zoom and pan, the sidebar toggle, the
-// redraw loop) is identical and handled here.
+// `Drawing` topic, wheel/drag/slider zoom and pan, pointer tools that take
+// canvas clicks instead of a pan, the sidebar toggle, the redraw loop) is
+// identical and handled here.
 //
 // Served at /map_view.js by both binaries, and loaded before their own
 // app.js, which then talks to the `MapView` global.
@@ -42,6 +43,10 @@ window.MapView = (() => {
   let statusVerticalSize = null;
   let statusSpeed = null;
   let zoomSlider = null;
+
+  /** The host's pointer tool while one is armed, else null - see
+   *  `setPointerTool`. */
+  let pointerTool = null;
 
   // -------------------------------------------------------------------
   // Small helpers
@@ -306,6 +311,10 @@ window.MapView = (() => {
     ctx.fillStyle = "#008080";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawLayers(nowMs);
+    if (pointerTool && pointerTool.drawOverlay) {
+      pointerTool.drawOverlay(ctx, { worldToScreen, dpr });
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
   }
 
   function updateStatusBar(nowMs) {
@@ -415,9 +424,30 @@ window.MapView = (() => {
 
     canvas.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
+      if (pointerTool) {
+        // An armed tool takes the click instead of it starting a pan.
+        const { x, y } = clientToDevice(event.clientX, event.clientY);
+        if (pointerTool.onClick) pointerTool.onClick(screenToWorld(x, y), event);
+        return;
+      }
       dragging = true;
       canvas.classList.add("panning");
       lastDevice = clientToDevice(event.clientX, event.clientY);
+    });
+
+    canvas.addEventListener("mousemove", (event) => {
+      if (!pointerTool || !pointerTool.onMove) return;
+      const { x, y } = clientToDevice(event.clientX, event.clientY);
+      pointerTool.onMove(screenToWorld(x, y), event);
+    });
+
+    // Right-click cancels an armed tool, rather than opening the menu.
+    canvas.addEventListener("contextmenu", (event) => {
+      if (!pointerTool) return;
+      event.preventDefault();
+      const tool = pointerTool;
+      setPointerTool(null);
+      if (tool.onCancel) tool.onCancel();
     });
 
     window.addEventListener("mousemove", (event) => {
@@ -469,6 +499,20 @@ window.MapView = (() => {
     // `resize` listener on top of it would only buy a second redraw for the
     // same event.
     new ResizeObserver(requestRedraw).observe(canvas.parentElement);
+  }
+
+  /** Arms `tool` - or disarms whatever is armed, given null. While armed,
+   *  a left click on the canvas goes to `tool.onClick(world, event)`
+   *  instead of starting a pan, mouse moves over it to
+   *  `tool.onMove(world, event)`, and `tool.drawOverlay(ctx, {worldToScreen,
+   *  dpr})` paints on top of every layer each frame; the canvas shows
+   *  `tool.cursor`. A right click disarms it, calling `tool.onCancel()`.
+   *  Wheel zoom keeps working throughout. */
+  function setPointerTool(tool) {
+    pointerTool = tool;
+    // Cleared, the inline cursor gives way to the stylesheet's grab cursor.
+    canvas.style.cursor = tool && tool.cursor ? tool.cursor : "";
+    requestRedraw();
   }
 
   /** Selects the nav rail's `name` button and shows the right panel's
@@ -574,6 +618,7 @@ window.MapView = (() => {
     },
 
     requestRedraw,
+    setPointerTool,
     home,
     selectPanel,
     scalePxPerMeter,

@@ -3,7 +3,7 @@
 //! `vehicle_model_status`, and `autonomous_algorithm_status` topics), and the
 //! write endpoints a driver uses to steer the vehicle, pick its map, model,
 //! and autonomous algorithm, tune that model and algorithm, place it at the
-//! start line, drive SLAM, and plan a race line (`map_selection`,
+//! start line or at a pose of its own, drive SLAM, and plan a race line (`map_selection`,
 //! `human_vesc_command`, `vehicle_model_selection`,
 //! `vehicle_model_parameters`, `autonomous_algorithm_selection`,
 //! `autonomous_parameters`, `place_at_start`, `slam_command`, `slam_save`,
@@ -22,11 +22,11 @@ use crate::topics::{
     PLANNING_STATUS_TOPIC_NAME, PlaceAtStart, PlanningObjective, PlanningParameters,
     PlanningRequest, PlanningState, PlanningStatus, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
     SLAM_STATUS_TOPIC_NAME, SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus,
-    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
     VehicleModelSelection, VehicleModelStatus, VescCommand,
 };
-use crate::web::{bad_request, error_response, json_response, read_json};
+use crate::web::{bad_request, error_response, json_response, read_json, read_optional_json};
 use crate::{Captain, WriteMeta};
 use crate::{actuators, autonomous_control, planning};
 use std::path::Path;
@@ -731,19 +731,50 @@ pub fn restart(captain: &Captain) -> ResponseBox {
     json_response(&(), 200)
 }
 
+#[derive(serde::Deserialize)]
+struct PlaceAtPoseBody {
+    x_m: f64,
+    y_m: f64,
+    heading_rad: f64,
+}
+
 /// `POST /api/place_at_start` - bumps `place_at_start`'s counter, asking
 /// [`crate::actuators::SimulatedVehicle`] to place the vehicle at whatever
-/// `start_state` currently holds, e.g. from the "P" keyboard shortcut. Unlike
-/// [`restart`], this doesn't tear anything down - just resets the vehicle's
-/// simulated position/heading/speed in place. Also turns SLAM's mapping
-/// off: the vehicle jumps, and dead reckoning - whose frame the map is built
-/// in - resets with it. Localization carries on: SLAM restarts it from the
-/// start by itself when dead reckoning resets.
-pub fn place_at_start(captain: &Captain, writer_id: u16) -> ResponseBox {
+/// `start_state` currently holds, e.g. from the "P" keyboard shortcut - or,
+/// given a body `{"x_m", "y_m", "heading_rad"}`, to place the ego vehicle
+/// (only - opponents stay put) at rest at that pose instead, e.g. from the
+/// map's place-vehicle tool. Unlike [`restart`], this doesn't tear anything
+/// down - just resets the vehicle's simulated position/heading/speed in
+/// place. Also turns SLAM's mapping off: the vehicle jumps, and dead
+/// reckoning - whose frame the map is built in - resets with it.
+/// Localization carries on: SLAM restarts it from wherever the vehicle was
+/// placed by itself when dead reckoning resets.
+pub fn place_at_start(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
+    let body: Option<PlaceAtPoseBody> = match read_optional_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let pose = match body {
+        None => None,
+        Some(body) => {
+            if ![body.x_m, body.y_m, body.heading_rad]
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                return bad_request("x_m, y_m and heading_rad must be finite");
+            }
+            Some(StartState {
+                x_m: body.x_m,
+                y_m: body.y_m,
+                heading_rad: body.heading_rad,
+                speed_mps: 0.0,
+            })
+        }
+    };
     let topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
     let requested = topic.read().requested.wrapping_add(1);
     topic
-        .write(writer_id, PlaceAtStart { requested })
+        .write(writer_id, PlaceAtStart { requested, pose })
         .expect("lost writer authorization for the place_at_start topic");
     let slam_state = captain
         .topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME)

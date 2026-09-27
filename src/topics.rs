@@ -36,7 +36,7 @@ pub use opponents::{
     NumberedRequest, OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor,
     OpponentOutcome, OpponentRequest, OpponentRequests, OpponentSpec, Opponents,
 };
-pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart};
+pub use place_at_start::{PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement};
 pub use planning::{
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
     PlanningObjective, PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState,

@@ -8,10 +8,9 @@ use crate::opponents::validate;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AlgorithmParameter, AlgorithmRequirements,
     AutonomousAlgorithmStatus, AvailableAlgorithm, Color, MAP_TOPIC_NAME,
-    OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor,
-    OpponentOutcome, OpponentRequest, OpponentRequests, OpponentSpec, Opponents,
-    RACE_LINE_TOPIC_NAME, SelectedMap, SelectedRaceLine, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VehicleModelStatus,
+    OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor, OpponentOutcome,
+    OpponentRequest, OpponentRequests, OpponentSpec, Opponents, RACE_LINE_TOPIC_NAME, SelectedMap,
+    SelectedRaceLine, VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelStatus,
 };
 use crate::web::{bad_request, json_response, read_json};
 use std::path::PathBuf;
@@ -189,7 +188,11 @@ pub fn delete(request: &mut Request, captain: &Captain, writer_id: u16) -> Respo
         Ok(body) => body,
         Err(response) => return response,
     };
-    if !opponents(captain).list.iter().any(|opponent| opponent.id == body.id) {
+    if !opponents(captain)
+        .list
+        .iter()
+        .any(|opponent| opponent.id == body.id)
+    {
         return bad_request(&format!("there's no opponent {}", body.id));
     }
     let request = queue(captain, writer_id, OpponentRequest::Delete(body.id));

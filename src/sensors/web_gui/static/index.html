@@ -35,12 +35,19 @@
       <span id="status-map-name">No map loaded</span>
       <span id="status-vertical-size"></span>
       <span id="status-speed"></span>
-      <span id="status-hint" title="W/S: throttle/reverse · A/D: steer · R: restart everything and reload · P: place vehicle at start line">WASD drive · R restart · P place at start</span>
+      <span id="status-hint" title="W/S: throttle/reverse · A/D: steer · R: restart everything and reload · P: place vehicle at start line · Esc: cancel placing the vehicle">WASD drive · R restart · P place at start</span>
     </div>
 
     <div id="zoom-controls">
       <button id="home-btn" title="Center on the vehicle, zoom to 10 m" aria-label="Home">&#8962;</button>
       <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+      <button id="place-pose-btn" title="Place the vehicle: click where it goes, then where it faces (Esc or right-click cancels)" aria-label="Place the vehicle">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="13" height="13" rx="1.5" />
+          <path d="M4.5 11.5 L11 5" />
+          <path d="M7.5 5 H11 V8.5" />
+        </svg>
+      </button>
     </div>
   </main>
 

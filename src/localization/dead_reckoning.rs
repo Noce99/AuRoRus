@@ -10,7 +10,7 @@
 
 use crate::topics::{
     Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry,
-    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, START_STATE_TOPIC_NAME, Shape, StartState,
+    PLACE_AT_START_TOPIC_NAME, PlaceAtStart, Placement, START_STATE_TOPIC_NAME, Shape, StartState,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -97,7 +97,8 @@ const DRAWN_Z_INDEX: i32 = 11;
 /// [`Odometry`] once per new reading. Resets to the `odom` origin - zero
 /// covariance - whenever [`START_STATE_TOPIC_NAME`] changes or
 /// [`PLACE_AT_START_TOPIC_NAME`] is bumped, the same events
-/// [`crate::actuators::SimulatedVehicle`] places the vehicle on.
+/// [`crate::actuators::SimulatedVehicle`] places the vehicle on - its trail
+/// starting from wherever that placed it (see [`Placement`]).
 pub struct DeadReckoning {
     id: u16,
     name: String,
@@ -133,10 +134,12 @@ impl Executor for DeadReckoning {
         let place_at_start_topic = captain.topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
 
-        let mut applied_start = start_state_topic.read().into_value();
-        let mut applied_place_request = place_at_start_topic.read().requested;
+        let mut placement = Placement::new(
+            start_state_topic.read().into_value(),
+            place_at_start_topic.read().into_value(),
+        );
         let mut odometry = Odometry::default();
-        let mut trail = Trail::new(applied_start);
+        let mut trail = Trail::new(placement.anchor());
         // The write count of the last reading consumed, so a re-read of the
         // same one is skipped - starting at whatever is there now, so a
         // reading left over from before this executor started isn't
@@ -148,17 +151,17 @@ impl Executor for DeadReckoning {
         let mut ticker = Ticker::new(self.config.rate_hz);
 
         while captain.is_running(self.id) {
-            let wanted_start = start_state_topic.read().into_value();
-            let wanted_place_request = place_at_start_topic.read().requested;
-            if wanted_start != applied_start || wanted_place_request != applied_place_request {
+            if let Some(anchor) = placement.update(
+                start_state_topic.read().into_value(),
+                place_at_start_topic.read().into_value(),
+                true,
+            ) {
                 odometry = Odometry {
                     reset_count: odometry.reset_count.wrapping_add(1),
                     ..Odometry::default()
                 };
-                trail = Trail::new(wanted_start);
+                trail = Trail::new(anchor);
                 last_written_at = None;
-                applied_start = wanted_start;
-                applied_place_request = wanted_place_request;
                 odometry_topic
                     .write(self.id, odometry)
                     .expect("lost writer authorization for the odometry topic");

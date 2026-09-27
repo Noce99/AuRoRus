@@ -109,7 +109,7 @@ body:has(#sidebar.collapsed) #sidebar-toggle-btn {
   padding: 10px 8px;
 }
 
-#home-btn {
+#zoom-controls button {
   width: 32px;
   height: 32px;
   border-radius: 6px;
@@ -121,10 +121,17 @@ body:has(#sidebar.collapsed) #sidebar-toggle-btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
 }
 
-#home-btn:hover {
+#zoom-controls button:hover {
   background: #2b323b;
+}
+
+/* A map tool that's armed, waiting for its clicks on the canvas. */
+#zoom-controls button.active {
+  background: #3f6dc9;
+  border-color: #3f6dc9;
 }
 
 #zoom-slider {

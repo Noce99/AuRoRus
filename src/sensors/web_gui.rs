@@ -31,11 +31,11 @@ use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
     AutonomousAlgorithmSelection, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
     MAP_SELECTION_TOPIC_NAME, MapSelection, OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests,
-    PLACE_AT_START_TOPIC_NAME,
-    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
-    PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RaceLineSelection, SLAM_COMMAND_TOPIC_NAME,
-    SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
+    PLACE_AT_START_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
+    PlaceAtStart, PlanningParameters, PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME,
+    RaceLineSelection, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VehicleModelParameters, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, Executor};
 use std::any::Any;

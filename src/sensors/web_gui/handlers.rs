@@ -96,7 +96,9 @@ pub fn handle(
             live_api::load_autonomous_parameters(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/restart") => live_api::restart(captain),
-        (Method::Post, "/api/place_at_start") => live_api::place_at_start(captain, writer_id),
+        (Method::Post, "/api/place_at_start") => {
+            live_api::place_at_start(&mut request, captain, writer_id)
+        }
         (Method::Get, "/api/slam") => live_api::slam(captain),
         (Method::Post, "/api/slam_command") => {
             live_api::slam_command(&mut request, captain, writer_id)

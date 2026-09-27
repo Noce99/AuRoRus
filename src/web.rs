@@ -186,6 +186,23 @@ pub fn read_json<T: serde::de::DeserializeOwned>(
     serde_json::from_str(&body).map_err(|err| bad_request(&format!("invalid JSON body: {err}")))
 }
 
+/// Like [`read_json`], but an empty (or all-whitespace) body is `None`
+/// rather than an error - for endpoints whose body is optional.
+pub fn read_optional_json<T: serde::de::DeserializeOwned>(
+    request: &mut tiny_http::Request,
+) -> Result<Option<T>, ResponseBox> {
+    let mut body = String::new();
+    if let Err(err) = request.as_reader().read_to_string(&mut body) {
+        return Err(bad_request(&format!("failed to read request body: {err}")));
+    }
+    if body.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(&body)
+        .map(Some)
+        .map_err(|err| bad_request(&format!("invalid JSON body: {err}")))
+}
+
 /// The percent-decoded value of query parameter `key` in `url` (e.g.
 /// `/api/topic?name=draw%2FMapServer`), or `None` if it's absent or isn't
 /// valid UTF-8 once decoded.
