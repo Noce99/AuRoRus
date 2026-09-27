@@ -1,0 +1,81 @@
+# Configuration for `aurorus::autonomous_control::ubm_frenet_overtaking`,
+# ported from ubm's map-based Frenet overtaking (`frenet_map_based_node`):
+# follows the selected map's race line, and switches to a Frenet planner
+# around whatever the LIDAR sees on the map's free space (e.g. an opponent).
+
+# Rate at which a new control is published, in Hz.
+rate_hz = 40.0
+# Where the vehicle's pose and speed come from: 0 = localization (odometry
+# composed onto SLAM's map_to_odom, only while localizing), 1 = ground truth
+# (vehicle_status, simulation only).
+pose_source = 0
+# Steering law toward the lookahead point: 0 = PD, 1 = P-enhanced.
+controller = 0
+# Distance between the front and rear axles, in meters (ubm's car: 0.28).
+wheelbase_m = 0.32
+# Proportional gain on the heading error, pure number.
+kk_s = 0.8
+# Derivative gain on the heading error (PD only), in seconds.
+kd_s = 0.0
+# Above this speed, P-enhanced steers less, in m/s.
+min_speed = 2.5
+# Heading errors below this are damped further by P-enhanced, in radians.
+max_error = 0.15
+# How much P-enhanced damps with speed, pure number.
+decay_v = 0.2
+# How much P-enhanced damps small errors, per m/s above min_speed.
+decay_e = 0.2
+# Lookahead distance: look_ahead_gain_s * speed + min_look_ahead_m.
+look_ahead_gain_s = 0.2
+min_look_ahead_m = 0.45
+# Multiplies the race line's speed profile, pure number (ubm used 1.0).
+scale_speed = 0.6
+# Farther than this from the line, the vehicle stops, in meters.
+max_cross_track_m = 1.5
+
+# Obstacle detection: every lidar_downsample-th reading within
+# desired_fov_deg straight ahead, closer than max_path_length_m, landing on
+# the map's free space shrunk by wall_clearance_m (ubm: a 9 px erosion at
+# 0.05 m/px), is an obstacle.
+lidar_downsample = 5
+desired_fov_deg = 200.0
+wall_clearance_m = 0.2
+# Obstacles seen for this long switch to the Frenet planner, in seconds.
+switch_on_s = 0.07
+# No obstacles for this long switch back to following the line, in seconds.
+hysteresis_s = 2.07
+
+# Frenet paths: end offsets from the line in [-max_road_width_m,
+# max_road_width_m] every delta_road_width_m, lengths from min_path_length_m
+# to max_path_length_m every delta_path_length_m, a point every
+# path_point_distance_m - all in meters.
+max_road_width_m = 1.0
+delta_road_width_m = 0.1
+path_point_distance_m = 0.2
+min_path_length_m = 1.25
+max_path_length_m = 4.35
+delta_path_length_m = 1.5
+# Paths ending at a steeper angle than this from the vehicle are skipped, in degrees.
+path_fov_deg = 30.0
+# A path point closer than this to an obstacle collides, in meters.
+robot_radius_m = 0.35
+# Path cost: k_jerk * jerk + k_length / length + k_distance * (end offset -
+# remembered offset)^2.
+k_jerk = 0.01
+k_length = 0.1
+k_distance = 0.01
+# Each tick no path is free, the speed is multiplied by this once more...
+speed_decay_factor = 0.999
+# ...but never below this fraction of the reference speed (also the floor of
+# the slowdown where the path curves more than the line).
+min_speed_reduction_gain = 0.7
+# The remembered end offset decays by this every tick, pure number...
+decay_last_d_factor = 0.99
+# ...and moves this far toward the chosen path's end offset, pure number.
+weight_last_d = 0.4
+# Exponent of the slowdown where the path curves more than the line.
+speed_curvature_exponent = 0.3
+# When no full-length path is clear, the speed is capped so the vehicle can
+# stop this far short of the nearest obstacle, braking at the vehicle's
+# max_decel, in meters.
+braking_margin_m = 0.3

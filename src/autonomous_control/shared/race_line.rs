@@ -253,6 +253,42 @@ impl Line {
         (b.y - a.y).atan2(b.x - a.x)
     }
 
+    /// Direction of the line at arc length `s_m`, continuous along it:
+    /// interpolated between the headings at the ends of its segment, each
+    /// the mean of the two segments meeting there - so a line offset
+    /// sideways doesn't kink at every point.
+    pub(crate) fn heading_at(&self, s_m: f64) -> f64 {
+        let n = self.points.len();
+        let s_m = s_m.rem_euclid(self.lap_m());
+        let segment = self.segment_at(s_m);
+        let len_m = self.segment_len_m(segment);
+        let t = if len_m > 0.0 {
+            (s_m - self.cumulative_m[segment]) / len_m
+        } else {
+            0.0
+        };
+        let vertex = |i: usize| {
+            let before = self.segment_heading((i + n - 1) % n);
+            before + wrap_to_pi(self.segment_heading(i % n) - before) / 2.0
+        };
+        let (start, end) = (vertex(segment), vertex(segment + 1));
+        wrap_to_pi(start + t * wrap_to_pi(end - start))
+    }
+
+    /// Where `pose` sits relative to the line at its projection `nearest`:
+    /// its signed lateral offset (positive toward increasing heading - the
+    /// side a positive steering angle turns toward) and how fast that offset grows per meter of line
+    /// travelled - the tangent of the heading error, clamped to +-1.
+    pub(crate) fn lateral(&self, pose: Pose, nearest: &Nearest) -> (f64, f64) {
+        let heading = self.heading_at(nearest.s_m);
+        let (sin, cos) = heading.sin_cos();
+        let d = -sin * (pose.x_m - nearest.x_m) + cos * (pose.y_m - nearest.y_m);
+        let slope = wrap_to_pi(pose.heading_rad - heading)
+            .tan()
+            .clamp(-1.0, 1.0);
+        (d, slope)
+    }
+
     /// Signed curvature at arc length `s_m`: that of the circle through the
     /// start of its segment and the points either side of it (Menger
     /// curvature), positive where the line turns toward increasing heading.
@@ -355,5 +391,38 @@ mod tests {
         assert!((line.segment_heading(0) - PI / 2.0).abs() < 1e-12);
         assert_eq!(line.segment_at(1.0), 0);
         assert_eq!(line.segment_at(2.5), 1);
+    }
+
+    #[test]
+    fn the_heading_is_continuous_and_tangent_on_a_circle() {
+        let line = circle(4.0, true);
+        let step = line.lap_m() / 1000.0;
+        for i in 0..1000 {
+            let s = i as f64 * step;
+            let jump = wrap_to_pi(line.heading_at(s + step) - line.heading_at(s)).abs();
+            assert!(jump < 2.0 * step / 4.0, "jump {jump} at {s}");
+            // Tangent to a counterclockwise circle: the position angle plus 90 degrees.
+            let p = line.at(s);
+            let expected = p.y.atan2(p.x) + PI / 2.0;
+            assert!(
+                wrap_to_pi(line.heading_at(s) - expected).abs() < 0.02,
+                "at {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn lateral_is_positive_toward_increasing_heading() {
+        let line = circle(4.0, true);
+        // At (4, 0) the line heads +y; increasing heading is toward the center.
+        let pose = Pose {
+            x_m: 3.8,
+            y_m: 0.0,
+            heading_rad: PI / 2.0 + 0.1,
+        };
+        let nearest = line.nearest(pose.x_m, pose.y_m, None, 0.0);
+        let (d, slope) = line.lateral(pose, &nearest);
+        assert!((d - 0.2).abs() < 1e-2, "{d}");
+        assert!((slope - 0.1f64.tan()).abs() < 2e-2, "{slope}");
     }
 }

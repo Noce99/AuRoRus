@@ -512,6 +512,113 @@ line. ubm had no such guard. Lap statistics and lap progress aren't ported.
 The drawing shows the nearest point (blue), the target (the lookahead or
 Stanley point, purple), and the chord to it.
 
+## UBM Frenet overtaking
+
+`ubm_frenet_overtaking.rs` is a port of ubm's `frenet_map_based_node.cpp`
+and the `plan_map_based` part of `frenet_overtaking.cpp`. It follows the
+race line like the UBM Path Follower's PD or P-enhanced law (`controller`
+0 or 1). When the LIDAR sees something on the track that the map doesn't
+contain, such as an opponent, it steers along a Frenet path around it
+instead. Its parameters live in
+`config/autonomous_control/ubm_frenet_overtaking.toml`. The planner is in
+`shared/frenet.rs`, and the steering laws are in `shared/steering.rs`,
+which it shares with `ubm_path_follower`.
+
+It needs the vehicle's pose (`pose_source`), a race line, its LIDAR scan,
+and the selected map.
+
+### Each tick
+
+1. **Free space.** The map's white pixels, shrunk away from every wall by
+   `wall_clearance_m`, form the free space. This replaces ubm's 9 px
+   `cv::erode`, and is rebuilt only when the map or the clearance changes.
+2. **Obstacles.** A LIDAR reading is an obstacle when its world point
+   lands on the free space. Only every `lidar_downsample`-th reading
+   within `desired_fov_deg` straight ahead and closer than
+   `max_path_length_m` is looked at. A hit on a wall lands off the free
+   space, so it doesn't count.
+3. **Switching.** Obstacles seen for `switch_on_s` switch to the planner.
+   No obstacles for `hysteresis_s` switch back to following the line.
+   Without a map, it only follows the line, and the autonomous algorithms
+   panel says so.
+4. **Frenet planning**, while avoiding:
+   - **Sampling.** Paths are sampled along the line. Their end offsets
+     range from `−max_road_width_m` to `+max_road_width_m` in steps of
+     `delta_road_width_m`, and their lengths from `min_path_length_m` to
+     `max_path_length_m` in steps of `delta_path_length_m`. Each path gets
+     a point every `path_point_distance_m`.
+   - **Shape.** Each path is a cubic that starts at the vehicle's offset
+     and slope relative to the line, and ends flat.
+   - **Field of view.** Paths whose end is more than `path_fov_deg` off
+     straight ahead are skipped.
+   - **Cost:** `k_jerk · jerk + k_length / length + k_distance · (end − d_weight)²`.
+     `d_weight` is a decaying average of the chosen end offsets (weights
+     `decay_last_d_factor` and `weight_last_d`). It keeps the vehicle on
+     the side it picked.
+   - **Choice.** The cheapest path is chosen among those that stay on the
+     free space and keep `robot_radius_m` from every obstacle. If none
+     does, it falls back to the cheapest path that keeps clear of the
+     obstacles and only passes too close to a wall. If there's no such
+     path either, it takes the one that gets farthest before its first
+     obstacle. The speed decays by `speed_decay_factor` for every tick
+     without a free path.
+   - **Steering.** The steering law aims at the chosen path's first point
+     at least the lookahead distance along it.
+5. **Speed** is `scale_speed ·` the line's profile speed. While avoiding,
+   it's also scaled:
+   - by the decay above;
+   - by `(line curvature / path curvature)^speed_curvature_exponent`,
+     since swerving is slower than following the line;
+   - never below `min_speed_reduction_gain` in total.
+
+   If no full-length path is clear of the obstacles, the speed is also
+   capped at `√(2 · max_decel · (reach − braking_margin_m))`. The reach is
+   the farthest any path gets before its first obstacle, so the vehicle
+   can always stop before it.
+
+The vehicle is held stopped in the same cases as the UBM Path Follower: no
+race line, no trustworthy pose, or farther than `max_cross_track_m` from the
+line. `max_cross_track_m` defaults wider here (1.5 m), since overtaking
+leaves the line.
+
+### Differences from ubm
+
+**Bug fixes:**
+
+- The LIDAR field of view is honoured. ubm's filter compared with `||`,
+  so it let every reading through.
+- `lidar_downsample` is at least 1. At 0, ubm's scan loop never ended.
+- `path_fov_deg` limits both sides. ubm's check had no absolute value, so
+  it only rejected paths swerving toward negative offsets.
+
+**Improvements:**
+
+- **Slope matching.** A path starts along the vehicle's current slope, so
+  replanning doesn't kink the path the vehicle is on. ubm's paths started
+  flat and ended with zero curvature.
+- **Braking.** The reach-based speed cap is new. ubm only slowed to a
+  fixed fraction, and only once even its shortest path was blocked.
+- **Fallback path.** ubm fell back to the cheapest path overall, even
+  one running straight into the obstacle.
+- **Target point.** The target is the first point at least the lookahead
+  distance along the path; ubm's was one point short.
+- **Speed.** The curvature slowdown doesn't compound from tick to tick.
+
+**Not ported:** the external detector switch, map B, the basic
+(all-LIDAR-points) planner, and lap statistics.
+
+### Drawing
+
+The drawing shows:
+
+- **Obstacle points** (red).
+- **Chosen path:** green if it's free, amber if it's merely the cheapest.
+- **Candidate paths:** faint, hidden by default.
+- **Nearest point, target and chord,** as for the UBM Path Follower.
+
+While avoiding, the panel message says how many obstacle points it's
+avoiding.
+
 ## Conventions and pitfalls
 
 - **Publish at least once per second.** The handler treats anything older than
@@ -540,7 +647,7 @@ Stanley point, purple), and the chord to it.
 | `build.rs` | Generates the module list and `autonomous_control::all()` |
 | `src/autonomous_control.rs` | `AutonomousControlsHandler`, module docs |
 | `src/autonomous_control/*.rs` | One algorithm per file |
-| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
+| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), ubm's PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
 | `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
 | `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `load_config`/`save_parameters` |

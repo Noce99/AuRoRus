@@ -12,6 +12,7 @@
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi};
+use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd};
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing,
@@ -43,8 +44,6 @@ const FEEDFORWARD_PATH: u8 = 1;
 /// [`UbmPathFollowerConfig::feedforward`]: learned per race line point.
 const FEEDFORWARD_LEARNED: u8 = 2;
 
-/// The PD controller's derivative action never exceeds this, in radians.
-const MAX_DERIVATIVE_ACTION_RAD: f64 = 0.2;
 /// Stanley divides by the speed, but never by less than this, in m/s.
 const STANLEY_MIN_SPEED_MPS: f64 = 0.5;
 
@@ -106,6 +105,19 @@ impl Default for UbmPathFollowerConfig {
     fn default() -> Self {
         toml::from_str(include_str!("../../config/autonomous_control/ubm_path_follower.toml"))
             .expect("config/autonomous_control/ubm_path_follower.toml must deserialize into UbmPathFollowerConfig")
+    }
+}
+
+impl UbmPathFollowerConfig {
+    fn gains(&self) -> SteeringGains {
+        SteeringGains {
+            kk_s: self.kk_s,
+            kd_s: self.kd_s,
+            min_speed: self.min_speed,
+            max_error: self.max_error,
+            decay_v: self.decay_v,
+            decay_e: self.decay_e,
+        }
     }
 }
 
@@ -342,9 +354,9 @@ fn control(
         let steering = match config.controller {
             CONTROLLER_P_ENHANCED => {
                 state.previous_error = None;
-                p_enhanced(config, error, speed_mps)
+                p_enhanced(&config.gains(), error, speed_mps)
             }
-            _ => pd(config, error, &mut state.previous_error, now),
+            _ => pd(&config.gains(), error, &mut state.previous_error, now),
         };
         (steering, back, [target.x, target.y])
     };
@@ -364,42 +376,6 @@ fn control(
         from,
         target,
     })
-}
-
-/// `kk_s` times the heading `error`, plus `kd_s` times its rate of change
-/// since `previous` (clamped to [`MAX_DERIVATIVE_ACTION_RAD`]) - none on the
-/// first call. Updates `previous`.
-fn pd(config: &UbmPathFollowerConfig, error: f64, previous: &mut Option<(f64, Instant)>, now: Instant) -> f64 {
-    let derivative = match *previous {
-        Some((previous_error, at)) => {
-            let dt_s = now.saturating_duration_since(at).as_secs_f64();
-            if dt_s > 0.0 {
-                (config.kd_s * (error - previous_error) / dt_s)
-                    .clamp(-MAX_DERIVATIVE_ACTION_RAD, MAX_DERIVATIVE_ACTION_RAD)
-            } else {
-                0.0
-            }
-        }
-        None => 0.0,
-    };
-    *previous = Some((error, now));
-    config.kk_s * error + derivative
-}
-
-/// ubm's P-enhanced controller: `kk_s` times the heading `error`, damped
-/// above `min_speed` by `(min_speed / speed)^decay_v` and, for errors up to
-/// `max_error`, further by `|error / max_error|^((speed - min_speed) decay_e)`
-/// - so small errors at speed barely steer.
-fn p_enhanced(config: &UbmPathFollowerConfig, error: f64, speed_mps: f64) -> f64 {
-    let mut steering = config.kk_s * error;
-    if speed_mps >= config.min_speed && speed_mps > 0.0 {
-        steering *= (config.min_speed / speed_mps).powf(config.decay_v);
-        if error != 0.0 && error.abs() <= config.max_error {
-            let exponent = (speed_mps - config.min_speed) * config.decay_e;
-            steering *= (error / config.max_error).abs().powf(exponent);
-        }
-    }
-    steering
 }
 
 /// The Stanley controller on the race line point `tdp` points past the
@@ -572,24 +548,6 @@ mod tests {
         let (steering, target) = stanley(&config, &line, &nearest, pose, 2.0);
         assert!(steering < 0.0, "{steering}");
         assert!((target[1] - 0.2).abs() < 1e-9, "{target:?}");
-    }
-
-    #[test]
-    fn p_enhanced_damps_small_errors_at_speed() {
-        let config = config(CONTROLLER_P_ENHANCED);
-        assert_eq!(p_enhanced(&config, 0.1, config.min_speed - 1.0), config.kk_s * 0.1);
-        let fast = p_enhanced(&config, 0.1, config.min_speed + 2.0);
-        assert!(fast > 0.0 && fast < config.kk_s * 0.1, "{fast}");
-    }
-
-    #[test]
-    fn the_pd_derivative_is_clamped_and_skipped_on_the_first_tick() {
-        let config = UbmPathFollowerConfig { kk_s: 1.0, kd_s: 1.0, ..config(CONTROLLER_PD) };
-        let mut previous = None;
-        let start = Instant::now();
-        assert_eq!(pd(&config, 0.1, &mut previous, start), 0.1);
-        let steering = pd(&config, 0.2, &mut previous, start + Duration::from_millis(10));
-        assert!((steering - (0.2 + MAX_DERIVATIVE_ACTION_RAD)).abs() < 1e-12, "{steering}");
     }
 
     #[test]

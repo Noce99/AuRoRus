@@ -26,7 +26,7 @@ mod min_time;
 mod pipeline;
 mod planner;
 mod speed_profile;
-mod track;
+pub(crate) mod track;
 
 pub use config::{PlanningConfig, config_path, save_parameters, saved_values, tunable_parameters};
 pub use pipeline::{PlannedLines, Progress, plan};
