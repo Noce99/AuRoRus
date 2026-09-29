@@ -2,76 +2,18 @@
 
 // ---------------------------------------------------------------------
 // replay_web_gui's frontend: everything specific to *replaying* a
-// recorded session - the playback clock, and the sidebar summary.
+// recorded session - the drawing layers at the playback time, and the
+// sidebar summary.
 //
 // The map canvas itself (painting, panning, zooming, the redraw loop) and
 // the drawing layers behind it are shared with web_gui and live in
 // /map_view.js and /draw_layers.js, loaded before this file - the canvas
 // shows whatever the recorded executors drew, exactly as web_gui showed
 // it live. `fetchJSON`, `startPolling` and `formatAge` come from there too.
-// timeline.js loads after this one and drives the same PlaybackClock.
+// The playback clock (`PlaybackClock`) comes from /playback_clock.js,
+// loaded before this file; timeline.js loads after it and drives the same
+// clock.
 // ---------------------------------------------------------------------
-
-// ---------------------------------------------------------------------
-// PlaybackClock: the single source of truth for "what time is it" during
-// playback, shared by this file (main canvas) and timeline.js (timeline +
-// transport bar).
-// ---------------------------------------------------------------------
-
-window.PlaybackClock = {
-  durationUs: 0,
-  currentTimeUs: 0,
-  playing: false,
-  speedMultiplier: 1,
-  /** @type {((timeUs:number) => void)[]} */
-  listeners: [],
-  _lastFrameMs: null,
-
-  subscribe(fn) {
-    this.listeners.push(fn);
-  },
-
-  _notify() {
-    for (const fn of this.listeners) fn(this.currentTimeUs);
-    MapView.requestRedraw();
-  },
-
-  setTime(timeUs) {
-    this.currentTimeUs = Math.max(0, Math.min(this.durationUs, timeUs));
-    this._notify();
-  },
-
-  play() {
-    if (this.currentTimeUs >= this.durationUs) this.currentTimeUs = 0;
-    this.playing = true;
-    this._lastFrameMs = null;
-    requestAnimationFrame((ms) => this._tick(ms));
-  },
-
-  pause() {
-    this.playing = false;
-  },
-
-  togglePlaying() {
-    if (this.playing) this.pause();
-    else this.play();
-  },
-
-  _tick(nowMs) {
-    if (!this.playing) return;
-    if (this._lastFrameMs !== null) {
-      const deltaUs = (nowMs - this._lastFrameMs) * 1000 * this.speedMultiplier;
-      this.currentTimeUs = Math.min(this.durationUs, this.currentTimeUs + deltaUs);
-    }
-    this._lastFrameMs = nowMs;
-    this._notify();
-    if (this.currentTimeUs >= this.durationUs) {
-      this.playing = false;
-      return;
-    }
-    requestAnimationFrame((ms) => this._tick(ms));
-  },
-};
 
 // ---------------------------------------------------------------------
 // Drawing layers - aged and dead-reckoned against the playback time, not

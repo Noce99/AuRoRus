@@ -74,6 +74,10 @@ pub struct MapRecord {
     pub info_sha256: String,
     /// SHA-256 of its `map.tiff`.
     pub tiff_sha256: String,
+    /// SHA-256 of its centerline, copied into `map/race_lines/` - `None` if
+    /// it has none (or the run predates the copy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centerline_sha256: Option<String>,
     /// Length of one lap of its centerline, in meters.
     pub centerline_length_m: f64,
     /// Longest a lap may take before the run ends as [`RunStatus::Timeout`],
@@ -230,6 +234,7 @@ pub(crate) mod tests {
                 name: "map".to_string(),
                 info_sha256: "aa".to_string(),
                 tiff_sha256: "bb".to_string(),
+                centerline_sha256: Some("dd".to_string()),
                 centerline_length_m: 42.0,
                 lap_timeout_s: 42.0,
             },

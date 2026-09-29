@@ -630,6 +630,7 @@ fn run_one(
             name: spec.map.clone(),
             info_sha256: hashes.info_sha256,
             tiff_sha256: hashes.tiff_sha256,
+            centerline_sha256: hashes.centerline_sha256,
             centerline_length_m,
             lap_timeout_s,
         },

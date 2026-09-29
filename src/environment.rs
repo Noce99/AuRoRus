@@ -9,7 +9,7 @@
 
 mod info;
 mod map;
-mod race_line;
+pub mod race_line;
 pub mod race_lines;
 mod raster;
 pub mod simulator;

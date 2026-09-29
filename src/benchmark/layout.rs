@@ -6,6 +6,7 @@
 //!     trajectory.csv     see TrajectoryRow
 //!     map/info.json      copies of the map driven
 //!     map/map.tiff
+//!     map/race_lines/centerline.csv
 //!     race_line.csv      copy of the race line laps were timed against
 //! ```
 //!
@@ -68,11 +69,15 @@ pub struct TrackHashes {
     pub info_sha256: String,
     pub tiff_sha256: String,
     pub race_line_sha256: String,
+    /// `None` if the map has no centerline.
+    pub centerline_sha256: Option<String>,
 }
 
-/// Copies the map in `map_folder` (its `info.json` and `map.tiff`) and its
-/// race line `race_line` (a file of its `race_lines/`) into `run_folder`,
-/// and hashes the copies.
+/// Copies the map in `map_folder` (its `info.json`, `map.tiff` and, if it
+/// has one, its centerline - so `map/` is a map folder
+/// [`crate::environment::Map::load`] reads as is) and its race line
+/// `race_line` (a file of its `race_lines/`) into `run_folder`, and hashes
+/// the copies.
 pub fn copy_track(
     map_folder: &Path,
     race_line: &str,
@@ -97,6 +102,18 @@ pub fn copy_track(
             map_folder.join(RACE_LINES_DIR_NAME).join(race_line),
             run_folder.join(RACE_LINE_FILE_NAME),
         )?,
+        centerline_sha256: {
+            let centerline = map_folder
+                .join(RACE_LINES_DIR_NAME)
+                .join(CENTERLINE_FILE_NAME);
+            if centerline.is_file() {
+                let lines_copy = map_copy.join(RACE_LINES_DIR_NAME);
+                std::fs::create_dir_all(&lines_copy)?;
+                Some(copy(centerline, lines_copy.join(CENTERLINE_FILE_NAME))?)
+            } else {
+                None
+            }
+        },
     })
 }
 
@@ -110,9 +127,29 @@ pub struct ScannedRun {
     pub summary: BenchmarkSummary,
 }
 
+/// Every run folder under `root` (`<root>/*/*/` holding a `summary.toml`),
+/// split into those whose summary reads and those whose doesn't.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScanOutcome {
+    /// Sorted by folder.
+    pub runs: Vec<ScannedRun>,
+    /// Each folder with why its summary can't be read, sorted by folder.
+    pub unreadable: Vec<(PathBuf, String)>,
+}
+
 /// Every run under `root` (`<root>/*/*/summary.toml`), sorted by folder.
-/// A summary that can't be read is left out, with a warning.
+/// A summary that can't be read is left out, with a warning - see
+/// [`scan_all`] to get those too.
 pub fn scan(root: &Path) -> Vec<ScannedRun> {
+    let outcome = scan_all(root);
+    for (folder, err) in &outcome.unreadable {
+        eprintln!("benchmarks: skipping {}: {err}", folder.display());
+    }
+    outcome.runs
+}
+
+/// Every run under `root`, readable or not - see [`ScanOutcome`].
+pub fn scan_all(root: &Path) -> ScanOutcome {
     let subfolders = |dir: &Path| -> Vec<PathBuf> {
         std::fs::read_dir(dir)
             .map(|entries| {
@@ -124,25 +161,20 @@ pub fn scan(root: &Path) -> Vec<ScannedRun> {
             })
             .unwrap_or_default()
     };
-    let mut runs: Vec<ScannedRun> = subfolders(root)
-        .iter()
-        .flat_map(|map| subfolders(map))
-        .filter_map(|folder| {
-            let path = folder.join(SUMMARY_FILE_NAME);
-            if !path.is_file() {
-                return None;
-            }
-            match BenchmarkSummary::read(&path) {
-                Ok(summary) => Some(ScannedRun { folder, summary }),
-                Err(err) => {
-                    eprintln!("benchmarks: skipping {}: {err}", folder.display());
-                    None
-                }
-            }
-        })
-        .collect();
-    runs.sort_by(|a, b| a.folder.cmp(&b.folder));
-    runs
+    let mut outcome = ScanOutcome::default();
+    for folder in subfolders(root).iter().flat_map(|map| subfolders(map)) {
+        let path = folder.join(SUMMARY_FILE_NAME);
+        if !path.is_file() {
+            continue;
+        }
+        match BenchmarkSummary::read(&path) {
+            Ok(summary) => outcome.runs.push(ScannedRun { folder, summary }),
+            Err(err) => outcome.unreadable.push((folder, err)),
+        }
+    }
+    outcome.runs.sort_by(|a, b| a.folder.cmp(&b.folder));
+    outcome.unreadable.sort();
+    outcome
 }
 
 #[cfg(test)]
@@ -175,6 +207,44 @@ mod tests {
     }
 
     #[test]
+    fn copy_track_makes_a_loadable_map_folder() {
+        let root = temp_root("copy_track");
+        let map = root.join("source");
+        let lines = map.join(RACE_LINES_DIR_NAME);
+        std::fs::create_dir_all(&lines).unwrap();
+        std::fs::write(map.join(INFO_FILE_NAME), "{}").unwrap();
+        std::fs::write(map.join(MAP_TIFF_FILE_NAME), "tiff").unwrap();
+        std::fs::write(lines.join(CENTERLINE_FILE_NAME), "x,y,speed\n").unwrap();
+        std::fs::write(lines.join("fast.csv"), "x,y,speed\n1,2,3\n").unwrap();
+        let run = root.join("run");
+        std::fs::create_dir_all(&run).unwrap();
+
+        let hashes = copy_track(&map, "fast.csv", &run).unwrap();
+        let copied = |path: PathBuf| std::fs::read_to_string(path).unwrap();
+        assert_eq!(copied(run.join(RACE_LINE_FILE_NAME)), "x,y,speed\n1,2,3\n");
+        assert_eq!(
+            copied(
+                run.join(MAP_DIR_NAME)
+                    .join(RACE_LINES_DIR_NAME)
+                    .join(CENTERLINE_FILE_NAME)
+            ),
+            "x,y,speed\n"
+        );
+        assert!(hashes.centerline_sha256.is_some());
+
+        std::fs::remove_file(lines.join(CENTERLINE_FILE_NAME)).unwrap();
+        let run = root.join("run_without_centerline");
+        std::fs::create_dir_all(&run).unwrap();
+        assert_eq!(
+            copy_track(&map, "fast.csv", &run)
+                .unwrap()
+                .centerline_sha256,
+            None
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn scan_finds_every_readable_run() {
         let root = temp_root("scan");
         let at = OffsetDateTime::UNIX_EPOCH;
@@ -187,7 +257,17 @@ mod tests {
         std::fs::write(broken.join(SUMMARY_FILE_NAME), "not = [toml").unwrap();
 
         let runs = scan(&root);
+        let outcome = scan_all(&root);
         std::fs::remove_dir_all(&root).ok();
+        assert_eq!(outcome.runs, runs);
+        assert_eq!(
+            outcome
+                .unreadable
+                .iter()
+                .map(|(folder, _)| folder)
+                .collect::<Vec<_>>(),
+            [&broken]
+        );
         let folders: Vec<&PathBuf> = runs.iter().map(|run| &run.folder).collect();
         assert_eq!(folders, [&a, &b]);
         assert!(!folders.contains(&&empty));

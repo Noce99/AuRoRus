@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AuRoRus Benchmarks</title>
+<link rel="stylesheet" href="/base.css" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <div id="sidebar-toggle">
+    <button id="sidebar-toggle-btn" title="Show/hide the panel list" aria-label="Show/hide the panel list">&#9664;</button>
+  </div>
+
+  <aside id="sidebar">
+    <h1>Benchmarks</h1>
+    <span id="sidebar-root" class="readonly-value"></span>
+    <span id="sidebar-counts" class="readonly-value"></span>
+    <nav id="panel-nav">
+      <button class="panel-nav-btn selected" data-panel="runs">Runs</button>
+      <button class="panel-nav-btn" data-panel="compare">Compare</button>
+      <button class="panel-nav-btn" data-panel="parameters">Parameters</button>
+      <button class="panel-nav-btn" data-panel="layers">Layers</button>
+    </nav>
+  </aside>
+
+  <div id="center-column">
+    <main id="canvas-area">
+      <canvas id="map-canvas"></canvas>
+
+      <div id="status-bar">
+        <span id="status-map-name">Select runs to replay them</span>
+        <span id="status-vertical-size"></span>
+        <span id="status-speed"></span>
+        <span id="status-time"></span>
+      </div>
+
+      <div id="zoom-controls">
+        <button id="home-btn" title="Center on the track (or the followed run)" aria-label="Home">&#8962;</button>
+        <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+      </div>
+    </main>
+
+    <div id="bottom-panel-toggle">
+      <button id="bottom-panel-toggle-btn" title="Show/hide the replay controls and charts" aria-label="Show/hide the replay controls and charts">&#9650;</button>
+    </div>
+
+    <section id="bottom-panel">
+      <div id="transport-bar">
+        <button type="button" id="play-pause-btn" title="Play/pause (Space)">&#9654;</button>
+        <button type="button" id="seek-start-btn" title="Back to the start">&#9198;</button>
+        <label>Speed
+          <select id="speed-select">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+            <option value="8">8x</option>
+          </select>
+        </label>
+        <input id="seek-slider" type="range" min="0" max="1000" value="0" step="1" title="Seek" />
+        <span id="playback-time-label">0:00.0 / 0:00.0</span>
+        <label>Lap
+          <select id="lap-select" title="The lap the charts show - and the one lined up by 'Align: lap start'"></select>
+        </label>
+        <button type="button" id="lap-jump-btn" title="Jump to the start of this lap">&#8677;</button>
+        <label>Align
+          <select id="align-select">
+            <option value="go" title="Every run from its own Go! - a race between them">Go!</option>
+            <option value="lap" title="Every run shifted so the lap picked starts at the same moment">Lap start</option>
+          </select>
+        </label>
+        <label>Follow
+          <select id="follow-select"></select>
+        </label>
+        <label id="track-row" hidden>Track
+          <select id="track-select" title="The selected runs were driven on several tracks: the one shown"></select>
+        </label>
+      </div>
+      <div id="chart-area">
+        <nav class="bottom-tabs" id="chart-tabs">
+          <button class="bottom-tab selected" data-chart="speed">Speed</button>
+          <button class="bottom-tab" data-chart="delta">&Delta; time</button>
+          <button class="bottom-tab" data-chart="lateral">Lateral</button>
+          <button class="bottom-tab" data-chart="steering">Steering</button>
+          <label id="reference-row">Reference
+            <select id="reference-select" title="The run Δ time is measured against"></select>
+          </label>
+          <span class="bottom-info" id="chart-info"></span>
+        </nav>
+        <div id="chart-legend"></div>
+        <div class="bottom-chart-wrap" id="chart-wrap">
+          <canvas class="bottom-chart" id="chart"></canvas>
+          <div class="bottom-tooltip" id="chart-tooltip" hidden></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="right-panel-toggle">
+    <button id="right-panel-toggle-btn" title="Show/hide details" aria-label="Show/hide details">&#9654;</button>
+  </div>
+
+  <aside id="right-panel">
+    <section id="panel-runs" class="panel-section">
+      <h1>Runs</h1>
+      <div id="runs-actions">
+        <button type="button" id="refresh-btn" title="Read the benchmarks folder again">&#8635; Refresh</button>
+        <button type="button" id="clear-selection-btn" title="Unselect every run">Clear selection</button>
+        <span id="selection-count"></span>
+      </div>
+      <div id="filters"></div>
+      <div id="date-row">
+        <label>From <input type="date" id="date-from" /></label>
+        <label>To <input type="date" id="date-to" /></label>
+      </div>
+      <div id="param-rules">
+        <div id="param-rule-list"></div>
+        <button type="button" id="add-rule-btn" title="Keep only the runs whose parameter matches">+ Parameter filter</button>
+      </div>
+      <div id="sort-row">
+        <label>Sort by
+          <select id="sort-select">
+            <option value="date">Date</option>
+            <option value="total">Total time</option>
+            <option value="best">Best lap</option>
+            <option value="mean">Mean lap</option>
+            <option value="map">Map</option>
+            <option value="algorithm">Algorithm</option>
+          </select>
+        </label>
+        <button type="button" id="sort-dir-btn" title="Flip the order">&#8595;</button>
+        <span id="shown-count"></span>
+      </div>
+      <p id="selection-warning" class="warning" hidden></p>
+      <ul id="run-list"></ul>
+      <details id="unreadable" hidden>
+        <summary></summary>
+        <ul id="unreadable-list"></ul>
+      </details>
+    </section>
+
+    <section id="panel-compare" class="panel-section" hidden>
+      <h1>Compare</h1>
+      <p class="panel-hint" id="compare-hint">Select runs in the Runs panel to compare them.</p>
+      <div id="lap-table-wrap"></div>
+      <div id="lap-chart-legend"></div>
+      <div id="lap-chart-wrap">
+        <canvas id="lap-chart"></canvas>
+        <div class="bottom-tooltip" id="lap-chart-tooltip" hidden></div>
+      </div>
+    </section>
+
+    <section id="panel-parameters" class="panel-section" hidden>
+      <h1>Parameters</h1>
+      <label id="show-all-row"><input type="checkbox" id="show-all-params" /> Show every parameter (not only the ones that differ)</label>
+      <div id="param-table-wrap"></div>
+    </section>
+
+    <section id="panel-layers" class="panel-section" hidden>
+      <h1>Layers</h1>
+      <ul id="layer-toggles"></ul>
+    </section>
+  </aside>
+</div>
+<script src="/map_view.js"></script>
+<script src="/chart.js"></script>
+<script src="/playback_clock.js"></script>
+<script src="/track_math.js"></script>
+<script src="/app.js"></script>
+<script src="/replay.js"></script>
+<script src="/charts.js"></script>
+</body>
+</html>

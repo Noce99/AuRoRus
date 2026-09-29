@@ -23,6 +23,11 @@ pub const MAP_VIEW_JS: &str = include_str!("web/map_view.js");
 pub const DRAW_LAYERS_JS: &str = include_str!("web/draw_layers.js");
 /// The shared bottom panel (lap telemetry), served at `/lap_panel.js`.
 pub const LAP_PANEL_JS: &str = include_str!("web/lap_panel.js");
+/// The shared playback clock of the replaying UIs, served at
+/// `/playback_clock.js`.
+pub const PLAYBACK_CLOCK_JS: &str = include_str!("web/playback_clock.js");
+/// A few canvas chart helpers, served at `/chart.js`.
+pub const CHART_JS: &str = include_str!("web/chart.js");
 /// The shared page/canvas styles, served at `/base.css`.
 pub const BASE_CSS: &str = include_str!("web/base.css");
 
@@ -134,6 +139,8 @@ pub fn shared_asset(path: &str) -> Option<ResponseBox> {
         "/map_view.js" => (MAP_VIEW_JS, "text/javascript; charset=utf-8"),
         "/draw_layers.js" => (DRAW_LAYERS_JS, "text/javascript; charset=utf-8"),
         "/lap_panel.js" => (LAP_PANEL_JS, "text/javascript; charset=utf-8"),
+        "/playback_clock.js" => (PLAYBACK_CLOCK_JS, "text/javascript; charset=utf-8"),
+        "/chart.js" => (CHART_JS, "text/javascript; charset=utf-8"),
         "/base.css" => (BASE_CSS, "text/css; charset=utf-8"),
         _ => return None,
     };

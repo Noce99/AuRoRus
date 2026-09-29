@@ -14,7 +14,7 @@ pub mod layout;
 pub mod summary;
 pub mod trajectory;
 
-pub use layout::{ScannedRun, scan};
+pub use layout::{ScanOutcome, ScannedRun, scan, scan_all};
 pub use summary::{
     AlgorithmRecord, BenchmarkSummary, CodeVersion, FORMAT_VERSION, LapResult, MapRecord,
     RaceLineRecord, Results, RunStatus, VehicleRecord,

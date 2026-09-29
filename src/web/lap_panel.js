@@ -9,7 +9,8 @@
 //
 // Each UI's page holds an empty `#bottom-panel` (under the map, collapsed)
 // and its `#bottom-panel-toggle-btn`; this fills the panel in, and only
-// polls while it's open. Needs `startPolling` from /map_view.js.
+// polls while it's open. Needs `startPolling` from /map_view.js and
+// `Chart` from /chart.js.
 // ---------------------------------------------------------------------
 
 const LapPanel = (() => {
@@ -17,8 +18,6 @@ const LapPanel = (() => {
   const SPEED_COLOR = [255, 92, 92];
   /** Opacity of the previous lap's line, under the current one's. */
   const PREVIOUS_ALPHA = 0.35;
-  const AXIS_COLOR = "#ffffff";
-  const GRID_COLOR = "rgba(255, 255, 255, 0.12)";
   /** Chart margins around the plot area, in CSS pixels. */
   const MARGIN = { left: 58, right: 18, top: 14, bottom: 34 };
   /** Hovering farther than this from a lap's point, in CSS pixels, doesn't
@@ -134,26 +133,6 @@ const LapPanel = (() => {
     return `${minutes}:${(seconds - 60 * minutes).toFixed(3).padStart(6, "0")}`;
   }
 
-  function formatSigned(value, digits) {
-    const text = value.toFixed(digits);
-    return value > 0 ? `+${text}` : text;
-  }
-
-  /** A tick step giving roughly `count` ticks over `range`: 1, 2 or 5 times
-   *  a power of ten. */
-  function niceStep(range, count) {
-    const raw = range / Math.max(1, count);
-    const power = 10 ** Math.floor(Math.log10(raw));
-    for (const factor of [1, 2, 5]) {
-      if (factor * power >= raw) return factor * power;
-    }
-    return 10 * power;
-  }
-
-  function decimalsFor(step) {
-    return Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
-  }
-
   // -------------------------------------------------------------------
   // Header
   // -------------------------------------------------------------------
@@ -181,17 +160,7 @@ const LapPanel = (() => {
 
   function drawChart() {
     if (!chart || chartWrap.hidden) return;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = chartWrap.getBoundingClientRect();
-    const widthPx = Math.max(1, Math.round(rect.width * dpr));
-    const heightPx = Math.max(1, Math.round(rect.height * dpr));
-    if (chart.width !== widthPx || chart.height !== heightPx) {
-      chart.width = widthPx;
-      chart.height = heightPx;
-    }
-    const ctx = chart.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    const { ctx, width, height } = Chart.prepare(chart, chartWrap);
     tooltip.hidden = true;
 
     const spec = CHARTS[tab];
@@ -199,8 +168,8 @@ const LapPanel = (() => {
     const plot = {
       left: MARGIN.left,
       top: MARGIN.top,
-      right: rect.width - MARGIN.right,
-      bottom: rect.height - MARGIN.bottom,
+      right: width - MARGIN.right,
+      bottom: height - MARGIN.bottom,
     };
     if (plot.right <= plot.left || plot.bottom <= plot.top) return;
 
@@ -216,63 +185,24 @@ const LapPanel = (() => {
         if (value != null) maxAbs = Math.max(maxAbs, Math.abs(value));
       }
     }
-    const yStep = niceStep(2 * maxAbs, 6);
+    const yStep = Chart.niceStep(2 * maxAbs, 6);
     const yMax = Math.ceil((maxAbs * 1.05) / yStep) * yStep;
     const xMax = lapM > 0 ? lapM : 100;
-    const xStep = niceStep(xMax, Math.max(2, Math.floor((plot.right - plot.left) / 80)));
+    const xStep = Chart.niceStep(xMax, Math.max(2, Math.floor((plot.right - plot.left) / 80)));
 
-    const toX = (s) => plot.left + (s / xMax) * (plot.right - plot.left);
-    const toY = (v) => plot.top + ((yMax - v) / (2 * yMax)) * (plot.bottom - plot.top);
-
-    // Grid, axes, and their numbers.
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = AXIS_COLOR;
-    ctx.lineWidth = 1;
-    const yDecimals = decimalsFor(yStep);
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let v = -yMax; v <= yMax + yStep / 2; v += yStep) {
-      const y = Math.round(toY(v)) + 0.5;
-      ctx.strokeStyle = Math.abs(v) < yStep / 2 ? "rgba(255, 255, 255, 0.55)" : GRID_COLOR;
-      ctx.beginPath();
-      ctx.moveTo(plot.left, y);
-      ctx.lineTo(plot.right, y);
-      ctx.stroke();
-      ctx.fillText(formatSigned(Math.abs(v) < yStep / 2 ? 0 : v, yDecimals), plot.left - 6, y);
-    }
-    const xDecimals = decimalsFor(xStep);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    for (let s = 0; s <= xMax + 1e-9; s += xStep) {
-      const x = Math.round(toX(s)) + 0.5;
-      ctx.strokeStyle = GRID_COLOR;
-      ctx.beginPath();
-      ctx.moveTo(x, plot.top);
-      ctx.lineTo(x, plot.bottom);
-      ctx.stroke();
-      ctx.fillText(s.toFixed(xDecimals), x, plot.bottom + 5);
-    }
-    ctx.strokeStyle = AXIS_COLOR;
-    ctx.beginPath();
-    ctx.moveTo(plot.left + 0.5, plot.top);
-    ctx.lineTo(plot.left + 0.5, plot.bottom + 0.5);
-    ctx.lineTo(plot.right, plot.bottom + 0.5);
-    ctx.stroke();
-    ctx.textAlign = "right";
-    ctx.fillText("s [m]", plot.right, plot.bottom + 19);
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(`${spec.label} [${spec.unit}]`, 6, 2);
+    const { toX, toY } = Chart.axes(ctx, plot, {
+      xMax,
+      xStep,
+      yMin: -yMax,
+      yMax,
+      yStep,
+      xLabel: "s [m]",
+      yLabel: `${spec.label} [${spec.unit}]`,
+      signedY: true,
+    });
 
     if (laps.length === 0) {
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-      ctx.fillText(
-        (telemetry && telemetry.status) || "No lap telemetry yet.",
-        (plot.left + plot.right) / 2,
-        (plot.top + plot.bottom) / 2,
-      );
+      Chart.placeholder(ctx, plot, (telemetry && telemetry.status) || "No lap telemetry yet.");
       return;
     }
 
@@ -337,7 +267,7 @@ const LapPanel = (() => {
     if (!best) return;
 
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${best.alpha})`;
-    ctx.strokeStyle = AXIS_COLOR;
+    ctx.strokeStyle = Chart.AXIS_COLOR;
     ctx.beginPath();
     ctx.arc(best.point.x, best.point.y, 4, 0, 2 * Math.PI);
     ctx.fill();
@@ -350,20 +280,10 @@ const LapPanel = (() => {
       el("div", { class: "bottom-tooltip-title", text: lap }),
       el("div", { text: `s = ${best.s.toFixed(2)} m (${percent.toFixed(1)} %)` }),
       el("div", {
-        text: `${spec.label} = ${formatSigned(best.value, 3)} ${spec.unit}${spec.describe(best.value)}`,
+        text: `${spec.label} = ${Chart.formatSigned(best.value, 3)} ${spec.unit}${spec.describe(best.value)}`,
       }),
     );
-    tooltip.hidden = false;
-    // Beside the point, flipped to its other side near the right/bottom edge.
-    const gap = 12;
-    const tipWidth = tooltip.offsetWidth;
-    const tipHeight = tooltip.offsetHeight;
-    let left = best.point.x + gap;
-    if (left + tipWidth > rect.width) left = best.point.x - gap - tipWidth;
-    let top = best.point.y - tipHeight - gap;
-    if (top < 0) top = best.point.y + gap;
-    tooltip.style.left = `${Math.max(0, left)}px`;
-    tooltip.style.top = `${Math.max(0, top)}px`;
+    Chart.placeTooltip(tooltip, best.point, width);
   }
 
   // -------------------------------------------------------------------
