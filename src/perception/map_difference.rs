@@ -1,6 +1,6 @@
 //! The pure steps of ubm's `detector_py` (`detector_py.py`,
 //! `kalman_filter.py`) used by [`super::UbmDetector`]: finding the stretch
-//! of a scan that's shorter than the map predicts ([`find_plateau`]),
+//! of a scan that's shorter than the map predicts ([`find_plateaus`]),
 //! rejecting one on a wall ([`near_wall`]), smoothing it over time
 //! ([`Kalman`]) - plus a rectangle fit around its points ([`fit_rectangle`],
 //! the closeness-criterion L-shape fit of ubm's `detector_cpp`), which
@@ -18,13 +18,18 @@ pub(crate) struct Plateau {
     pub(crate) median_range_m: f64,
 }
 
-/// What [`find_plateau`] accepts as an object.
+/// What [`find_plateaus`] accepts as an object.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PlateauLimits {
     pub(crate) median_kernel_size: usize,
     /// `0` picks the threshold from the scan itself.
     pub(crate) gradient_threshold: f64,
-    pub(crate) min_length: usize,
+    /// Narrowest a stretch may be, in meters across: its rays times
+    /// `ray_step_rad` times its median real range. (ubm counted rays, which
+    /// ties the threshold to one lidar's resolution.)
+    pub(crate) min_width_m: f64,
+    /// Angle between two consecutive rays of the scan.
+    pub(crate) ray_step_rad: f64,
     pub(crate) max_std_m: f64,
     pub(crate) min_mean_difference_m: f64,
     /// Which acceptable stretch wins: `0` for the lowest score, or
@@ -32,32 +37,56 @@ pub(crate) struct PlateauLimits {
     pub(crate) selection: u8,
 }
 
+/// A jump in the difference is an object's edge only if the (median-
+/// filtered) real scan moves by at least this much there, in meters - see
+/// [`find_plateaus`]. Well above the range noise, below the edges seen
+/// between a car and what's behind it, 0.25 m and up.
+const EDGE_MIN_REAL_STEP_M: f64 = 0.15;
+
 /// [`PlateauLimits::selection`]: the closest, by median real range - the
 /// opponent nearest the ego vehicle, e.g. for its MPC.
 pub(crate) const SELECTION_CLOSEST: u8 = 1;
 
-/// `detect_object_in_difference`: the best stretch where `real` is
-/// shorter than `expected` (both one range per ray, same length) by a
-/// consistent amount, or `None`.
+/// `detect_object_in_difference`: every stretch where `real` is shorter
+/// than `expected` (both one range per ray, same length) by a consistent
+/// amount, best first - so a caller rejecting one (e.g. on a wall) falls
+/// back on the next rather than on nothing (ubm returned only the best).
 ///
-/// The positive difference is median-filtered, then split at every jump
-/// larger than the gradient threshold; of the stretches between jumps at
-/// least `min_length` rays long, whose real ranges spread less than
-/// `max_std_m` and which are on average at least `min_mean_difference_m`
-/// shorter than expected, the one scoring lowest - long, flat and far in
-/// front of the map - wins, or with [`SELECTION_CLOSEST`] the closest one.
-pub(crate) fn find_plateau(
+/// The positive difference is median-filtered, then split at an object's
+/// edges: every jump in it larger than the gradient threshold, either from a
+/// level below that threshold (next to nothing in front of the map) or back,
+/// or between two levels above it where the (median-filtered) real scan
+/// moves by at least [`EDGE_MIN_REAL_STEP_M`] too (ubm split at every jump).
+/// Of the stretches between them at least `min_width_m` wide, whose real
+/// ranges spread less than `max_std_m` and which are on average at least
+/// `min_mean_difference_m` shorter than expected, the ones scoring lowest - wide, flat and far in
+/// front of the map - come first, or with [`SELECTION_CLOSEST`] the closest.
+pub(crate) fn find_plateaus(
     expected: &[f64],
     real: &[f64],
     limits: &PlateauLimits,
-) -> Option<Plateau> {
+) -> Vec<Plateau> {
     let n = expected.len().min(real.len());
-    let min_length = limits.min_length.max(1);
+    // Never 0: it divides the score.
+    let min_width_m = limits.min_width_m.max(1e-3);
+    let width_m = |start: usize, end: usize| {
+        (end - start) as f64 * limits.ray_step_rad * median(&real[start..end])
+    };
     let difference: Vec<f64> = (0..n).map(|i| (expected[i] - real[i]).max(0.0)).collect();
     let filtered = median_filter(&difference, limits.median_kernel_size);
     let gradient: Vec<f64> = filtered.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+    // How much the real scan itself moves between two rays: a jump in the
+    // difference between two levels of something in front of the map is
+    // only an object's edge if the real scan moves too - not if it's only
+    // the map jumping *behind* the object (a wall's corner), which ubm took
+    // for an edge, cutting the object in pieces often too narrow to count.
+    let smoothed_real = median_filter(&real[..n], limits.median_kernel_size);
+    let real_step: Vec<f64> = smoothed_real
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .collect();
     if gradient.is_empty() {
-        return None;
+        return Vec::new();
     }
 
     let threshold = if limits.gradient_threshold > 0.0 {
@@ -68,47 +97,56 @@ pub(crate) fn find_plateau(
         median(&gradient) + 2.0 * median(&deviations)
     };
     let changes: Vec<usize> = (0..gradient.len())
-        .filter(|&i| gradient[i] > threshold)
+        .filter(|&i| {
+            if gradient[i] <= threshold {
+                return false;
+            }
+            // From (next to) nothing in front of the map to something, or
+            // back - one side less than a jump's worth: an edge.
+            if filtered[i].min(filtered[i + 1]) <= threshold {
+                return true;
+            }
+            // Between two levels of something: only if the real scan steps
+            // there too.
+            real_step[i] >= EDGE_MIN_REAL_STEP_M
+        })
         .collect();
-    let (&first, &last) = (changes.first()?, changes.last()?);
+    let (Some(&first), Some(&last)) = (changes.first(), changes.last()) else {
+        return Vec::new();
+    };
 
-    let mut candidates = Vec::new();
-    if first > min_length {
-        candidates.push((0, first));
-    }
-    for pair in changes.windows(2) {
-        let (start, end) = (pair[0] + 1, pair[1]);
-        if end >= start + min_length {
-            candidates.push((start, end));
-        }
-    }
-    if n - last > min_length {
-        candidates.push((last + 1, n));
-    }
+    // Before the first jump, between each two, and after the last.
+    let candidates = std::iter::once((0, first))
+        .chain(changes.windows(2).map(|pair| (pair[0] + 1, pair[1])))
+        .chain(std::iter::once((last + 1, n)))
+        .filter(|&(start, end)| end > start && width_m(start, end) >= min_width_m);
 
-    let mut best: Option<((usize, usize), f64)> = None;
-    for (start, end) in candidates {
-        let spread = std_dev(&real[start..end]);
-        let mean_difference =
-            filtered[start..end].iter().map(|d| d.abs()).sum::<f64>() / (end - start) as f64;
-        let score = if limits.selection == SELECTION_CLOSEST {
-            median(&real[start..end])
-        } else {
-            spread / (1.0 + (end - start) as f64 / min_length as f64) - mean_difference
-        };
-        if spread < limits.max_std_m
-            && mean_difference >= limits.min_mean_difference_m
-            && best.is_none_or(|(_, best_score)| score < best_score)
-        {
-            best = Some(((start, end), score));
-        }
-    }
-    let ((start, end), _) = best?;
-    Some(Plateau {
-        start,
-        end,
-        median_range_m: median(&real[start..end]),
-    })
+    let mut accepted: Vec<(Plateau, f64)> = candidates
+        .filter_map(|(start, end)| {
+            // Median-filtered, like the edges: a single ray that got no
+            // return (or a stray one) doesn't make an object look spread.
+            let spread = std_dev(&smoothed_real[start..end]);
+            let mean_difference =
+                filtered[start..end].iter().map(|d| d.abs()).sum::<f64>() / (end - start) as f64;
+            let median_range_m = median(&smoothed_real[start..end]);
+            let score = if limits.selection == SELECTION_CLOSEST {
+                median_range_m
+            } else {
+                spread / (1.0 + width_m(start, end) / min_width_m) - mean_difference
+            };
+            (spread < limits.max_std_m && mean_difference >= limits.min_mean_difference_m)
+                .then_some((
+                    Plateau {
+                        start,
+                        end,
+                        median_range_m,
+                    },
+                    score,
+                ))
+        })
+        .collect();
+    accepted.sort_by(|a, b| a.1.total_cmp(&b.1));
+    accepted.into_iter().map(|(plateau, _)| plateau).collect()
 }
 
 /// `values` median-filtered over a window of `kernel_size` (at least 1),
@@ -336,11 +374,18 @@ fn bounds(values: &[f64]) -> (f64, f64) {
 mod tests {
     use super::*;
 
+    /// The best stretch, as ubm's `detect_object_in_difference` returned it.
+    fn find_plateau(expected: &[f64], real: &[f64], limits: &PlateauLimits) -> Option<Plateau> {
+        find_plateaus(expected, real, limits).into_iter().next()
+    }
+
     fn limits() -> PlateauLimits {
         PlateauLimits {
             median_kernel_size: 5,
             gradient_threshold: 0.6,
-            min_length: 5,
+            min_width_m: 0.15,
+            // The simulated lidar: 360 rays over 4.2 rad.
+            ray_step_rad: 4.2 / 359.0,
             max_std_m: 1.0,
             min_mean_difference_m: 0.15,
             selection: 0,
@@ -390,6 +435,107 @@ mod tests {
         };
         let closest = find_plateau(&expected, &real, &closest).unwrap();
         assert_eq!(closest.median_range_m, 1.0, "{closest:?}");
+    }
+
+    /// A scan of the simulated lidar (360 rays over 4.2 rad, straight ahead
+    /// in the middle) of a wall `wall_m` away, with a `width_m` wide object
+    /// square to it `distance_m` straight ahead.
+    fn object_ahead(distance_m: f64, width_m: f64, wall_m: f64) -> (Vec<f64>, Vec<f64>) {
+        let expected = vec![wall_m; 360];
+        let real = (0..360)
+            .map(|i| {
+                let angle = -2.1 + i as f64 * 4.2 / 359.0;
+                let across = distance_m * angle.tan();
+                if angle.abs() < 1.2 && across.abs() <= width_m / 2.0 {
+                    distance_m / angle.cos()
+                } else {
+                    wall_m
+                }
+            })
+            .collect();
+        (expected, real)
+    }
+
+    #[test]
+    fn a_car_is_found_however_few_rays_it_takes() {
+        // A car's rear, 0.25 m wide: 4 rays of the simulated lidar from
+        // 4.5 m on - ubm's 5-ray minimum lost it there.
+        for distance_m in [1.0, 2.0, 3.0, 4.5, 5.0, 6.0, 7.0] {
+            let (expected, real) = object_ahead(distance_m, 0.25, 10.0);
+            let plateau = find_plateau(&expected, &real, &limits());
+            let plateau = plateau.unwrap_or_else(|| panic!("nothing found at {distance_m} m"));
+            assert!(
+                (plateau.median_range_m - distance_m).abs() < 0.01,
+                "{plateau:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_corner_behind_an_object_does_not_cut_it_in_two() {
+        // A car's rear 1.4 m ahead, over a wall whose range jumps from 7 m to
+        // 10 m right behind its middle: split on the difference, as ubm
+        // did, it made two stretches narrower than min_width_m.
+        let (mut expected, real) = object_ahead(1.4, 0.25, 10.0);
+        expected[..180].fill(7.0);
+        let plateau = find_plateau(&expected, &real, &limits()).expect("the car");
+        assert!((plateau.median_range_m - 1.4).abs() < 0.01, "{plateau:?}");
+        assert!(plateau.start < 178 && plateau.end > 182, "{plateau:?}");
+    }
+
+    #[test]
+    fn an_object_at_the_range_of_the_wall_beside_it_is_found() {
+        // A wall seen at a grazing angle, its range climbing to 6 m, then a
+        // car at 5.2 m: the real scan barely steps at the car's edge (less
+        // than the gradient threshold), the difference does.
+        let mut expected: Vec<f64> = (0..360).map(|i| 3.0 + i as f64 * 0.02).collect();
+        let mut real = expected.clone();
+        for i in 200..205 {
+            expected[i] = 7.0;
+            real[i] = 5.2;
+        }
+        for i in 205..360 {
+            expected[i] = 12.0;
+            real[i] = 12.0;
+        }
+        let plateau = find_plateau(&expected, &real, &limits()).expect("the car");
+        assert!((plateau.median_range_m - 5.2).abs() < 0.01, "{plateau:?}");
+    }
+
+    #[test]
+    fn an_object_at_the_range_of_a_wall_ending_beside_it_is_found() {
+        // A wall ending 4.3 m away, then a car at 4.3 m in front of open
+        // space: the real scan doesn't step at all at the car's edge - only
+        // the difference, from nothing to something.
+        let expected: Vec<f64> = (0..360).map(|i| if i < 200 { 4.3 } else { 12.0 }).collect();
+        let real: Vec<f64> = (0..360).map(|i| if i < 206 { 4.3 } else { 12.0 }).collect();
+        let plateau = find_plateau(&expected, &real, &limits()).expect("the car");
+        assert!((plateau.median_range_m - 4.3).abs() < 0.01, "{plateau:?}");
+        assert!(plateau.start >= 199 && plateau.end <= 207, "{plateau:?}");
+    }
+
+    #[test]
+    fn a_corner_behind_a_narrow_object_near_its_edge_does_not_cut_it() {
+        // 6 rays of car 3.2 m ahead, over open space that becomes a wall
+        // 6 m away two rays before the car's far edge.
+        let (mut expected, real) = object_ahead(3.2, 0.25, 12.0);
+        let rays: Vec<usize> = (0..360).filter(|&i| real[i] < 12.0).collect();
+        let last = *rays.last().unwrap();
+        expected[last - 1..].fill(6.0);
+        let plateau = find_plateau(&expected, &real, &limits()).expect("the car");
+        assert!((plateau.median_range_m - 3.2).abs() < 0.05, "{plateau:?}");
+    }
+
+    #[test]
+    fn too_narrow_an_object_is_not_one() {
+        // 0.08 m across at 1 m: 7 rays, plenty for ubm's 5-ray minimum.
+        let (expected, real) = object_ahead(1.0, 0.08, 10.0);
+        assert_eq!(find_plateau(&expected, &real, &limits()), None);
+        let wide_enough = PlateauLimits {
+            min_width_m: 0.05,
+            ..limits()
+        };
+        assert!(find_plateau(&expected, &real, &wide_enough).is_some());
     }
 
     #[test]

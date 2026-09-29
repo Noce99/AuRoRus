@@ -5,7 +5,7 @@
 //! [`DETECTOR_PARAMETERS_TOPIC_NAME`].
 
 use super::config::{UbmDetectorConfig, tunable_parameters};
-use super::map_difference::{Kalman, PlateauLimits, find_plateau, fit_rectangle, near_wall};
+use super::map_difference::{Kalman, PlateauLimits, find_plateaus, fit_rectangle, near_wall};
 use crate::autonomous_control::shared::race_line::{Pose, pose};
 use crate::sensors::cast_ray;
 use crate::topics::{
@@ -117,31 +117,42 @@ fn detect(
     let limits = PlateauLimits {
         median_kernel_size: config.median_filter_kernel_size,
         gradient_threshold: config.gradient_threshold,
-        min_length: config.min_object_size,
+        min_width_m: config.min_object_width_m,
+        ray_step_rad: if scan.points.len() > 1 {
+            f64::from(scan.angle_rad(1) - scan.angle_rad(0))
+        } else {
+            0.0
+        },
         max_std_m: config.object_std_threshold_m,
         min_mean_difference_m: config.distance_from_walls_threshold_m,
         selection: config.selection,
     };
-    let Some(plateau) = find_plateau(&expected, &real, &limits) else {
+    // The best stretch not on a wall - ubm checked only the best, so a
+    // stretch of wall the map is slightly off on hid the opponent behind it.
+    let found = find_plateaus(&expected, &real, &limits)
+        .into_iter()
+        .map(|plateau| {
+            let center = (plateau.start + plateau.end) / 2;
+            let distance_m = plateau.median_range_m.abs() + config.robot_radius_m;
+            let measured = [
+                pose.x_m + distance_m * angle(center).cos(),
+                pose.y_m + distance_m * angle(center).sin(),
+            ];
+            (plateau, measured)
+        })
+        .find(|(_, measured)| {
+            config.ignore_walls == 0
+                || !near_wall(
+                    map,
+                    info,
+                    measured[0],
+                    measured[1],
+                    config.ignore_walls_radius_px,
+                )
+        });
+    let Some((plateau, measured)) = found else {
         return (None, expected_hits);
     };
-    let center = (plateau.start + plateau.end) / 2;
-    let distance_m = plateau.median_range_m.abs() + config.robot_radius_m;
-    let measured = [
-        pose.x_m + distance_m * angle(center).cos(),
-        pose.y_m + distance_m * angle(center).sin(),
-    ];
-    if config.ignore_walls != 0
-        && near_wall(
-            map,
-            info,
-            measured[0],
-            measured[1],
-            config.ignore_walls_radius_px,
-        )
-    {
-        return (None, expected_hits);
-    }
     let points = (plateau.start..plateau.end)
         .filter(|&i| real[i] < max_range_m)
         .map(|i| {

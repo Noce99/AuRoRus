@@ -25,8 +25,12 @@ median_filter_kernel_size = 5
 # stretch. 0.0 picks it from the scan: the gradients' median plus twice their
 # median absolute deviation.
 gradient_threshold = 0.6
-# Fewest consecutive rays a stretch needs to be an object.
-min_object_size = 5
+# Narrowest a stretch may be to be an object, in meters across: its rays
+# times the angle between two rays times its median range. ubm counted rays
+# instead (5, for its finer lidar), which lost a car farther than about 4 m
+# with the simulated lidar's 360. A car's rear is 0.25 m, of which the
+# stretch sees one ray less.
+min_object_width_m = 0.15
 # Most a stretch's real ranges may spread (standard deviation), in meters.
 object_std_threshold_m = 1.0
 # Least the real scan must be shorter than the map's across a stretch, on
@@ -38,7 +42,7 @@ robot_radius_m = 0.3
 # 1 to drop a detection within ignore_walls_radius_px of a wall, 0 to keep it.
 ignore_walls = 1
 # How close to a wall a detection may be before it's dropped, in map pixels.
-ignore_walls_radius_px = 4
+ignore_walls_radius_px = 2
 
 # Kalman filter: how much the opponent is expected to accelerate (higher
 # follows it faster, but noisier), in m/s^2.

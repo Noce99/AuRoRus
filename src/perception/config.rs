@@ -21,7 +21,7 @@ pub struct UbmDetectorConfig {
     pub max_detection_range_m: f64,
     pub median_filter_kernel_size: usize,
     pub gradient_threshold: f64,
-    pub min_object_size: usize,
+    pub min_object_width_m: f64,
     pub object_std_threshold_m: f64,
     pub distance_from_walls_threshold_m: f64,
     pub robot_radius_m: f64,
@@ -60,8 +60,9 @@ pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
         AlgorithmParameter::float("gradient_threshold", 0.0, 5.0, 0.05)
             .unit("m")
             .description("A jump in the difference larger than this starts or ends a stretch - 0 picks it from the scan."),
-        AlgorithmParameter::int("min_object_size", 1, 100, 1)
-            .description("Fewest consecutive rays an object needs."),
+        AlgorithmParameter::float("min_object_width_m", 0.0, 1.0, 0.01)
+            .unit("m")
+            .description("Narrowest an object may be, across the rays that see it."),
         AlgorithmParameter::float("object_std_threshold_m", 0.01, 5.0, 0.01)
             .unit("m")
             .description("Most an object's ranges may spread (standard deviation)."),
