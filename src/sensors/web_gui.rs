@@ -24,6 +24,7 @@
 mod assets;
 mod benchmark_api;
 mod debug_api;
+mod detector_api;
 mod draw_api;
 mod handlers;
 mod live_api;
@@ -35,13 +36,14 @@ mod topics_api;
 use crate::telemetry::TelemetryPoseSource;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
-    AutonomousAlgorithmSelection, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    MAP_SELECTION_TOPIC_NAME, MapSelection, OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests,
-    PLACE_AT_START_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
-    PlaceAtStart, PlanningParameters, PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME,
-    RACE_START_TOPIC_NAME, RaceLineSelection, RaceStart, SLAM_COMMAND_TOPIC_NAME,
-    SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
+    AutonomousAlgorithmSelection, AutonomousParameters, DETECTOR_PARAMETERS_TOPIC_NAME,
+    DetectorParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection,
+    OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests, PLACE_AT_START_TOPIC_NAME,
+    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
+    PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_START_TOPIC_NAME, RaceLineSelection,
+    RaceStart, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VehicleModelParameters, VehicleModelSelection, VescCommand,
 };
 use crate::{Captain, DebugRecorder, Executor};
 use std::any::Any;
@@ -204,6 +206,11 @@ impl Executor for WebGui {
             PLANNING_PARAMETERS_TOPIC_NAME,
             self.id,
             PlanningParameters::default,
+        );
+        captain.claim_writer::<DetectorParameters>(
+            DETECTOR_PARAMETERS_TOPIC_NAME,
+            self.id,
+            DetectorParameters::default,
         );
         captain.claim_writer::<PlanningRequest>(
             PLANNING_REQUEST_TOPIC_NAME,

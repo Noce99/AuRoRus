@@ -3,6 +3,7 @@
 //! without redefining it.
 
 mod autonomous_control;
+mod detection;
 mod drawing;
 mod imu;
 mod lap_telemetry;
@@ -28,6 +29,10 @@ pub use autonomous_control::{
     AUTONOMOUS_PARAMETERS_TOPIC_NAME, AlgorithmParameter, AlgorithmRequirements,
     AutonomousAlgorithmInfo, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
     AutonomousParameters, AvailableAlgorithm, ParameterKind,
+};
+pub use detection::{
+    BoundingBox, DETECTED_OPPONENT_TOPIC_NAME, DETECTOR_PARAMETERS_TOPIC_NAME,
+    DETECTOR_STATUS_TOPIC_NAME, DetectedOpponent, DetectorParameters, DetectorStatus,
 };
 pub use drawing::{Color, DRAW_TOPIC_PREFIX, Drawing, DrawingElement, Shape};
 pub use imu::{IMU_TOPIC_NAME, ImuReading};

@@ -1,0 +1,56 @@
+# Configuration for `aurorus::perception::UbmDetector`, ubm's `detector_py`
+# (map-difference opponent detector): it raycasts the scan the lidar would
+# see on the map alone, from the ego vehicle's pose, and looks for a stretch
+# of the real scan that's shorter - something that isn't on the map. That
+# stretch becomes one opponent, smoothed by a constant-velocity Kalman filter,
+# with a rectangle fitted around its points. Every value but poll_interval_ms
+# can be tuned live from web_gui's Detector panel, which can also save them
+# back here.
+
+# How often the detector checks for a new scan, in milliseconds - it runs
+# once per scan, however fast they come.
+poll_interval_ms = 5
+
+# Where the ego vehicle's pose comes from: 0 = localization (odometry
+# composed onto SLAM's map_to_odom, only while localizing), 1 = ground truth
+# (vehicle_status, simulation only).
+pose_source = 0
+
+# Ranges beyond this are clamped to it, in both scans, in meters.
+max_detection_range_m = 30.0
+# Width, in rays, of the median filter smoothing the difference between the
+# two scans - removes isolated noise spikes. Odd; 1 for none.
+median_filter_kernel_size = 5
+# A jump in the difference larger than this, in meters, starts or ends a
+# stretch. 0.0 picks it from the scan: the gradients' median plus twice their
+# median absolute deviation.
+gradient_threshold = 0.6
+# Fewest consecutive rays a stretch needs to be an object.
+min_object_size = 5
+# Most a stretch's real ranges may spread (standard deviation), in meters.
+object_std_threshold_m = 1.0
+# Least the real scan must be shorter than the map's across a stretch, on
+# average, in meters.
+distance_from_walls_threshold_m = 0.15
+# Added to the object's (median) distance: how far behind the surface seen
+# the opponent's center is, in meters.
+robot_radius_m = 0.3
+# 1 to drop a detection within ignore_walls_radius_px of a wall, 0 to keep it.
+ignore_walls = 1
+# How close to a wall a detection may be before it's dropped, in map pixels.
+ignore_walls_radius_px = 4
+
+# Kalman filter: how much the opponent is expected to accelerate (higher
+# follows it faster, but noisier), in m/s^2.
+kf_process_noise = 5.0
+# Kalman filter: how far off a detection is expected to be (higher is
+# smoother, but lags), in meters.
+kf_measurement_noise = 0.2
+# How many predicted positions to publish.
+prediction_count = 10
+# Time between two predicted positions, in seconds.
+prediction_dt_s = 0.1
+
+# Bounding box: points closer than this to a side count as this close, so a
+# single point on it can't dominate the fit, in meters.
+min_2_points_dist_m = 0.01

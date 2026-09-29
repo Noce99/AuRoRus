@@ -256,7 +256,7 @@ fn measured_range_m(
 /// (world frame) until it either hits an occupied pixel of `map`, leaves the
 /// raster, or travels `max_distance_m` - returning the traveled distance and
 /// whether it ended in a hit.
-fn cast_ray(
+pub(crate) fn cast_ray(
     map: &SelectedMap,
     info: &MapInfo,
     origin_x: f64,

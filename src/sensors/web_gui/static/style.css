@@ -33,6 +33,8 @@
 #algorithm-message,
 #slam-details,
 #localization-details,
+#detector-details,
+#detector-opponent,
 #planning-details,
 #planning-outcome {
   margin: 0;
@@ -193,6 +195,7 @@
 
 #slam-state,
 #localization-state,
+#detector-state,
 #planning-state {
   margin: 0;
   font-size: 15px;
@@ -202,17 +205,20 @@
 
 #slam-state.running,
 #localization-state.localizing,
+#detector-state.detected,
 #planning-state.computing {
   color: #7fd18b;
 }
 
 #slam-state.waiting,
-#localization-state.localization_paused {
+#localization-state.localization_paused,
+#detector-state.waiting {
   color: #e0a458;
 }
 
 #slam-state.stale,
 #localization-state.stale,
+#detector-state.stale,
 #planning-state.stale {
   color: #f59e0b;
 }

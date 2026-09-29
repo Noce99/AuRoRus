@@ -6,6 +6,7 @@ use super::WebGuiConfig;
 use super::assets;
 use super::benchmark_api::{self, Benchmark};
 use super::debug_api;
+use super::detector_api;
 use super::draw_api;
 use super::live_api;
 use super::maps_api;
@@ -127,6 +128,16 @@ pub fn handle(
             live_api::slam_command(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/slam_save") => live_api::slam_save(&mut request, captain, writer_id),
+        (Method::Get, "/api/detector") => detector_api::detector(captain),
+        (Method::Post, "/api/detector_parameter") => {
+            detector_api::set_detector_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/detector_parameters_save") => {
+            detector_api::save_detector_parameters(captain)
+        }
+        (Method::Post, "/api/detector_parameters_load") => {
+            detector_api::load_detector_parameters(captain, writer_id)
+        }
         (Method::Get, "/api/planning") => live_api::planning(captain),
         (Method::Post, "/api/planning_parameter") => {
             live_api::set_planning_parameter(&mut request, captain, writer_id)

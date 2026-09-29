@@ -22,6 +22,7 @@
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
       <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
       <button class="panel-nav-btn" data-panel="localization">Localization</button>
+      <button class="panel-nav-btn" data-panel="detector">Detector</button>
       <button class="panel-nav-btn" data-panel="planning">Planning</button>
       <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
       <button class="panel-nav-btn" data-panel="opponents">Opponents</button>
@@ -161,6 +162,21 @@
         <button type="button" id="localization-pause-btn" data-state="localization_paused" title="Pause, keeping the pose">&#10074;&#10074; Pause</button>
       </div>
       <p id="localization-details"></p>
+    </section>
+
+    <section id="panel-detector" class="panel-section" hidden>
+      <h1>Detector</h1>
+      <p id="detector-state"></p>
+      <p id="detector-details"></p>
+      <p id="detector-opponent"></p>
+      <h2 class="parameter-group-title">Parameters</h2>
+      <p class="parameter-description">Applied from the next scan.</p>
+      <div id="detector-parameters" class="parameter-list" hidden></div>
+      <div id="detector-save" class="parameter-save" hidden>
+        <button type="button" id="detector-save-btn" class="parameter-save-btn" title="Write these values into the detector's config file">Save parameters</button>
+        <button type="button" id="detector-load-btn" class="parameter-load-btn" title="Use the values in the detector's config file again, dropping unsaved changes">Load from file</button>
+        <p id="detector-save-status"></p>
+      </div>
     </section>
 
     <section id="panel-planning" class="panel-section" hidden>

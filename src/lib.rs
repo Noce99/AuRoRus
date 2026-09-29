@@ -37,6 +37,7 @@ pub mod debug_format;
 pub mod environment;
 pub mod localization;
 pub mod opponents;
+pub mod perception;
 pub mod planning;
 pub mod sensors;
 pub mod telemetry;

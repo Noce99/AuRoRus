@@ -16,5 +16,6 @@ pub use map_server::{MapServer, MapServerConfig};
 pub use race_line_publisher::RaceLinePublisher;
 pub use random_lidar::{RandomLidar, RandomLidarConfig};
 pub use simulated_imu::{SimulatedImu, SimulatedImuConfig};
+pub(crate) use simulated_lidar::cast_ray;
 pub use simulated_lidar::{SimulatedLidar, SimulatedLidarConfig};
 pub use web_gui::{BenchmarkSetup, WebGui, WebGuiConfig};

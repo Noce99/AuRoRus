@@ -70,7 +70,7 @@ struct StampedBody<'a, T> {
 
 /// Serializes `value` (derived from a topic read) wrapped in a
 /// [`StampedBody`] carrying that read's `meta`.
-fn stamped_json<T: serde::Serialize>(value: &T, meta: WriteMeta) -> ResponseBox {
+pub(super) fn stamped_json<T: serde::Serialize>(value: &T, meta: WriteMeta) -> ResponseBox {
     json_response(
         &StampedBody {
             value,
@@ -688,7 +688,7 @@ pub fn load_autonomous_parameters(
 }
 
 /// The response to a successful load from the config file at `path`.
-fn loaded(path: &Path) -> ResponseBox {
+pub(super) fn loaded(path: &Path) -> ResponseBox {
     json_response(
         &SavedParameters {
             path: path.display().to_string(),

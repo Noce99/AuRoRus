@@ -2,6 +2,7 @@ use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
 use aurorus::opponents::OpponentsManager;
+use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
     BenchmarkSetup, MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
@@ -37,6 +38,9 @@ fn main() {
             .unwrap_or_else(|_| SimulatedVehicleConfig::default());
     let planning_config = aurorus::config::load(&config.config_dir.join("planning/race_line.toml"))
         .unwrap_or_else(|_| PlanningConfig::default());
+    let detector_config =
+        aurorus::config::load(&config.config_dir.join("perception/ubm_detector.toml"))
+            .unwrap_or_else(|_| UbmDetectorConfig::default());
 
     let lap_telemetry_config =
         aurorus::config::load(&config.config_dir.join("telemetry/lap_telemetry.toml"))
@@ -66,6 +70,7 @@ fn main() {
     runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
     runner.add_executor(Slam::new("Slam", config.maps_root, slam_config).boxed());
     runner.add_executor(Planner::new("Planner", planning_config).boxed());
+    runner.add_executor(UbmDetector::new("UbmDetector", detector_config).boxed());
     // Opponents copy the ego vehicle's configs - see `OpponentsManager`.
     runner.add_executor(
         OpponentsManager::new(

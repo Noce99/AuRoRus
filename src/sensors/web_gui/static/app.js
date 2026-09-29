@@ -709,6 +709,74 @@ function renderLocalization(status, stale) {
 }
 
 // ---------------------------------------------------------------------
+// Detector panel - shows what `UbmDetector` (ubm's detector_py) found in the
+// ego vehicle's latest scan and why it isn't detecting, from `/api/detector`
+// (the `detector_status` and `detected_opponent` topics), and tunes it
+// through `detector_parameters`. The opponent and its bounding box are
+// drawn by the detector itself (see the Layers panel).
+// ---------------------------------------------------------------------
+
+const detectorStateEl = document.getElementById("detector-state");
+const detectorDetailsEl = document.getElementById("detector-details");
+const detectorOpponentEl = document.getElementById("detector-opponent");
+
+const syncDetectorParameters = createParameterPanel({
+  containerEl: document.getElementById("detector-parameters"),
+  saveEl: document.getElementById("detector-save"),
+  setUrl: "/api/detector_parameter",
+  saveUrl: "/api/detector_parameters_save",
+  loadUrl: "/api/detector_parameters_load",
+});
+
+/** The detected opponent, in words. */
+function describeDetectedOpponent(opponent) {
+  const [x, y] = opponent.position;
+  const [vx, vy] = opponent.velocity;
+  const parts = [
+    `At (${x.toFixed(2)}, ${y.toFixed(2)}) m, moving at ${Math.hypot(vx, vy).toFixed(2)} m/s.`,
+  ];
+  const box = opponent.bounding_box;
+  if (box !== null) {
+    parts.push(
+      `Box ${box.length_m.toFixed(2)} x ${box.width_m.toFixed(2)} m,`,
+      `turned ${((box.heading_rad * 180) / Math.PI).toFixed(0)}°.`,
+    );
+  }
+  return parts.join(" ");
+}
+
+// Polls `/api/detector`. The detector writes its status after every scan,
+// or when it stops detecting - only a status never written at all means
+// there's no detector.
+async function pollDetector() {
+  const response = await fetchJSON("/api/detector");
+  const { status, opponent } = response.value;
+  const missing = status === null || response.age_ms === null;
+  const waiting = !missing && status.message !== null;
+
+  detectorStateEl.className = missing ? "stale" : waiting ? "waiting" : opponent.detected ? "detected" : "";
+  detectorStateEl.textContent = missing
+    ? "Detector not running"
+    : waiting
+      ? "Waiting"
+      : opponent.detected
+        ? "Opponent detected"
+        : "No opponent in sight";
+
+  if (missing) {
+    detectorDetailsEl.textContent = "";
+  } else if (waiting) {
+    detectorDetailsEl.textContent = status.message;
+  } else {
+    detectorDetailsEl.textContent =
+      `Compares every lidar scan with the one the map alone would give - last scan took ${status.scan_ms.toFixed(1)} ms.`;
+  }
+  detectorOpponentEl.textContent = !missing && !waiting && opponent.detected ? describeDetectedOpponent(opponent) : "";
+
+  syncDetectorParameters("detector", missing ? [] : status.parameters);
+}
+
+// ---------------------------------------------------------------------
 // Planning panel - asks the planner for a race line for the selected map
 // through the `planning_request` topic, tunes it through
 // `planning_parameters` (applied right away, so before starting), and
@@ -2326,6 +2394,7 @@ startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollVehicleModel, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
+startPolling(pollDetector, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);
 startPolling(pollOpponents, SELECTION_POLL_MS);
