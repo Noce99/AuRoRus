@@ -1,4 +1,4 @@
-//! The optimal-control problem behind [`ubm_mpc`](crate::autonomous_control):
+//! The optimal-control problem behind [`mpc`](crate::autonomous_control):
 //! ubm's `MPCEuclidianDistance` (`mpc_casadi.cpp`), solved with PANOC
 //! instead of CasADi/IPOPT.
 //!

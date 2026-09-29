@@ -205,6 +205,7 @@ const algorithmSelectEl = document.getElementById("algorithm-select");
 const algorithmDescriptionEl = document.getElementById("algorithm-description");
 const algorithmStatusEl = document.getElementById("algorithm-status");
 const algorithmMessageEl = document.getElementById("algorithm-message");
+const algorithmStatsEl = document.getElementById("algorithm-stats");
 const algorithmStartBtn = document.getElementById("algorithm-start-btn");
 const algorithmPauseBtn = document.getElementById("algorithm-pause-btn");
 
@@ -216,7 +217,7 @@ let liveAlgorithm = null;
 /** Whether the selected algorithm was last reported running (not paused). */
 let algorithmRunning = false;
 
-/** `{name, label, description, parameters, message}` of every algorithm last reported available. */
+/** `{name, label, description, parameters, message, stats}` of every algorithm last reported available. */
 let algorithmOptions = [];
 
 async function selectAlgorithm(name, running) {
@@ -314,6 +315,11 @@ async function pollAlgorithms() {
   const message = algorithmOptions.find((o) => o.name === status.selected)?.message ?? null;
   algorithmMessageEl.hidden = message === null;
   algorithmMessageEl.textContent = message ?? "";
+
+  // Its live figures, e.g. the solve time - only while it's in control.
+  const stats = algorithmRunning ? (algorithmOptions.find((o) => o.name === status.selected)?.stats ?? null) : null;
+  algorithmStatsEl.hidden = stats === null;
+  algorithmStatsEl.textContent = stats ?? "";
 
   syncAlgorithmParameters(status.selected);
   focusAlgorithmDrawing(status.selected, status.available);

@@ -1,5 +1,5 @@
-//! Building blocks of the LIDAR-reactive algorithms (`ubm_disparity_extender`,
-//! `ubm_potential_field`, `ubm_potential_pursuit`): picking the part of a scan to
+//! Building blocks of the LIDAR-reactive algorithms (`disparity_extender`,
+//! `potential_field`, `potential_pursuit`): picking the part of a scan to
 //! look at, the speed laws, the obstacle-dependent Gaussian potential field,
 //! and drawing helpers.
 //!

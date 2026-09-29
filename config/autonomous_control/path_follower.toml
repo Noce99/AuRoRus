@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_path_follower`, ported
+# Configuration for `aurorus::autonomous_control::path_follower`, ported
 # from ubm's path follower: follows the selected map's race line with a PD,
 # P-enhanced or Stanley steering law, plus an optional feedforward term.
 

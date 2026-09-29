@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_potential_field`, a
+# Configuration for `aurorus::autonomous_control::potential_field`, a
 # reactive algorithm: obstacles in the LIDAR scan repel with Gaussian
 # potentials, the longest reading attracts, and the vehicle steers toward a
 # minimum of the sum.

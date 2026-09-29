@@ -22,19 +22,19 @@ use std::time::Duration;
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    Box::new(UbmDisparityExtender {
+    Box::new(DisparityExtender {
         id: 0,
         config: load_config(&instance.config_name),
         instance,
     })
 }
 
-/// Every tunable parameter [`UbmDisparityExtender`] needs - loaded from
-/// `config/autonomous_control/ubm_disparity_extender.toml` at runtime (see [`load_config`]), falling
+/// Every tunable parameter [`DisparityExtender`] needs - loaded from
+/// `config/autonomous_control/disparity_extender.toml` at runtime (see [`load_config`]), falling
 /// back to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmDisparityExtenderConfig {
+pub struct DisparityExtenderConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
     /// Part of the scan looked at, centred straight ahead, in degrees.
@@ -62,14 +62,14 @@ pub struct UbmDisparityExtenderConfig {
     pub min_speed: f32,
 }
 
-impl Default for UbmDisparityExtenderConfig {
+impl Default for DisparityExtenderConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_disparity_extender.toml"))
-            .expect("config/autonomous_control/ubm_disparity_extender.toml must deserialize into UbmDisparityExtenderConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/disparity_extender.toml"))
+            .expect("config/autonomous_control/disparity_extender.toml must deserialize into DisparityExtenderConfig")
     }
 }
 
-/// The live-tunable parameters, one per [`UbmDisparityExtenderConfig`] field -
+/// The live-tunable parameters, one per [`DisparityExtenderConfig`] field -
 /// see [`ParameterTuner`].
 fn parameters() -> [AlgorithmParameter; 11] {
     [
@@ -109,13 +109,13 @@ fn parameters() -> [AlgorithmParameter; 11] {
     ]
 }
 
-struct UbmDisparityExtender {
+struct DisparityExtender {
     id: u16,
     instance: Instance,
-    config: UbmDisparityExtenderConfig,
+    config: DisparityExtenderConfig,
 }
 
-impl Executor for UbmDisparityExtender {
+impl Executor for DisparityExtender {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -125,7 +125,7 @@ impl Executor for UbmDisparityExtender {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM Disparity extender",
+                "Disparity extender",
                 "Extends the edges of obstacles by the car's width, then steers toward the farthest reading",
             )
             .requires_lidar()
@@ -203,7 +203,7 @@ impl Executor for UbmDisparityExtender {
 
 /// How long the drawing stays valid: a few publishing periods, but never
 /// less than the default.
-fn drawing_stale_after(config: &UbmDisparityExtenderConfig) -> Duration {
+fn drawing_stale_after(config: &DisparityExtenderConfig) -> Duration {
     Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
@@ -222,7 +222,7 @@ struct Control {
 }
 
 /// The disparity extender on `scan` - `None` if it has too few readings.
-fn control(config: &UbmDisparityExtenderConfig, scan: &LidarScan, limits: &ActuatorLimits) -> Option<Control> {
+fn control(config: &DisparityExtenderConfig, scan: &LidarScan, limits: &ActuatorLimits) -> Option<Control> {
     let window = fov_window(scan, config.desired_fov_deg.to_radians());
     if window.len() < 2 {
         return None;
@@ -242,7 +242,7 @@ fn control(config: &UbmDisparityExtenderConfig, scan: &LidarScan, limits: &Actua
 /// nearer) enough readings on the farther side, starting at the farther
 /// one, to cover half the car's width at its distance - times
 /// `r_multiplier`.
-fn extend_disparities(config: &UbmDisparityExtenderConfig, scan: &LidarScan, window: Range<usize>) -> Vec<f32> {
+fn extend_disparities(config: &DisparityExtenderConfig, scan: &LidarScan, window: Range<usize>) -> Vec<f32> {
     let clipped: Vec<f32> = scan.points.iter().map(|&r| r.min(config.max_range_m)).collect();
     let mut processed = clipped.clone();
     let step = ray_step_rad(scan);
@@ -268,8 +268,8 @@ fn extend_disparities(config: &UbmDisparityExtenderConfig, scan: &LidarScan, win
 }
 
 /// The reading in `window` to steer toward - see
-/// [`UbmDisparityExtenderConfig::ray_eq_thr_m`] and the fields after it.
-fn choose(config: &UbmDisparityExtenderConfig, scan: &LidarScan, processed: &[f32], window: Range<usize>) -> usize {
+/// [`DisparityExtenderConfig::ray_eq_thr_m`] and the fields after it.
+fn choose(config: &DisparityExtenderConfig, scan: &LidarScan, processed: &[f32], window: Range<usize>) -> usize {
     let toward_positive = config.angle_priority == 1;
     let farthest = window.clone().map(|i| processed[i]).fold(f32::MIN, f32::max);
     // Lower indices are the more negative angles.
@@ -310,8 +310,8 @@ mod tests {
         }
     }
 
-    fn config() -> UbmDisparityExtenderConfig {
-        UbmDisparityExtenderConfig {
+    fn config() -> DisparityExtenderConfig {
+        DisparityExtenderConfig {
             desired_fov_deg: 180.0,
             car_width_m: 0.30,
             disparity_threshold_m: 0.5,
@@ -339,7 +339,7 @@ mod tests {
         let scan = scan(181, PI, 5.0);
         let processed = scan.points.clone();
         assert_eq!(choose(&config(), &scan, &processed, 0..181), 0);
-        let right = UbmDisparityExtenderConfig { angle_priority: 1, ..config() };
+        let right = DisparityExtenderConfig { angle_priority: 1, ..config() };
         assert_eq!(choose(&right, &scan, &processed, 0..181), 180);
     }
 
@@ -348,7 +348,7 @@ mod tests {
         let mut scan = scan(181, PI, 5.0);
         scan.points[20] = 5.05;
         let processed = scan.points.clone();
-        let tolerant = UbmDisparityExtenderConfig { ray_eq_thr_m: 0.1, angle_eq_thr_rad: 0.0, ..config() };
+        let tolerant = DisparityExtenderConfig { ray_eq_thr_m: 0.1, angle_eq_thr_rad: 0.0, ..config() };
         assert_eq!(choose(&tolerant, &scan, &processed, 0..181), 90);
         // Without the tolerance, the farthest wins.
         assert_eq!(choose(&config(), &scan, &processed, 0..181), 20);
@@ -369,8 +369,8 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmDisparityExtenderConfig::default();
-        let info = AutonomousAlgorithmInfo::new("UBM Disparity extender", "").with_parameters(&config, parameters());
+        let config = DisparityExtenderConfig::default();
+        let info = AutonomousAlgorithmInfo::new("Disparity extender", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

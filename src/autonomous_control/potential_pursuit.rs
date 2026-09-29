@@ -1,16 +1,16 @@
-//! Potential pursuit: the [`ubm_potential_field`](super::ubm_potential_field), but
+//! Potential pursuit: the [`potential_field`](super::potential_field), but
 //! attracted toward a blend of the longest LIDAR reading and a pursuit point
 //! a lookahead distance ahead on the selected map's race line - so it
 //! follows the line while the field steers it around what's in the way.
 //! Ported from ubm's `potential_pursuit_node.cpp`.
 //!
-//! Needs a pose, like `pure_pursuit` - see [`UbmPotentialPursuitConfig::pose_source`].
+//! Needs a pose, like `pure_pursuit` - see [`PotentialPursuitConfig::pose_source`].
 //! Without a trustworthy pose, a race line, or while too far from the line,
 //! the vehicle is held stopped, and why is reported in the autonomous
 //! algorithms panel (see [`report_message`]). See
 //! `documentation/autonomous_algorithms.md`.
 
-use super::ubm_potential_field::{UbmPotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters};
+use super::potential_field::{PotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters};
 use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi};
 use crate::autonomous_control::shared::reactive::{Field, potential_field};
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
@@ -24,21 +24,21 @@ use std::any::Any;
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    let mut config: UbmPotentialPursuitConfig = load_config(&instance.config_name);
+    let mut config: PotentialPursuitConfig = load_config(&instance.config_name);
     // An opponent has no localization of its own - see `Instance::opponent`.
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(UbmPotentialPursuit { id: 0, instance, config })
+    Box::new(PotentialPursuit { id: 0, instance, config })
 }
 
-/// Every tunable parameter [`UbmPotentialPursuit`] needs - loaded from
-/// `config/autonomous_control/ubm_potential_pursuit.toml` at runtime (see [`load_config`]), falling
+/// Every tunable parameter [`PotentialPursuit`] needs - loaded from
+/// `config/autonomous_control/potential_pursuit.toml` at runtime (see [`load_config`]), falling
 /// back to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`]. The fields from `desired_fov_deg` on mean what they do in
-/// [`UbmPotentialFieldConfig`].
+/// [`PotentialFieldConfig`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmPotentialPursuitConfig {
+pub struct PotentialPursuitConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
     /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
@@ -70,17 +70,17 @@ pub struct UbmPotentialPursuitConfig {
     pub min_speed: f32,
 }
 
-impl Default for UbmPotentialPursuitConfig {
+impl Default for PotentialPursuitConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_potential_pursuit.toml"))
-            .expect("config/autonomous_control/ubm_potential_pursuit.toml must deserialize into UbmPotentialPursuitConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/potential_pursuit.toml"))
+            .expect("config/autonomous_control/potential_pursuit.toml must deserialize into PotentialPursuitConfig")
     }
 }
 
-impl UbmPotentialPursuitConfig {
+impl PotentialPursuitConfig {
     /// The potential field part of this config.
-    fn potential_field(&self) -> UbmPotentialFieldConfig {
-        UbmPotentialFieldConfig {
+    fn potential_field(&self) -> PotentialFieldConfig {
+        PotentialFieldConfig {
             rate_hz: self.rate_hz,
             desired_fov_deg: self.desired_fov_deg,
             field_resolution_deg: self.field_resolution_deg,
@@ -101,7 +101,7 @@ impl UbmPotentialPursuitConfig {
     }
 }
 
-/// The live-tunable parameters, one per [`UbmPotentialPursuitConfig`] field -
+/// The live-tunable parameters, one per [`PotentialPursuitConfig`] field -
 /// see [`ParameterTuner`].
 fn parameters() -> Vec<AlgorithmParameter> {
     let mut parameters = vec![
@@ -128,13 +128,13 @@ fn parameters() -> Vec<AlgorithmParameter> {
     parameters
 }
 
-struct UbmPotentialPursuit {
+struct PotentialPursuit {
     id: u16,
     instance: Instance,
-    config: UbmPotentialPursuitConfig,
+    config: PotentialPursuitConfig,
 }
 
-impl Executor for UbmPotentialPursuit {
+impl Executor for PotentialPursuit {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -144,7 +144,7 @@ impl Executor for UbmPotentialPursuit {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM Potential pursuit",
+                "Potential pursuit",
                 "A potential field attracted toward a point ahead on the race line",
             )
             .requires_race_line()
@@ -267,7 +267,7 @@ struct Control {
 /// The field for `pose` on `line` and `scan`, attracted toward the blend
 /// of the pursuit point's direction and the longest reading's.
 fn control(
-    config: &UbmPotentialPursuitConfig,
+    config: &PotentialPursuitConfig,
     line: &Line,
     pose: Pose,
     hint: Option<usize>,
@@ -339,8 +339,8 @@ mod tests {
         .unwrap()
     }
 
-    fn config() -> UbmPotentialPursuitConfig {
-        UbmPotentialPursuitConfig { max_distance_weight: 0.0, desired_fov_deg: 180.0, ..Default::default() }
+    fn config() -> PotentialPursuitConfig {
+        PotentialPursuitConfig { max_distance_weight: 0.0, desired_fov_deg: 180.0, ..Default::default() }
     }
 
     #[test]
@@ -367,8 +367,8 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmPotentialPursuitConfig::default();
-        let info = AutonomousAlgorithmInfo::new("UBM Potential pursuit", "").with_parameters(&config, parameters());
+        let config = PotentialPursuitConfig::default();
+        let info = AutonomousAlgorithmInfo::new("Potential pursuit", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

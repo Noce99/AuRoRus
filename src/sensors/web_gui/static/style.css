@@ -31,6 +31,7 @@
 #algorithm-description,
 #algorithm-status,
 #algorithm-message,
+#algorithm-stats,
 #slam-details,
 #localization-details,
 #detector-details,
@@ -119,6 +120,11 @@
 /* What the selected algorithm itself reports, e.g. why it holds the vehicle. */
 #algorithm-message {
   color: #facc15;
+}
+
+/* Live figures the selected algorithm reports, e.g. its solve time. */
+#algorithm-stats {
+  color: #a855f7;
 }
 
 .parameter-list {

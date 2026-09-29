@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_disparity_extender`, a
+# Configuration for `aurorus::autonomous_control::disparity_extender`, a
 # reactive algorithm: extends the edges of obstacles in the LIDAR scan by the
 # car's width, then steers toward the farthest reading left.
 

@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_potential_pursuit`: the
+# Configuration for `aurorus::autonomous_control::potential_pursuit`: the
 # potential field, attracted toward a blend of the longest LIDAR reading and
 # a point ahead on the selected map's race line.
 
@@ -18,7 +18,7 @@ max_distance_weight = 0.5
 # Farther than this from the line, the vehicle stops, in meters.
 max_cross_track_m = 1.0
 
-# The potential field - see ubm_potential_field.toml.
+# The potential field - see potential_field.toml.
 desired_fov_deg = 200.0
 field_resolution_deg = 0.5
 obstacle_threshold_gain = 1.0

@@ -354,11 +354,8 @@ The drawing shows:
 
 ## Reactive algorithms
 
-`ubm_disparity_extender.rs`, `ubm_potential_field.rs` and `ubm_potential_pursuit.rs` are
-ported from ubm's `simple_control_algos`, hence the `ubm_` prefix on their
-names (topics `autonomous_control/ubm_…`, configs
-`config/autonomous_control/ubm_….toml`) and "UBM" in their labels in
-`web_gui`. The first two need only the LIDAR
+`disparity_extender.rs`, `potential_field.rs` and `potential_pursuit.rs` are
+ported from ubm's `simple_control_algos`. The first two need only the LIDAR
 scan (`lidar_scan`), with no map and no pose. Their building blocks (FOV
 window, speed laws, potential field, drawing helpers) live in
 `src/autonomous_control/shared/reactive.rs`.
@@ -380,7 +377,7 @@ All three share these conventions:
   simulated LIDAR casts from. Without it, nothing is drawn, but the
   algorithm still drives.
 
-### UBM Disparity extender
+### Disparity extender
 
 Based on [Nathan Otterness' write-up](https://www.nathanotterness.com/2019/04/the-disparity-extender-algorithm-and.html).
 Each tick:
@@ -403,7 +400,7 @@ Each tick:
 The drawing shows the extended ranges in green and the chosen direction in
 purple.
 
-### UBM Potential field
+### Potential field
 
 Based on "A Real-Time Obstacle Avoidance Method for Autonomous Vehicles
 Using an Obstacle-Dependent Gaussian Potential Field"
@@ -441,7 +438,7 @@ The obstacle threshold is relative to the mean reading. A scan where every
 reading is nearly equal (e.g. a round room) therefore holds no obstacles.
 On a track, the walls beside the car are the obstacles.
 
-### UBM Potential pursuit
+### Potential pursuit
 
 This is the potential field, attracted toward
 `(1 − max_distance_weight) ·` the pursuit direction `+ max_distance_weight ·`
@@ -466,13 +463,13 @@ these cases:
 The drawing is the potential field's, plus the nearest point (blue) and the
 pursuit point (green).
 
-## UBM Path Follower
+## Path Follower
 
-`ubm_path_follower.rs` is a port of ubm's `path_follower_node.cpp` and
+`path_follower.rs` is a port of ubm's `path_follower_node.cpp` and
 `steering_controller.cpp`. It follows the selected map's race line, like
 `pure_pursuit`, and uses the same pose sources (`pose_source`), which also
 supply the speed `v` (odometry's, or `vehicle_status`'s). Its parameters live
-in `config/autonomous_control/ubm_path_follower.toml`.
+in `config/autonomous_control/path_follower.toml`.
 
 Each tick it does the following:
 
@@ -512,17 +509,17 @@ line. ubm had no such guard. Lap statistics and lap progress aren't ported.
 The drawing shows the nearest point (blue), the target (the lookahead or
 Stanley point, purple), and the chord to it.
 
-## UBM Frenet overtaking
+## Frenet overtaking
 
-`ubm_frenet_overtaking.rs` is a port of ubm's `frenet_map_based_node.cpp`
+`frenet_overtaking.rs` is a port of ubm's `frenet_map_based_node.cpp`
 and the `plan_map_based` part of `frenet_overtaking.cpp`. It follows the
-race line like the UBM Path Follower's PD or P-enhanced law (`controller`
+race line like the Path Follower's PD or P-enhanced law (`controller`
 0 or 1). When the LIDAR sees something on the track that the map doesn't
 contain, such as an opponent, it steers along a Frenet path around it
 instead. Its parameters live in
-`config/autonomous_control/ubm_frenet_overtaking.toml`. The planner is in
+`config/autonomous_control/frenet_overtaking.toml`. The planner is in
 `shared/frenet.rs`, and the steering laws are in `shared/steering.rs`,
-which it shares with `ubm_path_follower`.
+which it shares with `path_follower`.
 
 It needs the vehicle's pose (`pose_source`), a race line, its LIDAR scan,
 and the selected map.
@@ -576,7 +573,7 @@ and the selected map.
    the farthest any path gets before its first obstacle, so the vehicle
    can always stop before it.
 
-The vehicle is held stopped in the same cases as the UBM Path Follower: no
+The vehicle is held stopped in the same cases as the Path Follower: no
 race line, no trustworthy pose, or farther than `max_cross_track_m` from the
 line. `max_cross_track_m` defaults wider here (1.5 m), since overtaking
 leaves the line.
@@ -614,18 +611,18 @@ The drawing shows:
 - **Obstacle points** (red).
 - **Chosen path:** green if it's free, amber if it's merely the cheapest.
 - **Candidate paths:** faint, hidden by default.
-- **Nearest point, target and chord,** as for the UBM Path Follower.
+- **Nearest point, target and chord,** as for the Path Follower.
 
 While avoiding, the panel message says how many obstacle points it's
 avoiding.
 
-## UBM MPC
+## MPC
 
-`ubm_mpc.rs` is a port of ubm's MPC path follower
+`mpc.rs` is a port of ubm's MPC path follower
 (`mpc_path_follower_node.cpp` and `mpc_casadi.cpp`). It follows the race
 line with a model predictive controller over a kinematic bicycle and steers
 around the opponent that `UbmDetector` reports. Its parameters live in
-`config/autonomous_control/ubm_mpc.toml`. The optimal-control problem is in
+`config/autonomous_control/mpc.toml`. The optimal-control problem is in
 `shared/mpc.rs`.
 
 It needs the vehicle's pose (`pose_source`) and a race line. The selected
@@ -749,8 +746,10 @@ The drawing shows:
 - **Initialization:** where the latest solve from scratch started. Hidden
   by default.
 - **Nearest point.** Hidden by default.
-- **Solve time:** milliseconds and iterations of the latest solve. Hidden
-  by default.
+
+The milliseconds and iterations of the latest solve aren't drawn: they're
+reported as the algorithm's stats (`report_stats`), shown in purple in
+`web_gui`'s autonomous algorithm panel while it's in control.
 
 ## Conventions and pitfalls
 

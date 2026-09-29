@@ -1,5 +1,5 @@
 //! ubm's Frenet overtaking planner (`frenet_overtaking.cpp`'s
-//! `plan_map_based`), used by `ubm_frenet_overtaking`: samples paths that
+//! `plan_map_based`), used by `frenet_overtaking`: samples paths that
 //! leave the vehicle's current offset from the race line for a range of end
 //! offsets and lengths, keeps those staying on the map's free space (shrunk
 //! away from the walls, see [`FreeGrid`]) and clear of the obstacles, and

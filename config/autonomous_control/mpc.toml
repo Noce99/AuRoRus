@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_mpc`, ported from
+# Configuration for `aurorus::autonomous_control::mpc`, ported from
 # ubm's MPC path follower (`mpc_path_follower_node` + `mpc_casadi`):
 # follows the selected map's race line with a model predictive controller
 # over a kinematic bicycle, solved with PANOC. Defaults from ubm's

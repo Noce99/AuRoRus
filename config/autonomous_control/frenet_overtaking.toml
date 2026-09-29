@@ -1,4 +1,4 @@
-# Configuration for `aurorus::autonomous_control::ubm_frenet_overtaking`,
+# Configuration for `aurorus::autonomous_control::frenet_overtaking`,
 # ported from ubm's map-based Frenet overtaking (`frenet_map_based_node`):
 # follows the selected map's race line, and switches to a Frenet planner
 # around whatever the LIDAR sees on the map's free space (e.g. an opponent).

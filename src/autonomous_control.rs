@@ -163,6 +163,7 @@ fn discover(captain: &Captain) -> Vec<AvailableAlgorithm> {
                 description: info.description,
                 parameters: info.parameters,
                 message: info.message,
+                stats: info.stats,
                 requires: info.requires,
             })
         })
@@ -286,6 +287,27 @@ pub fn report_message(
         return;
     }
     info.message = message;
+    info_topic
+        .write(executor_id, info)
+        .expect("lost writer authorization for this algorithm's info topic");
+}
+
+/// Sets `instance`'s (running as `executor_id`)
+/// [`AutonomousAlgorithmInfo::stats`] - shown in `web_gui`'s autonomous
+/// algorithms panel - rewriting its info only if the stats changed, so it
+/// can be called every tick.
+pub fn report_stats(
+    captain: &Captain,
+    executor_id: u16,
+    instance: &Instance,
+    stats: Option<String>,
+) {
+    let info_topic = captain.autonomous_control_info(&instance.algorithm_topics());
+    let mut info = info_topic.read().into_value();
+    if info.stats == stats {
+        return;
+    }
+    info.stats = stats;
     info_topic
         .write(executor_id, info)
         .expect("lost writer authorization for this algorithm's info topic");

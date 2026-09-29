@@ -104,7 +104,7 @@ pub struct RaceLineRecord {
 /// The algorithm that drove.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AlgorithmRecord {
-    /// Its file stem, e.g. `ubm_path_follower`.
+    /// Its file stem, e.g. `path_follower`.
     pub name: String,
     /// Whether `parameters` all match its config file - if not, they were
     /// tuned in the UI and not saved.

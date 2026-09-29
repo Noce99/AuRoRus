@@ -48,6 +48,11 @@ pub struct AutonomousAlgorithmInfo {
     /// holding the vehicle stopped - `None` if nothing. Set with
     /// [`crate::autonomous_control::report_message`].
     pub message: Option<String>,
+    /// Live figures on how the algorithm is doing, e.g. its solve time -
+    /// `None` if it reports none. Set with
+    /// [`crate::autonomous_control::report_stats`].
+    #[serde(default)]
+    pub stats: Option<String>,
     /// What the algorithm needs to drive at all.
     #[serde(default)]
     pub requires: AlgorithmRequirements,
@@ -71,6 +76,7 @@ impl AutonomousAlgorithmInfo {
             description: description.into(),
             parameters: Vec::new(),
             message: None,
+            stats: None,
             requires: AlgorithmRequirements::default(),
         }
     }
@@ -230,6 +236,9 @@ pub struct AvailableAlgorithm {
     pub parameters: Vec<AlgorithmParameter>,
     /// See [`AutonomousAlgorithmInfo::message`].
     pub message: Option<String>,
+    /// See [`AutonomousAlgorithmInfo::stats`].
+    #[serde(default)]
+    pub stats: Option<String>,
     /// See [`AutonomousAlgorithmInfo::requires`].
     pub requires: AlgorithmRequirements,
 }

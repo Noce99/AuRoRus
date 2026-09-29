@@ -1,5 +1,5 @@
-//! UBM Frenet overtaking: follows the selected map's race line like the
-//! [`ubm_path_follower`](super::ubm_path_follower)'s PD or P-enhanced law,
+//! Frenet overtaking: follows the selected map's race line like the
+//! [`path_follower`](super::path_follower)'s PD or P-enhanced law,
 //! and - while the LIDAR sees something on the map's free space, e.g. an
 //! opponent - steers along a Frenet path around it instead (see
 //! [`frenet`](crate::autonomous_control::shared::frenet)). Ported from
@@ -11,7 +11,7 @@
 //! loop never ended). Improved: see the `frenet` module.
 //!
 //! The pose comes from localization or, in simulation, the ground truth -
-//! see [`UbmFrenetOvertakingConfig::pose_source`]. Without a trustworthy
+//! see [`FrenetOvertakingConfig::pose_source`]. Without a trustworthy
 //! pose, a race line, or while too far from the line, the vehicle is held
 //! stopped, and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
@@ -35,29 +35,29 @@ use std::time::{Duration, Instant};
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    let mut config: UbmFrenetOvertakingConfig = load_config(&instance.config_name);
+    let mut config: FrenetOvertakingConfig = load_config(&instance.config_name);
     // An opponent has no localization of its own - see `Instance::opponent`.
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(UbmFrenetOvertaking {
+    Box::new(FrenetOvertaking {
         id: 0,
         instance,
         config,
     })
 }
 
-/// [`UbmFrenetOvertakingConfig::controller`]: PD on the heading error toward the lookahead point.
+/// [`FrenetOvertakingConfig::controller`]: PD on the heading error toward the lookahead point.
 const CONTROLLER_PD: u8 = 0;
-/// [`UbmFrenetOvertakingConfig::controller`]: ubm's P-enhanced controller.
+/// [`FrenetOvertakingConfig::controller`]: ubm's P-enhanced controller.
 const CONTROLLER_P_ENHANCED: u8 = 1;
 
-/// Every tunable parameter [`UbmFrenetOvertaking`] needs - loaded from
-/// `config/autonomous_control/ubm_frenet_overtaking.toml` at runtime (see [`load_config`]), falling
+/// Every tunable parameter [`FrenetOvertaking`] needs - loaded from
+/// `config/autonomous_control/frenet_overtaking.toml` at runtime (see [`load_config`]), falling
 /// back to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`]. The TOML file documents each one.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmFrenetOvertakingConfig {
+pub struct FrenetOvertakingConfig {
     pub rate_hz: f32,
     /// [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
     /// or [`POSE_GROUND_TRUTH`].
@@ -99,14 +99,14 @@ pub struct UbmFrenetOvertakingConfig {
     pub braking_margin_m: f64,
 }
 
-impl Default for UbmFrenetOvertakingConfig {
+impl Default for FrenetOvertakingConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_frenet_overtaking.toml"))
-            .expect("config/autonomous_control/ubm_frenet_overtaking.toml must deserialize into UbmFrenetOvertakingConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/frenet_overtaking.toml"))
+            .expect("config/autonomous_control/frenet_overtaking.toml must deserialize into FrenetOvertakingConfig")
     }
 }
 
-impl UbmFrenetOvertakingConfig {
+impl FrenetOvertakingConfig {
     fn gains(&self) -> SteeringGains {
         SteeringGains {
             kk_s: self.kk_s,
@@ -140,7 +140,7 @@ impl UbmFrenetOvertakingConfig {
     }
 }
 
-/// The live-tunable parameters, one per [`UbmFrenetOvertakingConfig`]
+/// The live-tunable parameters, one per [`FrenetOvertakingConfig`]
 /// field - see [`ParameterTuner`]. Every step and length has a positive
 /// minimum, so the path sampling always ends.
 fn parameters() -> [AlgorithmParameter; 36] {
@@ -238,17 +238,17 @@ fn parameters() -> [AlgorithmParameter; 36] {
     ]
 }
 
-struct UbmFrenetOvertaking {
+struct FrenetOvertaking {
     id: u16,
     instance: Instance,
-    config: UbmFrenetOvertakingConfig,
+    config: FrenetOvertakingConfig,
 }
 
 /// The map's free space in use, and what it was built from: the map
 /// topic's `write_count` and the clearance.
 type GridCache = Option<(u64, f64, Option<FreeGrid>)>;
 
-impl Executor for UbmFrenetOvertaking {
+impl Executor for FrenetOvertaking {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -258,7 +258,7 @@ impl Executor for UbmFrenetOvertaking {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM Frenet overtaking",
+                "Frenet overtaking",
                 "Follows the race line, and plans Frenet paths around what the LIDAR sees on the track",
             )
             .requires_race_line()
@@ -399,7 +399,7 @@ impl Executor for UbmFrenetOvertaking {
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
                 .write(self.id, drawing.stale_after(stale_after))
-                .expect("lost writer authorization for the UBM Frenet overtaking drawing topic");
+                .expect("lost writer authorization for the Frenet overtaking drawing topic");
             ticker.wait();
         }
     }
@@ -419,7 +419,7 @@ impl Executor for UbmFrenetOvertaking {
 
 /// How long the drawing stays valid: a few publishing periods, but never
 /// less than the default.
-fn drawing_stale_after(config: &UbmFrenetOvertakingConfig) -> Duration {
+fn drawing_stale_after(config: &FrenetOvertakingConfig) -> Duration {
     Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
@@ -428,7 +428,7 @@ fn drawing_stale_after(config: &UbmFrenetOvertakingConfig) -> Duration {
 /// `desired_fov_deg` straight ahead, closer than `max_path_length_m` - what
 /// the map doesn't know about, e.g. an opponent.
 fn find_obstacles(
-    config: &UbmFrenetOvertakingConfig,
+    config: &FrenetOvertakingConfig,
     scan: &LidarScan,
     pose: Pose,
     grid: &FreeGrid,
@@ -535,7 +535,7 @@ struct Control {
 /// farther than `max_cross_track_m` from the line, the projection that was
 /// too far.
 fn control(
-    config: &UbmFrenetOvertakingConfig,
+    config: &FrenetOvertakingConfig,
     input: &Input,
     state: &mut State,
     now: Instant,
@@ -776,8 +776,8 @@ mod tests {
         LidarScan::new(points, vec![0.0; n], 0.05, 10.0, fov)
     }
 
-    fn config() -> UbmFrenetOvertakingConfig {
-        UbmFrenetOvertakingConfig {
+    fn config() -> FrenetOvertakingConfig {
+        FrenetOvertakingConfig {
             lidar_downsample: 1,
             ..Default::default()
         }
@@ -801,7 +801,7 @@ mod tests {
         }
         // The box spans about +-5.7 degrees: a 6 degree field of view sees
         // only its middle.
-        let narrow = UbmFrenetOvertakingConfig {
+        let narrow = FrenetOvertakingConfig {
             desired_fov_deg: 6.0,
             ..config()
         };
@@ -929,8 +929,8 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmFrenetOvertakingConfig::default();
-        let info = AutonomousAlgorithmInfo::new("UBM Frenet overtaking", "")
+        let config = FrenetOvertakingConfig::default();
+        let info = AutonomousAlgorithmInfo::new("Frenet overtaking", "")
             .with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");

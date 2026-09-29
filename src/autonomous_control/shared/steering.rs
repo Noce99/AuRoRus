@@ -1,6 +1,6 @@
 //! ubm's heading-error steering laws - a PD controller and the
 //! "P-enhanced" controller - shared by the algorithms that steer toward a
-//! lookahead point (`ubm_path_follower`, `ubm_frenet_overtaking`). Ported
+//! lookahead point (`path_follower`, `frenet_overtaking`). Ported
 //! from ubm's `steering_controller.cpp`.
 
 use std::time::Instant;

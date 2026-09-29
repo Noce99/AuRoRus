@@ -1,6 +1,6 @@
 //! Where the vehicle is, and where the race line is: the pose sources and
 //! the closed-line geometry shared by the algorithms that follow the
-//! selected map's race line (`pure_pursuit`, `ubm_potential_pursuit`).
+//! selected map's race line (`pure_pursuit`, `potential_pursuit`).
 
 use crate::Captain;
 use crate::environment::SpeedPoint;

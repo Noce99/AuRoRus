@@ -1,4 +1,4 @@
-//! UBM MPC: follows the selected map's race line (the
+//! MPC: follows the selected map's race line (the
 //! [`RACE_LINE_TOPIC_NAME`] topic) with a model predictive controller over
 //! a kinematic bicycle - see [`mpc`](crate::autonomous_control::shared::mpc).
 //! Ported from ubm's `mpc_path_follower_node.cpp` and `mpc_casadi.cpp`,
@@ -19,19 +19,19 @@
 //! vehicle, whose lidar the detector looks at.
 //!
 //! The pose comes from localization or, in simulation, the ground truth -
-//! see [`UbmMpcConfig::pose_source`]. Without a trustworthy pose, a race
+//! see [`MpcConfig::pose_source`]. Without a trustworthy pose, a race
 //! line, a solution, or while too far from the line, the vehicle is held
 //! stopped, and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::mpc::{
-    Bounds, Cache, DistanceField, MIN_HORIZON, Mpc, Opponent, Solution, SolverSettings,
+    Bounds, Cache, DistanceField, MIN_HORIZON, Mpc as MpcProblem, Opponent, Solution, SolverSettings,
     State as MpcState, Target, Walls, Weights, solve,
 };
 use crate::autonomous_control::shared::race_line::{
     Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed,
 };
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
+use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message, report_stats};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color,
     DETECTED_OPPONENT_TOPIC_NAME, DetectedOpponent, Drawing, MAP_TOPIC_NAME, SelectedMap,
@@ -44,12 +44,12 @@ use std::time::{Duration, Instant};
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    let mut config: UbmMpcConfig = load_config(&instance.config_name);
+    let mut config: MpcConfig = load_config(&instance.config_name);
     // An opponent has no localization of its own - see `Instance::opponent`.
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(UbmMpc {
+    Box::new(Mpc {
         id: 0,
         instance,
         config,
@@ -64,11 +64,11 @@ const MIN_COMMAND_SPEED_MPS: f64 = 0.1;
 /// solver can always turn back.
 const FIRST_STEERING_MARGIN: f64 = 0.9;
 
-/// Every tunable parameter [`UbmMpc`] needs - loaded from
-/// `config/autonomous_control/ubm_mpc.toml` at runtime (see [`load_config`]), falling back to the
+/// Every tunable parameter [`Mpc`] needs - loaded from
+/// `config/autonomous_control/mpc.toml` at runtime (see [`load_config`]), falling back to the
 /// copy compiled in (see [`Default`]). Every field can also be tuned live - see [`parameters`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmMpcConfig {
+pub struct MpcConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
     /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
@@ -122,14 +122,14 @@ pub struct UbmMpcConfig {
     pub opponent_timeout_s: f64,
 }
 
-impl Default for UbmMpcConfig {
+impl Default for MpcConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_mpc.toml"))
-            .expect("config/autonomous_control/ubm_mpc.toml must deserialize into UbmMpcConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/mpc.toml"))
+            .expect("config/autonomous_control/mpc.toml must deserialize into MpcConfig")
     }
 }
 
-impl UbmMpcConfig {
+impl MpcConfig {
     fn weights(&self) -> Weights {
         Weights {
             distance: self.distance_weight,
@@ -179,7 +179,7 @@ impl UbmMpcConfig {
     }
 }
 
-/// The live-tunable parameters, one per [`UbmMpcConfig`] field - see [`ParameterTuner`].
+/// The live-tunable parameters, one per [`MpcConfig`] field - see [`ParameterTuner`].
 fn parameters() -> [AlgorithmParameter; 24] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
@@ -248,13 +248,13 @@ fn parameters() -> [AlgorithmParameter; 24] {
     ]
 }
 
-struct UbmMpc {
+struct Mpc {
     id: u16,
     instance: Instance,
-    config: UbmMpcConfig,
+    config: MpcConfig,
 }
 
-impl Executor for UbmMpc {
+impl Executor for Mpc {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -264,7 +264,7 @@ impl Executor for UbmMpc {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM MPC",
+                "MPC",
                 "Follows the race line with a model predictive controller over a kinematic bicycle",
             )
             .requires_race_line()
@@ -374,12 +374,13 @@ impl Executor for UbmMpc {
             };
 
             report_message(captain, self.id, &self.instance, message);
+            report_stats(captain, self.id, &self.instance, state.stats());
             command_topic
                 .write(self.id, command)
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
                 .write(self.id, drawing.stale_after(stale_after))
-                .expect("lost writer authorization for the UBM MPC drawing topic");
+                .expect("lost writer authorization for the MPC drawing topic");
             ticker.wait();
         }
     }
@@ -399,7 +400,7 @@ impl Executor for UbmMpc {
 
 /// How long the drawing stays valid: a few publishing periods, but never
 /// less than the default.
-fn drawing_stale_after(config: &UbmMpcConfig) -> Duration {
+fn drawing_stale_after(config: &MpcConfig) -> Duration {
     Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
@@ -453,7 +454,7 @@ struct Control {
 /// along it, or there's an opponent; then command the controls interpolated at where the
 /// vehicle is along the prediction. Errors if too far from the line or the
 /// solver fails.
-fn control(config: &UbmMpcConfig, input: &Input, state: &mut State) -> Result<Control, String> {
+fn control(config: &MpcConfig, input: &Input, state: &mut State) -> Result<Control, String> {
     let (line, pose, limits) = (input.line, input.pose, input.limits);
     let horizon = config.horizon();
     let span_m = horizon as f64 * config.step_m;
@@ -511,7 +512,7 @@ fn control(config: &UbmMpcConfig, input: &Input, state: &mut State) -> Result<Co
 /// A solve with no previous solution to start from: ubm's initialization,
 /// straight ahead at the race line's speed.
 fn solve_from_scratch(
-    config: &UbmMpcConfig,
+    config: &MpcConfig,
     input: &Input,
     nearest: &Nearest,
     state: &mut State,
@@ -529,7 +530,7 @@ fn solve_from_scratch(
 
 /// Solves from the initial guess `u`, keeping the result as the plan.
 fn solve_from(
-    config: &UbmMpcConfig,
+    config: &MpcConfig,
     input: &Input,
     nearest: &Nearest,
     state: &mut State,
@@ -557,14 +558,14 @@ fn solve_from(
 
 /// The problem from the vehicle's pose: one target every `step_m` along the
 /// line from its projection, at the scaled profile speed.
-fn problem(config: &UbmMpcConfig, input: &Input, nearest: &Nearest) -> Mpc {
+fn problem(config: &MpcConfig, input: &Input, nearest: &Nearest) -> MpcProblem {
     let targets = (0..config.horizon())
         .map(|i| {
             let point = input.line.at(nearest.s_m + i as f64 * config.step_m);
             [point.x, point.y, config.scale_speed * point.speed_mps]
         })
         .collect();
-    Mpc {
+    MpcProblem {
         start: [input.pose.x_m, input.pose.y_m, input.pose.heading_rad],
         targets,
         step_m: config.step_m,
@@ -576,8 +577,8 @@ fn problem(config: &UbmMpcConfig, input: &Input, nearest: &Nearest) -> Mpc {
 }
 
 fn bounds(
-    config: &UbmMpcConfig,
-    mpc: &Mpc,
+    config: &MpcConfig,
+    mpc: &MpcProblem,
     limits: &ActuatorLimits,
     last_steering_rad: f64,
 ) -> Bounds {
@@ -700,21 +701,20 @@ impl State {
             filled: false,
             color: Color::PINK,
         });
-        let [x, y, _] = states[states.len() - 1];
-        let solve = Shape::Text {
-            x_m: x,
-            y_m: y + 0.3,
-            text: format!("{:.1} ms, {} it", plan.solve_ms, plan.solution.iterations),
-            size_px: 12.0,
-            color: Color::WHITE,
-        };
         Drawing::default()
             .element("Prediction", prediction, true)
             .element("Target points", [targets], true)
             .element("Initialization", initialization, false)
             .element("Opponent prediction", opponent, true)
             .element("Nearest point", [nearest], false)
-            .element("Solve time", [solve], false)
+    }
+
+    /// The latest solve's time and iterations, for the algorithm panel -
+    /// `None` without a plan.
+    fn stats(&self) -> Option<String> {
+        self.plan.as_ref().map(|plan| {
+            format!("{:.1} ms, {} iterations", plan.solve_ms, plan.solution.iterations)
+        })
     }
 }
 
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn on_a_circle_it_settles_on_its_steering() {
-        let (radius, config) = (3.0, UbmMpcConfig::default());
+        let (radius, config) = (3.0, MpcConfig::default());
         let line = circle(radius);
         let mut state = State::default();
         let mut pose = Pose {
@@ -792,7 +792,7 @@ mod tests {
         let mut control = None;
         for _ in 0..400 {
             let c = super::control(&config, &input(&line, pose, &limits()), &mut state).unwrap();
-            let mpc = Mpc {
+            let mpc = MpcProblem {
                 start: [pose.x_m, pose.y_m, pose.heading_rad],
                 targets: vec![[0.0; 3]; 2],
                 step_m: 0.05,
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn an_opponent_appearing_is_planned_for_at_once() {
-        let (config, line, limits) = (UbmMpcConfig::default(), circle(3.0), limits());
+        let (config, line, limits) = (MpcConfig::default(), circle(3.0), limits());
         let pose = Pose {
             x_m: 3.0,
             y_m: 0.0,
@@ -865,7 +865,7 @@ mod tests {
         };
         assert!(
             control(
-                &UbmMpcConfig::default(),
+                &MpcConfig::default(),
                 &input(&line, pose, &limits()),
                 &mut State::default()
             )
@@ -876,9 +876,9 @@ mod tests {
     #[test]
     fn the_prediction_is_used_for_a_while_after_a_detection() {
         use crate::WriteMeta;
-        let config = UbmMpcConfig {
+        let config = MpcConfig {
             opponent_timeout_s: 0.2,
-            ..UbmMpcConfig::default()
+            ..MpcConfig::default()
         };
         let stamped = |detected: bool, age: Duration| crate::Stamped {
             value: DetectedOpponent {
@@ -967,9 +967,9 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmMpcConfig::default();
+        let config = MpcConfig::default();
         let info =
-            AutonomousAlgorithmInfo::new("UBM MPC", "").with_parameters(&config, parameters());
+            AutonomousAlgorithmInfo::new("MPC", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

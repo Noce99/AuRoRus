@@ -1,4 +1,4 @@
-//! UBM Path Follower: follows the selected map's race line (the
+//! Path Follower: follows the selected map's race line (the
 //! [`RACE_LINE_TOPIC_NAME`] topic) with one of three steering laws - a PD
 //! controller or ubm's "P-enhanced" controller on the heading error toward a
 //! lookahead point, or the Stanley controller - plus an optional feedforward
@@ -6,7 +6,7 @@
 //! `path_follower_node.cpp` and `steering_controller.cpp`.
 //!
 //! The pose comes from localization or, in simulation, the ground truth -
-//! see [`UbmPathFollowerConfig::pose_source`]. Without a trustworthy pose, a
+//! see [`PathFollowerConfig::pose_source`]. Without a trustworthy pose, a
 //! race line, or while too far from the line, the vehicle is held stopped,
 //! and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
@@ -24,35 +24,35 @@ use std::time::{Duration, Instant};
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    let mut config: UbmPathFollowerConfig = load_config(&instance.config_name);
+    let mut config: PathFollowerConfig = load_config(&instance.config_name);
     // An opponent has no localization of its own - see `Instance::opponent`.
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(UbmPathFollower { id: 0, instance, config })
+    Box::new(PathFollower { id: 0, instance, config })
 }
 
-/// [`UbmPathFollowerConfig::controller`]: PD on the heading error toward the lookahead point.
+/// [`PathFollowerConfig::controller`]: PD on the heading error toward the lookahead point.
 const CONTROLLER_PD: u8 = 0;
-/// [`UbmPathFollowerConfig::controller`]: ubm's P-enhanced controller.
+/// [`PathFollowerConfig::controller`]: ubm's P-enhanced controller.
 const CONTROLLER_P_ENHANCED: u8 = 1;
-/// [`UbmPathFollowerConfig::controller`]: the Stanley controller.
+/// [`PathFollowerConfig::controller`]: the Stanley controller.
 const CONTROLLER_STANLEY: u8 = 2;
 
-/// [`UbmPathFollowerConfig::feedforward`]: from the line's curvature.
+/// [`PathFollowerConfig::feedforward`]: from the line's curvature.
 const FEEDFORWARD_PATH: u8 = 1;
-/// [`UbmPathFollowerConfig::feedforward`]: learned per race line point.
+/// [`PathFollowerConfig::feedforward`]: learned per race line point.
 const FEEDFORWARD_LEARNED: u8 = 2;
 
 /// Stanley divides by the speed, but never by less than this, in m/s.
 const STANLEY_MIN_SPEED_MPS: f64 = 0.5;
 
-/// Every tunable parameter [`UbmPathFollower`] needs - loaded from
-/// `config/autonomous_control/ubm_path_follower.toml` at runtime (see [`load_config`]), falling
+/// Every tunable parameter [`PathFollower`] needs - loaded from
+/// `config/autonomous_control/path_follower.toml` at runtime (see [`load_config`]), falling
 /// back to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmPathFollowerConfig {
+pub struct PathFollowerConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
     /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
@@ -101,14 +101,14 @@ pub struct UbmPathFollowerConfig {
     pub max_cross_track_m: f64,
 }
 
-impl Default for UbmPathFollowerConfig {
+impl Default for PathFollowerConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_path_follower.toml"))
-            .expect("config/autonomous_control/ubm_path_follower.toml must deserialize into UbmPathFollowerConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/path_follower.toml"))
+            .expect("config/autonomous_control/path_follower.toml must deserialize into PathFollowerConfig")
     }
 }
 
-impl UbmPathFollowerConfig {
+impl PathFollowerConfig {
     fn gains(&self) -> SteeringGains {
         SteeringGains {
             kk_s: self.kk_s,
@@ -121,7 +121,7 @@ impl UbmPathFollowerConfig {
     }
 }
 
-/// The live-tunable parameters, one per [`UbmPathFollowerConfig`] field -
+/// The live-tunable parameters, one per [`PathFollowerConfig`] field -
 /// see [`ParameterTuner`].
 fn parameters() -> [AlgorithmParameter; 21] {
     [
@@ -182,13 +182,13 @@ fn parameters() -> [AlgorithmParameter; 21] {
     ]
 }
 
-struct UbmPathFollower {
+struct PathFollower {
     id: u16,
     instance: Instance,
-    config: UbmPathFollowerConfig,
+    config: PathFollowerConfig,
 }
 
-impl Executor for UbmPathFollower {
+impl Executor for PathFollower {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -198,7 +198,7 @@ impl Executor for UbmPathFollower {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM Path Follower",
+                "Path Follower",
                 "Follows the race line with a PD, P-enhanced or Stanley steering law, plus feedforward",
             )
             .requires_race_line()
@@ -277,7 +277,7 @@ impl Executor for UbmPathFollower {
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
                 .write(self.id, drawing.stale_after(stale_after))
-                .expect("lost writer authorization for the UBM path follower drawing topic");
+                .expect("lost writer authorization for the path follower drawing topic");
             ticker.wait();
         }
     }
@@ -297,7 +297,7 @@ impl Executor for UbmPathFollower {
 
 /// How long the drawing stays valid: a few publishing periods, but never
 /// less than the default.
-fn drawing_stale_after(config: &UbmPathFollowerConfig) -> Duration {
+fn drawing_stale_after(config: &PathFollowerConfig) -> Duration {
     Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
@@ -322,12 +322,12 @@ struct Control {
     target: [f64; 2],
 }
 
-/// The UBM path follower for `pose`, driving at `speed_mps`, on `line` -
+/// The path follower for `pose`, driving at `speed_mps`, on `line` -
 /// or, if farther than `max_cross_track_m` from it, the projection that was
 /// too far.
 #[allow(clippy::too_many_arguments)]
 fn control(
-    config: &UbmPathFollowerConfig,
+    config: &PathFollowerConfig,
     line: &Line,
     pose: Pose,
     speed_mps: f64,
@@ -383,7 +383,7 @@ fn control(
 /// `atan(k_stanley d / speed)` for the signed distance `d` from it (positive
 /// toward increasing heading). Also returns the point, projected across.
 fn stanley(
-    config: &UbmPathFollowerConfig,
+    config: &PathFollowerConfig,
     line: &Line,
     nearest: &Nearest,
     pose: Pose,
@@ -403,7 +403,7 @@ fn stanley(
 /// The feedforward term added to `steering` (0 if disabled), clamped so the
 /// sum stays within `max_steering`. The learned kind updates `learned`.
 fn feedforward(
-    config: &UbmPathFollowerConfig,
+    config: &PathFollowerConfig,
     line: &Line,
     nearest: &Nearest,
     steering: f64,
@@ -510,11 +510,11 @@ mod tests {
         Line::new(points).unwrap()
     }
 
-    fn config(controller: u8) -> UbmPathFollowerConfig {
-        UbmPathFollowerConfig { controller, feedforward: 0, constant_speed: 0.0, ..Default::default() }
+    fn config(controller: u8) -> PathFollowerConfig {
+        PathFollowerConfig { controller, feedforward: 0, constant_speed: 0.0, ..Default::default() }
     }
 
-    fn run(config: &UbmPathFollowerConfig, line: &Line, pose: Pose, speed_mps: f64) -> Control {
+    fn run(config: &PathFollowerConfig, line: &Line, pose: Pose, speed_mps: f64) -> Control {
         control(config, line, pose, speed_mps, None, &limits(), &mut State::default(), Instant::now()).unwrap()
     }
 
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn stanley_steers_back_toward_the_line() {
         let line = hairpin();
-        let config = UbmPathFollowerConfig { tdp: 0, ..config(CONTROLLER_STANLEY) };
+        let config = PathFollowerConfig { tdp: 0, ..config(CONTROLLER_STANLEY) };
         // Heading along +x, displaced toward increasing heading (+y).
         let pose = Pose { x_m: 5.0, y_m: 0.2, heading_rad: 0.0 };
         let nearest = line.nearest(pose.x_m, pose.y_m, None, 0.0);
@@ -554,7 +554,7 @@ mod tests {
     fn path_feedforward_follows_the_curvature() {
         let radius_m = 3.0;
         let line = circle(radius_m);
-        let config = UbmPathFollowerConfig { feedforward: FEEDFORWARD_PATH, delay_ff_action: 0.0, ..config(0) };
+        let config = PathFollowerConfig { feedforward: FEEDFORWARD_PATH, delay_ff_action: 0.0, ..config(0) };
         let nearest = line.nearest(radius_m, 0.0, None, 0.0);
         let action = feedforward(&config, &line, &nearest, 0.0, 0.4, &mut Vec::new());
         let expected = config.beta_ff_gain * (config.wheelbase_m / radius_m).atan();
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn learned_feedforward_remembers_per_point() {
         let line = hairpin();
-        let config = UbmPathFollowerConfig {
+        let config = PathFollowerConfig {
             feedforward: FEEDFORWARD_LEARNED,
             delay_ff_action: 0.0,
             beta_ff_gain: 0.5,
@@ -585,9 +585,9 @@ mod tests {
     fn speed_follows_the_scaled_profile_or_the_constant() {
         let line = hairpin();
         let pose = Pose { x_m: 5.0, y_m: 0.0, heading_rad: 0.0 };
-        let config = UbmPathFollowerConfig { scale_speed: 0.5, ..config(CONTROLLER_PD) };
+        let config = PathFollowerConfig { scale_speed: 0.5, ..config(CONTROLLER_PD) };
         assert!((run(&config, &line, pose, 1.0).speed_mps - 1.0).abs() < 1e-9);
-        let config = UbmPathFollowerConfig { constant_speed: 3.0, ..config };
+        let config = PathFollowerConfig { constant_speed: 3.0, ..config };
         assert_eq!(run(&config, &line, pose, 1.0).speed_mps, 3.0);
     }
 
@@ -602,8 +602,8 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmPathFollowerConfig::default();
-        let info = AutonomousAlgorithmInfo::new("UBM Path Follower", "").with_parameters(&config, parameters());
+        let config = PathFollowerConfig::default();
+        let info = AutonomousAlgorithmInfo::new("Path Follower", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

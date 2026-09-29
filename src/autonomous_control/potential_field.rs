@@ -21,19 +21,19 @@ use std::time::Duration;
 
 /// Entry point build.rs calls - required, with exactly this signature.
 pub fn new(instance: Instance) -> Box<dyn Executor> {
-    Box::new(UbmPotentialField {
+    Box::new(PotentialField {
         id: 0,
         config: load_config(&instance.config_name),
         instance,
     })
 }
 
-/// Every tunable parameter [`UbmPotentialField`] needs - loaded from
-/// `config/autonomous_control/ubm_potential_field.toml` at runtime (see [`load_config`]), falling
+/// Every tunable parameter [`PotentialField`] needs - loaded from
+/// `config/autonomous_control/potential_field.toml` at runtime (see [`load_config`]), falling
 /// back to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
 /// [`parameters`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct UbmPotentialFieldConfig {
+pub struct PotentialFieldConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
     /// Part of the scan looked at, centred straight ahead, in degrees.
@@ -68,10 +68,10 @@ pub struct UbmPotentialFieldConfig {
     pub min_speed: f32,
 }
 
-impl Default for UbmPotentialFieldConfig {
+impl Default for PotentialFieldConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/ubm_potential_field.toml"))
-            .expect("config/autonomous_control/ubm_potential_field.toml must deserialize into UbmPotentialFieldConfig")
+        toml::from_str(include_str!("../../config/autonomous_control/potential_field.toml"))
+            .expect("config/autonomous_control/potential_field.toml must deserialize into PotentialFieldConfig")
     }
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn field_parameters() -> Vec<AlgorithmParameter> {
     ]
 }
 
-/// The live-tunable parameters, one per [`UbmPotentialFieldConfig`] field -
+/// The live-tunable parameters, one per [`PotentialFieldConfig`] field -
 /// see [`ParameterTuner`].
 fn parameters() -> Vec<AlgorithmParameter> {
     // At least a few Hz: below 1 Hz every command would be stale on arrival
@@ -135,7 +135,7 @@ fn parameters() -> Vec<AlgorithmParameter> {
     parameters
 }
 
-impl UbmPotentialFieldConfig {
+impl PotentialFieldConfig {
     pub(crate) fn field(&self) -> FieldConfig {
         FieldConfig {
             fov_rad: self.desired_fov_deg.to_radians(),
@@ -150,11 +150,11 @@ impl UbmPotentialFieldConfig {
     }
 }
 
-/// The command for `field`: [`UbmPotentialFieldConfig::steering_gain`] times
+/// The command for `field`: [`PotentialFieldConfig::steering_gain`] times
 /// its chosen direction, and a speed from the steering (and the room ahead,
 /// if enabled), both within `limits`.
 pub(crate) fn command(
-    config: &UbmPotentialFieldConfig,
+    config: &PotentialFieldConfig,
     scan: &LidarScan,
     field: &Field,
     limits: &ActuatorLimits,
@@ -182,13 +182,13 @@ pub(crate) fn field_drawing(captain: &Captain, vehicle: &VehicleTopics, field: &
         .element("Chosen direction", chosen, false)
 }
 
-struct UbmPotentialField {
+struct PotentialField {
     id: u16,
     instance: Instance,
-    config: UbmPotentialFieldConfig,
+    config: PotentialFieldConfig,
 }
 
-impl Executor for UbmPotentialField {
+impl Executor for PotentialField {
     fn init(&mut self, id: u16) {
         self.id = id;
     }
@@ -198,7 +198,7 @@ impl Executor for UbmPotentialField {
             self.id,
             &self.instance.algorithm_topics(),
             AutonomousAlgorithmInfo::new(
-                "UBM Potential field",
+                "Potential field",
                 "Obstacles repel, the longest reading attracts: steers toward a minimum of the potential",
             )
             .requires_lidar()
@@ -278,18 +278,18 @@ mod tests {
 
     #[test]
     fn an_open_scan_drives_straight_at_full_speed() {
-        let config = UbmPotentialFieldConfig::default();
+        let config = PotentialFieldConfig::default();
         let scan = scan(361, 4.2, 6.0);
         let field = potential_field(&scan, &config.field(), |longest| longest).unwrap();
         // Nothing repels; with no steering gain, the vehicle drives straight.
-        let (steering, speed) = command(&UbmPotentialFieldConfig { steering_gain: 0.0, ..config }, &scan, &field, &limits());
+        let (steering, speed) = command(&PotentialFieldConfig { steering_gain: 0.0, ..config }, &scan, &field, &limits());
         assert_eq!(steering, 0.0);
         assert_eq!(speed, config.max_speed);
     }
 
     #[test]
     fn an_obstacle_on_the_positive_side_steers_negative() {
-        let config = UbmPotentialFieldConfig { desired_fov_deg: 180.0, ..Default::default() };
+        let config = PotentialFieldConfig { desired_fov_deg: 180.0, ..Default::default() };
         let mut scan = scan(181, PI, 5.0);
         for i in 92..110 {
             scan.points[i] = 1.0;
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn steering_is_clamped_to_the_limit() {
-        let config = UbmPotentialFieldConfig { steering_gain: 2.0, ..Default::default() };
+        let config = PotentialFieldConfig { steering_gain: 2.0, ..Default::default() };
         let scan = scan(181, PI, 5.0);
         let mut field = potential_field(&scan, &config.field(), |_| 1.2).unwrap();
         field.chosen_cell = field.attractive_cell;
@@ -313,8 +313,8 @@ mod tests {
 
     #[test]
     fn every_config_field_is_tunable() {
-        let config = UbmPotentialFieldConfig::default();
-        let info = AutonomousAlgorithmInfo::new("UBM Potential field", "").with_parameters(&config, parameters());
+        let config = PotentialFieldConfig::default();
+        let info = AutonomousAlgorithmInfo::new("Potential field", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };
