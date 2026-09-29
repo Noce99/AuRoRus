@@ -54,3 +54,8 @@ prediction_dt_s = 0.1
 # Bounding box: points closer than this to a side count as this close, so a
 # single point on it can't dominate the fit, in meters.
 min_2_points_dist_m = 0.01
+
+# Which object wins when the scan holds several: 0 = ubm's best score (long,
+# flat, far in front of the map), 1 = the closest - the one the ego vehicle's
+# MPC must avoid first.
+selection = 1

@@ -27,7 +27,14 @@ pub(crate) struct PlateauLimits {
     pub(crate) min_length: usize,
     pub(crate) max_std_m: f64,
     pub(crate) min_mean_difference_m: f64,
+    /// Which acceptable stretch wins: `0` for the lowest score, or
+    /// [`SELECTION_CLOSEST`].
+    pub(crate) selection: u8,
 }
+
+/// [`PlateauLimits::selection`]: the closest, by median real range - the
+/// opponent nearest the ego vehicle, e.g. for its MPC.
+pub(crate) const SELECTION_CLOSEST: u8 = 1;
 
 /// `detect_object_in_difference`: the best stretch where `real` is
 /// shorter than `expected` (both one range per ray, same length) by a
@@ -38,7 +45,7 @@ pub(crate) struct PlateauLimits {
 /// least `min_length` rays long, whose real ranges spread less than
 /// `max_std_m` and which are on average at least `min_mean_difference_m`
 /// shorter than expected, the one scoring lowest - long, flat and far in
-/// front of the map - wins.
+/// front of the map - wins, or with [`SELECTION_CLOSEST`] the closest one.
 pub(crate) fn find_plateau(
     expected: &[f64],
     real: &[f64],
@@ -84,7 +91,11 @@ pub(crate) fn find_plateau(
         let spread = std_dev(&real[start..end]);
         let mean_difference =
             filtered[start..end].iter().map(|d| d.abs()).sum::<f64>() / (end - start) as f64;
-        let score = spread / (1.0 + (end - start) as f64 / min_length as f64) - mean_difference;
+        let score = if limits.selection == SELECTION_CLOSEST {
+            median(&real[start..end])
+        } else {
+            spread / (1.0 + (end - start) as f64 / min_length as f64) - mean_difference
+        };
         if spread < limits.max_std_m
             && mean_difference >= limits.min_mean_difference_m
             && best.is_none_or(|(_, best_score)| score < best_score)
@@ -332,6 +343,7 @@ mod tests {
             min_length: 5,
             max_std_m: 1.0,
             min_mean_difference_m: 0.15,
+            selection: 0,
         }
     }
 
@@ -358,6 +370,26 @@ mod tests {
         assert!((19..=21).contains(&plateau.start), "{plateau:?}");
         assert!((29..=31).contains(&plateau.end), "{plateau:?}");
         assert_eq!(plateau.median_range_m, 2.0);
+    }
+
+    #[test]
+    fn the_closest_stretch_wins_when_selected() {
+        // Down a long straight, an object 4 m ahead of a wall 10 m away;
+        // to the side, one 1 m ahead of a wall 2 m away.
+        let mut expected = vec![10.0; 90];
+        expected[50..90].fill(2.0);
+        let mut real = expected.clone();
+        real[10..25].fill(4.0);
+        real[60..75].fill(1.0);
+        // ubm's score favors the larger difference: the far one.
+        let best = find_plateau(&expected, &real, &limits()).unwrap();
+        assert_eq!(best.median_range_m, 4.0, "{best:?}");
+        let closest = PlateauLimits {
+            selection: SELECTION_CLOSEST,
+            ..limits()
+        };
+        let closest = find_plateau(&expected, &real, &closest).unwrap();
+        assert_eq!(closest.median_range_m, 1.0, "{closest:?}");
     }
 
     #[test]

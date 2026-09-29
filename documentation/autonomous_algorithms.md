@@ -619,6 +619,139 @@ The drawing shows:
 While avoiding, the panel message says how many obstacle points it's
 avoiding.
 
+## UBM MPC
+
+`ubm_mpc.rs` is a port of ubm's MPC path follower
+(`mpc_path_follower_node.cpp` and `mpc_casadi.cpp`). It follows the race
+line with a model predictive controller over a kinematic bicycle and steers
+around the opponent that `UbmDetector` reports. Its parameters live in
+`config/autonomous_control/ubm_mpc.toml`. The optimal-control problem is in
+`shared/mpc.rs`.
+
+It needs the vehicle's pose (`pose_source`) and a race line. The selected
+map (for the walls term) and the detector (for the opponent term) are
+optional: without them, those terms are simply left out.
+
+### The problem
+
+- **Model.** ubm's kinematic bicycle, referenced at the middle of the
+  wheelbase, stepped over a fixed arc length `step_m` rather than a fixed
+  time. The slip angle is `β = atan(tan δ / 2)`, the vehicle travels along
+  `θ + β`, and the heading changes by `step · tan δ · cos β / wheelbase_m`.
+  The path doesn't depend on the speed, which only enters the cost.
+- **Variables.** One steering and one speed per step: `horizon − 1` pairs.
+  ubm also made the states variables and the dynamics equality constraints,
+  solved by CasADi with IPOPT. Here the states are simulated forward from
+  the controls (single shooting), which leaves only box constraints, so
+  PANOC solves it (`optimization_engine`, as `planning::min_curvature` does).
+  The gradient is a hand-written reverse pass through that simulation.
+- **Targets.** One point every `step_m` along the race line from the
+  vehicle's projection, with `scale_speed ·` the line's profile speed.
+- **Cost.** Each term is averaged over the horizon, as in ubm, so a weight
+  keeps its meaning when the horizon changes:
+  - `distance_weight`: squared distance of each predicted position from its
+    target.
+  - `steering_smoothness_weight` and `speed_smoothness_weight`: squared
+    second differences of the steering and the speed.
+  - `go_fast_weight`: squared difference of each speed from its target's.
+  - `centripetal_weight`: (heading change · speed)² per step.
+  - `walls_cost_weight`: squared depth of each predicted position into
+    `walls_margin_m` from the nearest wall. The distance comes from the
+    map's distance transform, interpolated bilinearly so it has a gradient.
+  - `opponent_distance_weight`: the opponent is predicted at constant
+    velocity to the time the vehicle reaches each step (`Σ step / (v + 0.01)`,
+    as in ubm). Each predicted position costs `exp(−4 d / opponent_radius_m)`
+    with `use_gaussian = 1`, or `1 / d²` with `use_gaussian = 0`.
+- **Constraints.** The first steering is the one last commanded, clamped
+  to 90% of the limit as in ubm. Every other steering stays within the
+  vehicle's `max_steering_angle_rad`. Each speed stays between
+  `min_speed_gain` and `max_speed_gain` times its target's, and never above
+  the vehicle's `max_speed_mps`.
+- **Solver.** At most `solver_max_iterations` PANOC iterations and
+  `solver_max_ms`. If it runs out before converging, it follows its best
+  iterate, as ubm did with `opti.debug()`, and the panel says so.
+
+### Each tick
+
+Ported from ubm's `control_loop`:
+
+1. **Locate.** Where the vehicle is along the last prediction, as a
+   fractional index between its two nearest states.
+2. **Solve**, when needed:
+   - from scratch (straight ahead at the target speeds) if there's no
+     prediction yet, the horizon changed, or the vehicle is more than one
+     step off the prediction;
+   - warm-started from the last solution, shifted to where the vehicle is,
+     once it's past `percentage_of_mpc_prediction_to_follow`% of the
+     horizon, or on every tick while there's an opponent (it moves, and
+     may have just appeared). At the default 2% that's nearly every tick
+     anyway, but a warm solve takes only a few iterations.
+3. **Command** the controls interpolated at the vehicle's index along the
+   prediction (right after a solve, halfway between the first two), with
+   the steering clamped to the vehicle's limit and the speed at least
+   0.1 m/s.
+
+The vehicle is held stopped with no race line, no trustworthy pose, farther
+than `max_cross_track_m` from the line, or when the solver fails outright.
+
+**The opponent** is the one `UbmDetector` publishes on `detected_opponent`.
+With the detector's `selection` at 1 (the default) that's the closest one
+it sees. The MPC uses the detection itself, or the detector's Kalman
+prediction while it's missed for up to `opponent_timeout_s` after the last
+detection. Only the ego vehicle uses it, because the detector only looks at
+the ego's LIDAR.
+
+### Differences from ubm
+
+**Bug fixes:**
+
+- The speed's upper bound is `max_speed_gain ·` the target speed. ubm
+  multiplied by its maximum speed (10) instead, so `max_speed_gain` did
+  nothing.
+- The steering is bounded by the vehicle's limit. ubm used a hard-coded
+  0.8 rad and never read `max_steer`.
+- Every weight can be tuned live. ubm read the weights through pointers,
+  but they were baked into the CasADi graph when the problem was built.
+- The walls term is always applied. ubm only added it with an opponent.
+- The map is looked up in its own frame. ubm flipped y.
+- The controls are never read past the end of the horizon. ubm's
+  interpolation could index one past it.
+
+**Improvements:**
+
+- **Solver.** PANOC with a hand-written gradient in place of CasADi and
+  IPOPT: typically 0.05–0.5 ms per solve.
+- **Warm start.** A shifted solution is padded with its last control.
+  ubm padded with straight ahead at 1 m/s.
+- **Walls term.** A distance field of the selected map replaces ubm's
+  precomputed `ExtendedMapFunction.casadi`.
+- **Opponent hold.** The detector's prediction is used for
+  `opponent_timeout_s` after the last detection. ubm dropped the opponent
+  at the first missed scan.
+- **Opponent re-solve.** With an opponent, it solves again on every tick.
+  ubm waited until the vehicle had moved along its prediction, so a car
+  standing still (e.g. on the grid) ignored an opponent that appeared.
+
+**Not ported:** ubm's unused parameters (`border_weight`,
+`race_line_d_weight`, `low_speed_weight`, `total_time_weight`,
+`high_theta_dot_weight`, `look_ahead_*`, `controls_index`), the
+`set_max_speed` topic, and lap statistics.
+
+### Drawing
+
+The drawing shows:
+
+- **Prediction:** the predicted path, with a dot per state coloured from
+  green (standstill) to red (`max_speed_mps`) by its speed.
+- **Target points** (purple).
+- **Opponent prediction:** where the opponent is predicted to be as the
+  vehicle reaches each state (pink rings).
+- **Initialization:** where the latest solve from scratch started. Hidden
+  by default.
+- **Nearest point.** Hidden by default.
+- **Solve time:** milliseconds and iterations of the latest solve. Hidden
+  by default.
+
 ## Conventions and pitfalls
 
 - **Publish at least once per second.** The handler treats anything older than
@@ -647,7 +780,7 @@ avoiding.
 | `build.rs` | Generates the module list and `autonomous_control::all()` |
 | `src/autonomous_control.rs` | `AutonomousControlsHandler`, module docs |
 | `src/autonomous_control/*.rs` | One algorithm per file |
-| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), ubm's PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
+| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), ubm's PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`), the MPC's optimal-control problem (`mpc.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
 | `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
 | `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `load_config`/`save_parameters` |

@@ -3,6 +3,7 @@
 //! file directly in `src/autonomous_control/` into an algorithm.
 
 pub(crate) mod frenet;
+pub(crate) mod mpc;
 pub(crate) mod race_line;
 pub(crate) mod reactive;
 pub(crate) mod steering;

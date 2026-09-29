@@ -120,6 +120,7 @@ fn detect(
         min_length: config.min_object_size,
         max_std_m: config.object_std_threshold_m,
         min_mean_difference_m: config.distance_from_walls_threshold_m,
+        selection: config.selection,
     };
     let Some(plateau) = find_plateau(&expected, &real, &limits) else {
         return (None, expected_hits);
