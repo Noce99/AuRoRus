@@ -30,8 +30,8 @@
 //!   `bincode::config::standard()`).
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
@@ -41,7 +41,6 @@ pub const MAGIC: [u8; 4] = *b"ADBG";
 /// The only format version this module currently reads/writes.
 pub const FORMAT_VERSION: u8 = 1;
 
-const HEADER_LEN: u64 = 4 + 1 + 8 + 16;
 const TAG_TOPIC_DEF: u8 = 0x01;
 const TAG_SAMPLE: u8 = 0x02;
 /// How often [`DebugFileWriter::maybe_flush`] flushes unconditionally, regardless
@@ -135,15 +134,12 @@ fn read_str16(r: &mut impl Read) -> io::Result<String> {
 }
 
 /// The result of scanning a `.debug` file from the start: everything
-/// [`DebugFileReader::open`] needs to return, plus `valid_len` (the byte offset
-/// right after the last fully-parsed record) that [`DebugFileWriter::resume`]
-/// needs to truncate away any trailing partial record before appending more.
+/// [`DebugFileReader::open`] needs to return.
 struct Scanned {
     frequency_hz: f64,
     session_start_unix_micros: u128,
     topics: Vec<TopicMeta>,
     samples: Vec<Sample>,
-    valid_len: u64,
 }
 
 /// Reads the header, then records one at a time, stopping cleanly at EOF or the
@@ -170,7 +166,6 @@ fn scan(path: &Path) -> io::Result<Scanned> {
 
     let mut topics = Vec::new();
     let mut samples = Vec::new();
-    let mut valid_len = HEADER_LEN;
 
     loop {
         let mut tag_buf = [0u8; 1];
@@ -180,7 +175,7 @@ fn scan(path: &Path) -> io::Result<Scanned> {
             Ok(_) => {}
         }
 
-        let record: io::Result<u64> = (|| match tag_buf[0] {
+        let record: io::Result<()> = (|| match tag_buf[0] {
             TAG_TOPIC_DEF => {
                 let topic_id = read_u16(&mut reader)?;
                 let name = read_str16(&mut reader)?;
@@ -188,9 +183,8 @@ fn scan(path: &Path) -> io::Result<Scanned> {
                 if topic_id as usize != topics.len() {
                     return Err(io_err("topic ids are not sequential in this debug file"));
                 }
-                let len = 1 + 2 + 2 + name.len() + 2 + writer_name.len();
                 topics.push(TopicMeta { name, writer_name });
-                Ok(len as u64)
+                Ok(())
             }
             TAG_SAMPLE => {
                 let topic_id = read_u16(&mut reader)?;
@@ -198,20 +192,18 @@ fn scan(path: &Path) -> io::Result<Scanned> {
                 let payload_len = read_u32(&mut reader)?;
                 let mut payload = vec![0u8; payload_len as usize];
                 reader.read_exact(&mut payload)?;
-                let len = 1 + 2 + 8 + 4 + payload.len();
                 samples.push(Sample {
                     topic_id,
                     timestamp_us,
                     payload,
                 });
-                Ok(len as u64)
+                Ok(())
             }
             other => Err(io_err(format!("unknown record tag {other:#04x}"))),
         })();
 
-        match record {
-            Ok(len) => valid_len += len,
-            Err(_) => break, // truncated or corrupt - stop, keep everything parsed so far
+        if record.is_err() {
+            break; // truncated or corrupt - stop, keep everything parsed so far
         }
     }
 
@@ -220,7 +212,6 @@ fn scan(path: &Path) -> io::Result<Scanned> {
         session_start_unix_micros,
         topics,
         samples,
-        valid_len,
     })
 }
 
@@ -265,44 +256,12 @@ impl DebugFileWriter {
         })
     }
 
-    /// Reopens an existing session file for appending - e.g. after a
-    /// [`crate::Runner`] restart mid-recording. Re-derives `session_start_unix_micros`
-    /// from the file's own header (`frequency_hz` is assumed to already match, since
-    /// a restart reuses the same [`crate::Runner::debug_mode`] call) and replays
-    /// every `TopicDef` already present so a topic already defined pre-restart is
-    /// never given a second, conflicting id. Truncates away any trailing partial
-    /// record left by an abrupt prior shutdown before appending more.
-    pub fn resume(path: &Path) -> io::Result<Self> {
-        let scanned = scan(path)?;
-
-        let mut topic_ids = HashMap::with_capacity(scanned.topics.len());
-        for (id, meta) in scanned.topics.iter().enumerate() {
-            topic_ids.insert(meta.name.clone(), id as u16);
-        }
-        let next_topic_id = scanned.topics.len() as u16;
-
-        let file = OpenOptions::new().write(true).open(path)?;
-        file.set_len(scanned.valid_len)?;
-        let mut file = file;
-        file.seek(SeekFrom::Start(scanned.valid_len))?;
-
-        Ok(Self {
-            file: BufWriter::new(file),
-            topic_ids,
-            next_topic_id,
-            session_start_unix_micros: scanned.session_start_unix_micros,
-            records_since_flush: 0,
-            last_flush: Instant::now(),
-        })
-    }
-
     pub fn session_start_unix_micros(&self) -> u128 {
         self.session_start_unix_micros
     }
 
     /// Returns `name`'s topic id, writing a `TopicDef` record the first time this
-    /// name is seen (by this writer instance - which, after [`resume`](Self::resume),
-    /// already knows about every name the file had before).
+    /// name is seen.
     pub fn topic_id(&mut self, name: &str, writer_name: &str) -> io::Result<u16> {
         if let Some(&id) = self.topic_ids.get(name) {
             return Ok(id);
@@ -463,7 +422,10 @@ mod tests {
         // second (never-written) sample's would-be payload by appending a
         // dangling, incomplete record tag + partial fields.
         {
-            let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
             file.write_all(&[TAG_SAMPLE]).unwrap();
             write_u16(&mut file, id).unwrap();
             // stop here - no timestamp/payload_len/payload bytes at all.
@@ -472,32 +434,5 @@ mod tests {
         let reader = DebugFileReader::open(&path).unwrap();
         assert_eq!(reader.samples.len(), 1);
         assert_eq!(reader.samples[0].payload, vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn resume_preserves_topic_ids_and_appends_after_the_valid_prefix() {
-        let path = temp_path("resume.debug");
-        let mut writer = DebugFileWriter::create(&path, 100.0).unwrap();
-        let id_a = writer.topic_id("a", "W1").unwrap();
-        writer.write_sample(id_a, 0, &[1]).unwrap();
-        writer.flush().unwrap();
-        drop(writer);
-
-        let mut resumed = DebugFileWriter::resume(&path).unwrap();
-        // Re-claiming an already-known topic must return the same id, not define
-        // a second, conflicting one.
-        assert_eq!(resumed.topic_id("a", "W1").unwrap(), id_a);
-        let id_b = resumed.topic_id("b", "W2").unwrap();
-        assert_ne!(id_b, id_a);
-        resumed.write_sample(id_a, 5_000, &[2]).unwrap();
-        resumed.write_sample(id_b, 6_000, &[3]).unwrap();
-        resumed.flush().unwrap();
-
-        let reader = DebugFileReader::open(&path).unwrap();
-        assert_eq!(reader.topics.len(), 2);
-        assert_eq!(reader.samples.len(), 3);
-        assert_eq!(reader.samples[0].payload, vec![1]);
-        assert_eq!(reader.samples[1].timestamp_us, 5_000);
-        assert_eq!(reader.samples[2].timestamp_us, 6_000);
     }
 }

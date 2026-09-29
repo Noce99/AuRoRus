@@ -9,7 +9,7 @@ use aurorus::sensors::{
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
 use aurorus::topics::VehicleModelKind;
-use aurorus::{Executor, Runner};
+use aurorus::{DEBUG_GROUP, DebugRecorder, Executor, Runner};
 
 mod cli;
 
@@ -45,7 +45,17 @@ fn main() {
     let mut runner = Runner::new();
     runner.activate_verbose();
 
-    runner.add_executor(WebGui::new("WebGui", config.maps_root.clone(), web_gui_config).boxed());
+    let recorder = DebugRecorder::new();
+    runner.add_executor(
+        WebGui::new(
+            "WebGui",
+            config.maps_root.clone(),
+            config.debugs_root.clone(),
+            recorder.clone(),
+            web_gui_config,
+        )
+        .boxed(),
+    );
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
     runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
     runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
@@ -78,13 +88,16 @@ fn main() {
         runner.add_executor(algorithm);
     }
 
-    let mut runner = match &config.debug_output {
-        Some(path) => {
-            println!("recording debug session to {path:?}");
-            runner.debug_mode(config.debug_frequency_hz, path.clone())
+    // `--debug`: the same recording the Debug panel starts, just started
+    // along with everything else.
+    if let Some(path) = config.debug_output {
+        match recorder.begin(path, config.debug_frequency_hz) {
+            Ok(executor) => {
+                runner.add_group(DEBUG_GROUP, vec![executor]);
+            }
+            Err(err) => eprintln!("--debug: {err}"),
         }
-        None => runner,
-    };
+    }
 
     // Every executor here runs until stopped, and nothing ever stops them for
     // good - this blocks for the lifetime of the process, same as any other
@@ -93,7 +106,7 @@ fn main() {
     // rebuilding everything fresh and looping.
     //
     // Ctrl+C stops every executor cleanly (rather than just killing the
-    // process) so a `--debug` recording gets flushed and closed properly: it
+    // process) so a running debug recording gets flushed and closed properly: it
     // flips `Captain`'s running flag, every executor's `while
     // captain.is_running(id)` loop (including the debug executor's) exits on
     // its own, and `run_until_stopped` below only returns once every one of
@@ -107,8 +120,4 @@ fn main() {
     .expect("failed to set Ctrl+C handler");
 
     runner.run_until_stopped();
-
-    if let Some(path) = &config.debug_output {
-        println!("debug session saved to {path:?}");
-    }
 }

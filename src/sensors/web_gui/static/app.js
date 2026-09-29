@@ -2194,6 +2194,117 @@ window.addEventListener("keydown", (event) => {
 });
 
 // ---------------------------------------------------------------------
+// Debug panel - starting and stopping a debug recording (`/api/debug`).
+// The recording is the server's, not this tab's: every tab shows the same
+// one, and a restart ends it. Stopping only asks for it: the file is
+// complete once the status says `saved`.
+// ---------------------------------------------------------------------
+
+const debugStateEl = document.getElementById("debug-state");
+const debugFolderEl = document.getElementById("debug-folder");
+const debugStartFormEl = document.getElementById("debug-start");
+const debugNameEl = document.getElementById("debug-name");
+const debugFrequencyEl = document.getElementById("debug-frequency");
+const debugStartBtn = document.getElementById("debug-start-btn");
+const debugStopBtn = document.getElementById("debug-stop-btn");
+const debugDetailsEl = document.getElementById("debug-details");
+const debugErrorEl = document.getElementById("debug-error");
+const debugNavBtn = document.querySelector('.panel-nav-btn[data-panel="debug"]');
+
+const DEBUG_STATE_LABELS = {
+  idle: "Not recording",
+  recording: "Recording",
+  saving: "Saving...",
+  saved: "Saved",
+  failed: "Recording failed",
+};
+
+function showDebugError(message) {
+  debugErrorEl.textContent = message;
+  debugErrorEl.hidden = message === null;
+}
+
+function formatDuration(seconds) {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderDebug(status) {
+  debugFolderEl.textContent = `${status.folder}/`;
+  // Seeded once from the server's default, then left to the user.
+  if (debugFrequencyEl.value === "") debugFrequencyEl.value = status.frequency_hz;
+
+  const running = status.state === "recording" || status.state === "saving";
+  debugStateEl.className = status.state;
+  debugStateEl.textContent = DEBUG_STATE_LABELS[status.state];
+  debugNavBtn.classList.toggle("recording", status.state === "recording");
+  debugStartFormEl.hidden = running;
+  debugStopBtn.hidden = !running;
+  debugStopBtn.disabled = status.state === "saving";
+
+  if (status.path === null) {
+    debugDetailsEl.textContent = "";
+    return;
+  }
+  const parts = [
+    formatDuration(status.duration_s),
+    `${status.samples.toLocaleString()} sample${status.samples === 1 ? "" : "s"}`,
+  ];
+  if (status.file_size_bytes !== null) parts.push(formatBytes(status.file_size_bytes));
+  let text = `${status.state === "saved" ? "Saved to" : "File:"} ${status.path} - ${parts.join(" · ")}.`;
+  if (status.state === "recording" && status.falling_behind && status.achieved_hz !== null) {
+    text += ` Falling behind: ~${status.achieved_hz.toFixed(0)} of ${status.frequency_hz} Hz.`;
+  }
+  if (status.state === "saved" && status.interrupted) {
+    text += " Ended by a restart.";
+  }
+  if (status.state === "failed") text += ` ${status.error}`;
+  debugDetailsEl.textContent = text;
+}
+
+async function pollDebug() {
+  renderDebug(await fetchJSON("/api/debug"));
+}
+
+debugStartFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  showDebugError(null);
+  debugStartBtn.disabled = true;
+  fetchJSON("/api/debug/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: debugNameEl.value.trim(),
+      frequency_hz: Number(debugFrequencyEl.value),
+    }),
+  })
+    .then(() => {
+      debugNameEl.value = "";
+      return pollDebug();
+    })
+    .catch((err) => showDebugError(`Couldn't start: ${err.message}`))
+    .finally(() => {
+      debugStartBtn.disabled = false;
+    });
+});
+
+debugStopBtn.addEventListener("click", () => {
+  showDebugError(null);
+  fetchJSON("/api/debug/stop", { method: "POST" })
+    .then(() => pollDebug())
+    .catch((err) => showDebugError(`Couldn't stop: ${err.message}`));
+});
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
@@ -2218,6 +2329,7 @@ startPolling(pollSlam, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);
 startPolling(pollOpponents, SELECTION_POLL_MS);
+startPolling(pollDebug, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
 

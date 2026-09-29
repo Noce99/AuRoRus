@@ -10,7 +10,8 @@
 //! [`opponents_api`]);
 //! reads `map`, `vehicle_model_status`, `autonomous_algorithm_status`,
 //! `slam_status`, `planning_status`, `race_line` and `opponents` to reflect
-//! the current selections.
+//! the current selections. Starts and stops debug recordings through a
+//! [`crate::DebugRecorder`] (see [`debug_api`]).
 //!
 //! Everything on the map canvas comes from drawing topics (see
 //! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
@@ -20,6 +21,7 @@
 //! [`topics_api`]).
 
 mod assets;
+mod debug_api;
 mod draw_api;
 mod handlers;
 mod live_api;
@@ -38,7 +40,7 @@ use crate::topics::{
     SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
     VEHICLE_MODEL_SELECTION_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
 };
-use crate::{Captain, Executor};
+use crate::{Captain, DebugRecorder, Executor};
 use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,25 +90,35 @@ impl Default for WebGuiConfig {
 }
 
 /// Serves the map browser/generator web UI. Reads and writes map folders
-/// under `maps_root` directly off disk.
+/// under `maps_root` directly off disk, and records debug sessions into
+/// `debugs_root`.
 pub struct WebGui {
     id: u16,
     name: String,
     maps_root: PathBuf,
+    debugs_root: PathBuf,
+    /// Kept across restarts (see [`Executor::fresh`]), so the Debug panel
+    /// still shows how the recording a restart ended went.
+    recorder: DebugRecorder,
     config: WebGuiConfig,
 }
 
 impl WebGui {
-    /// Creates a `WebGui` that will serve maps under `maps_root` once run.
+    /// Creates a `WebGui` that will serve maps under `maps_root` once run,
+    /// and start recordings through `recorder` into `debugs_root`.
     pub fn new(
         name: impl Into<String>,
         maps_root: impl Into<PathBuf>,
+        debugs_root: impl Into<PathBuf>,
+        recorder: DebugRecorder,
         config: WebGuiConfig,
     ) -> Self {
         Self {
             id: 0,
             name: name.into(),
             maps_root: maps_root.into(),
+            debugs_root: debugs_root.into(),
+            recorder,
             config,
         }
     }
@@ -195,16 +207,21 @@ impl Executor for WebGui {
 
         let id = self.id;
         let maps_root = &self.maps_root;
+        let debug = handlers::Debug {
+            root: &self.debugs_root,
+            recorder: &self.recorder,
+        };
         let config = &self.config;
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         thread::scope(|scope| {
             for _ in 0..self.config.worker_threads {
                 let server = server.clone();
+                let debug = &debug;
                 scope.spawn(move || {
                     while captain.is_running(id) {
                         match server.recv_timeout(poll_interval) {
                             Ok(Some(request)) => {
-                                handlers::handle(request, maps_root, captain, id, config)
+                                handlers::handle(request, maps_root, debug, captain, id, config)
                             }
                             Ok(None) => continue,
                             Err(err) => eprintln!("web_gui: connection error: {err}"),
@@ -227,6 +244,8 @@ impl Executor for WebGui {
         Box::new(WebGui::new(
             self.name.clone(),
             self.maps_root.clone(),
+            self.debugs_root.clone(),
+            self.recorder.clone(),
             self.config.clone(),
         ))
     }

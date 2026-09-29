@@ -2,13 +2,11 @@
 //! parallel against a shared [`Captain`].
 
 use crate::core::captain::{Captain, RunnerRequest};
-use crate::core::debug_executor::DebugExecutor;
 use crate::core::executor::Executor;
 use crate::core::log::{self, LogColor};
 use crate::core::topic::RwLockTopic;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -86,9 +84,6 @@ pub struct Runner {
     running: HashMap<u16, thread::JoinHandle<Box<dyn Executor>>>,
     registered_topics: Vec<TopicRegistration>,
     verbose: bool,
-    /// Set by [`debug_mode`](Self::debug_mode); `None` means debug recording is off.
-    /// Passed to every executor's [`Executor::set_debug_mode`] as it's spawned.
-    debug_frequency_hz: Option<f64>,
     /// The ids of every group of executors started by [`Captain::spawn_group`], by group name.
     groups: HashMap<String, Vec<u16>>,
     /// Shared with every [`StopHandle`] - see [`stop_handle`](Self::stop_handle).
@@ -111,31 +106,34 @@ impl Runner {
             running: HashMap::new(),
             registered_topics: Vec::new(),
             verbose: false,
-            debug_frequency_hz: None,
             groups: HashMap::new(),
         }
     }
 
-    /// Turns on debug recording: every topic currently being written is
-    /// snapshotted at `frequency_hz` (only when its value actually changed) into
-    /// a new/resumed session file at `output_path`, via a [`crate::core::debug_executor::DebugExecutor`]
-    /// this adds automatically, right alongside every other executor.
-    ///
-    /// Consuming (`self -> Self`) rather than `&mut self`, unlike the rest of
-    /// `Runner`'s builder-ish methods, to match the call shape
-    /// `Runner::new().debug_mode(hz, path)` - it's still fine to chain further
-    /// `&mut self` calls (`activate_verbose`, `add_executor`, ...) on the result
-    /// afterward, since `Runner::new()` still returns `Self` by value.
-    ///
-    /// Takes both `frequency_hz` and `output_path` together, rather than a second
-    /// call/method for the path, because they're always known at the same call
-    /// site once a binary's CLI has resolved its `--debug`/`--debug_frequency`
-    /// flags - splitting them would only invite an inconsistent state (frequency
-    /// set, no path, or vice versa) with no benefit.
-    pub fn debug_mode(mut self, frequency_hz: f64, output_path: impl Into<PathBuf>) -> Self {
-        self.debug_frequency_hz = Some(frequency_hz);
-        self.add_executor(DebugExecutor::new(output_path.into(), frequency_hz).boxed());
-        self
+    /// Adds `executors` as one group called `group`, started along with everything
+    /// else by [`run_all`](Self::run_all) - like [`Captain::spawn_group`], but before
+    /// anything runs. Stopped by [`Captain::stop_group`], and not brought back by a
+    /// restart, same as any group. Refused (logged, dropped, `false` returned) if a
+    /// group under that name is already added.
+    pub fn add_group(
+        &mut self,
+        group: impl Into<String>,
+        executors: Vec<Box<dyn Executor>>,
+    ) -> bool {
+        let group = group.into();
+        if self.groups.contains_key(&group) {
+            self.log(
+                LogColor::Red,
+                format!("group {group:?} is already running - not starting it again"),
+            );
+            return false;
+        }
+        let ids = executors
+            .into_iter()
+            .map(|executor| self.add_executor(executor))
+            .collect();
+        self.groups.insert(group, ids);
+        true
     }
 
     /// A [`StopHandle`] for this runner, e.g. to wire up a Ctrl+C handler before
@@ -238,12 +236,7 @@ impl Runner {
         let prepared: Vec<_> = self
             .pending
             .drain(..)
-            .map(|(id, executor)| {
-                (
-                    id,
-                    Self::prepare(&self.captain, id, executor, self.debug_frequency_hz),
-                )
-            })
+            .map(|(id, executor)| (id, Self::prepare(&self.captain, id, executor)))
             .collect();
         for (id, executor) in prepared {
             self.running
@@ -281,7 +274,7 @@ impl Runner {
         let old_executor = old_handle.join().expect("executor thread panicked");
         self.captain.resume_executor(id);
 
-        let handle = Self::spawn(&self.captain, id, new_executor, self.debug_frequency_hz);
+        let handle = Self::spawn(&self.captain, id, new_executor);
         self.running.insert(id, handle);
 
         Ok(old_executor)
@@ -351,20 +344,10 @@ impl Runner {
     fn handle(&mut self, request: RunnerRequest) {
         match request {
             RunnerRequest::Spawn { group, executors } => {
-                if self.groups.contains_key(&group) {
-                    self.log(
-                        LogColor::Red,
-                        format!("group {group:?} is already running - not starting it again"),
-                    );
-                    return;
+                if self.add_group(group.clone(), executors) {
+                    self.run_all();
+                    self.log(LogColor::Green, format!("started group {group:?}"));
                 }
-                let ids = executors
-                    .into_iter()
-                    .map(|executor| self.add_executor(executor))
-                    .collect();
-                self.run_all();
-                self.log(LogColor::Green, format!("started group {group:?}"));
-                self.groups.insert(group, ids);
             }
             RunnerRequest::Stop { group } => {
                 let Some(ids) = self.groups.remove(&group) else {
@@ -406,25 +389,16 @@ impl Runner {
         captain: &Arc<Captain>,
         id: u16,
         executor: Box<dyn Executor>,
-        debug_frequency_hz: Option<f64>,
     ) -> thread::JoinHandle<Box<dyn Executor>> {
-        let executor = Self::prepare(captain, id, executor, debug_frequency_hz);
+        let executor = Self::prepare(captain, id, executor);
         Self::start(captain, executor)
     }
 
     /// Everything [`spawn`](Self::spawn) does before starting the executor's thread:
     /// assigns its id and name, and has it claim its writing topics.
-    fn prepare(
-        captain: &Captain,
-        id: u16,
-        mut executor: Box<dyn Executor>,
-        debug_frequency_hz: Option<f64>,
-    ) -> Box<dyn Executor> {
+    fn prepare(captain: &Captain, id: u16, mut executor: Box<dyn Executor>) -> Box<dyn Executor> {
         executor.init(id);
         captain.set_name(id, executor.name());
-        if let Some(hz) = debug_frequency_hz {
-            executor.set_debug_mode(hz);
-        }
         executor.claim_writing_topics(captain);
         executor
     }

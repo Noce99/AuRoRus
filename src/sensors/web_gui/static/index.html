@@ -25,6 +25,7 @@
       <button class="panel-nav-btn" data-panel="planning">Planning</button>
       <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
       <button class="panel-nav-btn" data-panel="opponents">Opponents</button>
+      <button class="panel-nav-btn" data-panel="debug">Debug</button>
     </nav>
   </aside>
 
@@ -195,6 +196,22 @@
       <p id="opponents-error" class="modal-error" hidden></p>
       <ul id="opponent-list"></ul>
       <button type="button" id="race-open-btn" title="Line every vehicle up on the starting grid and start them all at once">&#127937; Start race</button>
+    </section>
+
+    <section id="panel-debug" class="panel-section" hidden>
+      <h1>Debug</h1>
+      <p id="debug-state"></p>
+      <p class="parameter-description">Records every topic being written into a <code>.debug</code> file under <code id="debug-folder"></code>, to replay with <code>replay_web_gui</code>. A restart (R) ends the recording.</p>
+      <form id="debug-start" class="parameter-save">
+        <input type="text" id="debug-name" placeholder="File name (blank: date and time)" title="Name of the new file - .debug is added if missing" />
+        <label id="debug-frequency-row">Rate
+          <input type="number" id="debug-frequency" min="1" max="1000" step="1" required title="How often every topic is snapshotted" />
+          Hz</label>
+        <button type="submit" id="debug-start-btn" title="Start recording into a new file">&#9679; Start recording</button>
+      </form>
+      <button type="button" id="debug-stop-btn" title="Stop recording and save the file" hidden>&#9632; Stop &amp; save</button>
+      <p id="debug-details" class="parameter-description"></p>
+      <p id="debug-error" class="modal-error" hidden></p>
     </section>
   </aside>
 

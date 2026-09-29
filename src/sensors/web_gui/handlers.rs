@@ -3,16 +3,24 @@
 
 use super::WebGuiConfig;
 use super::assets;
+use super::debug_api;
 use super::draw_api;
 use super::live_api;
 use super::maps_api;
 use super::opponents_api;
 use super::race_lines_api;
 use super::topics_api;
-use crate::Captain;
 use crate::web::{not_found, respond_and_close};
+use crate::{Captain, DebugRecorder};
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
+
+/// What the Debug panel's routes need - see [`debug_api`].
+pub struct Debug<'a> {
+    /// Folder recordings go into.
+    pub root: &'a Path,
+    pub recorder: &'a DebugRecorder,
+}
 
 /// Handles one request end to end: routes it, then sends the response.
 /// `writer_id` is this `WebGui`'s own executor id, used to authorize its
@@ -20,6 +28,7 @@ use tiny_http::{Method, Request, ResponseBox};
 pub fn handle(
     mut request: Request,
     maps_root: &Path,
+    debug: &Debug,
     captain: &Captain,
     writer_id: u16,
     config: &WebGuiConfig,
@@ -127,6 +136,11 @@ pub fn handle(
         (Method::Post, "/api/race/start") => {
             opponents_api::start_race(&mut request, captain, writer_id, config)
         }
+        (Method::Get, "/api/debug") => debug_api::status(debug.recorder, debug.root),
+        (Method::Post, "/api/debug/start") => {
+            debug_api::start(&mut request, captain, debug.recorder, debug.root)
+        }
+        (Method::Post, "/api/debug/stop") => debug_api::stop(captain, debug.recorder),
         (Method::Post, "/api/race_line_selection") => {
             race_lines_api::select(&mut request, captain, writer_id)
         }

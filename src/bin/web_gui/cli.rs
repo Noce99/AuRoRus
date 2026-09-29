@@ -5,17 +5,21 @@ use std::path::{Path, PathBuf};
 /// Default folder `web_gui` serves maps from, matching
 /// `GenerationConfig::default().output_root`.
 const DEFAULT_MAPS_ROOT: &str = "maps";
-/// Default folder a `--debug` session with no explicit path is recorded into -
-/// a sibling of `DEFAULT_MAPS_ROOT`/`aurorus::config::DEFAULT_CONFIG_ROOT`.
+/// Folder debug sessions are recorded into - from the Debug panel, or by a
+/// `--debug` with no explicit path. A sibling of
+/// `DEFAULT_MAPS_ROOT`/`aurorus::config::DEFAULT_CONFIG_ROOT`.
 const DEFAULT_DEBUGS_ROOT: &str = "debugs";
 /// Default recording rate for `--debug`, in Hz, when `--debug_frequency` isn't given.
-const DEFAULT_DEBUG_FREQUENCY_HZ: f64 = 100.0;
+const DEFAULT_DEBUG_FREQUENCY_HZ: f64 = aurorus::DEFAULT_DEBUG_FREQUENCY_HZ;
 
 pub struct Config {
     pub maps_root: PathBuf,
     pub config_dir: PathBuf,
+    /// Folder the Debug panel records into.
+    pub debugs_root: PathBuf,
     /// The fully resolved `.debug` file path to record to, or `None` if
-    /// `--debug` wasn't given at all. See [`resolve_debug_output`].
+    /// `--debug` wasn't given at all. See [`resolve_debug_output`]. Recording
+    /// starts right away, as if started from the Debug panel.
     pub debug_output: Option<PathBuf>,
     pub debug_frequency_hz: f64,
 }
@@ -62,7 +66,8 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          Options:\n  \
          --maps-root DIR       folder to serve/generate maps from (default: {DEFAULT_MAPS_ROOT:?})\n  \
          --config-dir DIR      folder to load config/ files from (default: {:?})\n  \
-         --debug [PATH]        record every written topic to a .debug session file until Ctrl+C -\n  \
+         --debug [PATH]        start recording every written topic to a .debug session file right\n  \
+         \x20                    away, until stopped from the Debug panel, a restart, or Ctrl+C -\n  \
          \x20                    no PATH: {DEFAULT_DEBUGS_ROOT:?}/<generated name>.debug\n  \
          \x20                    PATH is a directory: <PATH>/<generated name>.debug\n  \
          \x20                    otherwise: PATH itself (overwritten if it already exists)\n  \
@@ -121,6 +126,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     Config {
         maps_root,
         config_dir,
+        debugs_root: PathBuf::from(DEFAULT_DEBUGS_ROOT),
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
     }

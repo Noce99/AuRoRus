@@ -217,6 +217,48 @@
   color: #f59e0b;
 }
 
+/* ---------- debug panel ---------- */
+
+#debug-state {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #9aa4b2;
+}
+
+#debug-state.recording {
+  color: #ef4444;
+}
+
+#debug-state.saving {
+  color: #e0a458;
+}
+
+#debug-state.saved {
+  color: #7fd18b;
+}
+
+#debug-state.failed {
+  color: #f59e0b;
+}
+
+#debug-frequency-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#debug-frequency {
+  width: 90px;
+}
+
+.panel-nav-btn.recording::after {
+  content: " \25CF";
+  color: #ef4444;
+}
+
 #slam-controls,
 #localization-controls,
 #algorithm-controls,
@@ -339,7 +381,9 @@
 #topic-select,
 #algorithm-select,
 #planning-objective,
-#slam-save-name {
+#slam-save-name,
+#debug-name,
+#debug-frequency {
   flex: 0 0 auto;
   font: inherit;
   background: #22272e;

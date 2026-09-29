@@ -26,15 +26,6 @@ pub trait Executor: Send {
     /// Default: does nothing, for executors that only read topics.
     fn claim_writing_topics(&mut self, _captain: &Captain) {}
 
-    /// Called once, right after [`init`](Self::init) and before
-    /// [`claim_writing_topics`](Self::claim_writing_topics), but only when
-    /// [`crate::Runner`] is in debug-recording mode (see [`crate::Runner::debug_mode`]) -
-    /// lets an executor decide to claim extra debug-only topics it wouldn't otherwise
-    /// bother publishing.
-    ///
-    /// Default: does nothing. No executor needs to override this yet.
-    fn set_debug_mode(&mut self, _frequency_hz: f64) {}
-
     /// The executor's main loop. Should keep working until
     /// `captain.is_running(id)` (with the id given to [`init`](Self::init)) returns
     /// `false`, then return.
