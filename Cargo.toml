@@ -24,6 +24,8 @@ tiny_http = "0.12.0"
 tiff = "0.11"
 toml = "1.1.4"
 voronoice = "0.2.0"
+# Hashing the map and race line a benchmark ran on - see `benchmark::hash`.
+sha2 = "0.10"
 
 # Only to switch Nagle's algorithm off on the web UIs' listening socket - see
 # `web::bind_http`. Already in the dependency tree via other crates.

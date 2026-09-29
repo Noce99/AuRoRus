@@ -27,3 +27,11 @@ grid_margin_m = 0.1
 # How long a race's countdown (3, 2, 1, Go!) lasts before the vehicles are
 # released, in milliseconds.
 race_countdown_ms = 3000
+# Benchmark panel: how many laps one benchmark run drives.
+benchmark_laps = 10
+# Benchmark panel: how often the vehicle's pose, speed and commands are
+# written to a run's trajectory.csv, in Hz.
+benchmark_sample_rate_hz = 40.0
+# Benchmark panel: a lap that takes longer than the map's centerline driven
+# at this speed, in m/s, ends the run as a timeout.
+benchmark_timeout_speed_mps = 1.0

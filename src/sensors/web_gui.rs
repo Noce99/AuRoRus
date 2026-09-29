@@ -11,7 +11,8 @@
 //! reads `map`, `vehicle_model_status`, `autonomous_algorithm_status`,
 //! `slam_status`, `planning_status`, `race_line` and `opponents` to reflect
 //! the current selections. Starts and stops debug recordings through a
-//! [`crate::DebugRecorder`] (see [`debug_api`]).
+//! [`crate::DebugRecorder`] (see [`debug_api`]), and runs benchmarks (see
+//! [`benchmark_api`]).
 //!
 //! Everything on the map canvas comes from drawing topics (see
 //! [`crate::topics::Drawing`] and [`draw_api`]): whatever every other
@@ -21,6 +22,7 @@
 //! [`topics_api`]).
 
 mod assets;
+mod benchmark_api;
 mod debug_api;
 mod draw_api;
 mod handlers;
@@ -30,6 +32,7 @@ mod opponents_api;
 mod race_lines_api;
 mod topics_api;
 
+use crate::telemetry::TelemetryPoseSource;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
     AutonomousAlgorithmSelection, AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME,
@@ -80,6 +83,13 @@ pub struct WebGuiConfig {
     /// How long a race's countdown lasts before the vehicles are released,
     /// in milliseconds.
     pub race_countdown_ms: u64,
+    /// How many laps one benchmark run drives - see [`benchmark_api`].
+    pub benchmark_laps: u32,
+    /// How often a benchmark run's trajectory is sampled, in Hz.
+    pub benchmark_sample_rate_hz: f64,
+    /// A benchmark lap taking longer than the map's centerline driven at
+    /// this speed, in meters/second, ends the run as a timeout.
+    pub benchmark_timeout_speed_mps: f64,
 }
 
 impl Default for WebGuiConfig {
@@ -87,6 +97,17 @@ impl Default for WebGuiConfig {
         toml::from_str(include_str!("../../config/sensors/web_gui.toml"))
             .expect("config/sensors/web_gui.toml must deserialize into WebGuiConfig")
     }
+}
+
+/// Where the Benchmark panel's runs go, and what `summary.toml` records
+/// about the lap timing it relies on - see [`benchmark_api`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct BenchmarkSetup {
+    /// Folder every run is written under, one subfolder per map.
+    pub root: PathBuf,
+    /// Where `crate::telemetry::LapTelemetryRecorder` takes the pose it times
+    /// laps with from.
+    pub pose_source: TelemetryPoseSource,
 }
 
 /// Serves the map browser/generator web UI. Reads and writes map folders
@@ -100,17 +121,23 @@ pub struct WebGui {
     /// Kept across restarts (see [`Executor::fresh`]), so the Debug panel
     /// still shows how the recording a restart ended went.
     recorder: DebugRecorder,
+    benchmark_setup: BenchmarkSetup,
+    /// Kept across restarts like `recorder`, so the Benchmark panel still
+    /// shows the last results.
+    benchmark: benchmark_api::Benchmark,
     config: WebGuiConfig,
 }
 
 impl WebGui {
     /// Creates a `WebGui` that will serve maps under `maps_root` once run,
-    /// and start recordings through `recorder` into `debugs_root`.
+    /// start recordings through `recorder` into `debugs_root`, and write
+    /// benchmarks as `benchmark_setup` says.
     pub fn new(
         name: impl Into<String>,
         maps_root: impl Into<PathBuf>,
         debugs_root: impl Into<PathBuf>,
         recorder: DebugRecorder,
+        benchmark_setup: BenchmarkSetup,
         config: WebGuiConfig,
     ) -> Self {
         Self {
@@ -119,6 +146,8 @@ impl WebGui {
             maps_root: maps_root.into(),
             debugs_root: debugs_root.into(),
             recorder,
+            benchmark_setup,
+            benchmark: benchmark_api::Benchmark::default(),
             config,
         }
     }
@@ -211,18 +240,33 @@ impl Executor for WebGui {
             root: &self.debugs_root,
             recorder: &self.recorder,
         };
+        let benchmarks = handlers::Benchmarks {
+            setup: &self.benchmark_setup,
+            benchmark: &self.benchmark,
+        };
         let config = &self.config;
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
+        let orchestrator = benchmark_api::Orchestrator {
+            captain,
+            id,
+            config,
+            maps_root,
+            setup: &self.benchmark_setup,
+            recorder: &self.recorder,
+            benchmark: &self.benchmark,
+        };
         thread::scope(|scope| {
+            scope.spawn(|| benchmark_api::run_orchestrator(&orchestrator));
             for _ in 0..self.config.worker_threads {
                 let server = server.clone();
                 let debug = &debug;
+                let benchmarks = &benchmarks;
                 scope.spawn(move || {
                     while captain.is_running(id) {
                         match server.recv_timeout(poll_interval) {
-                            Ok(Some(request)) => {
-                                handlers::handle(request, maps_root, debug, captain, id, config)
-                            }
+                            Ok(Some(request)) => handlers::handle(
+                                request, maps_root, debug, benchmarks, captain, id, config,
+                            ),
                             Ok(None) => continue,
                             Err(err) => eprintln!("web_gui: connection error: {err}"),
                         }
@@ -241,12 +285,15 @@ impl Executor for WebGui {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(WebGui::new(
+        let mut fresh = WebGui::new(
             self.name.clone(),
             self.maps_root.clone(),
             self.debugs_root.clone(),
             self.recorder.clone(),
+            self.benchmark_setup.clone(),
             self.config.clone(),
-        ))
+        );
+        fresh.benchmark = self.benchmark.clone();
+        Box::new(fresh)
     }
 }

@@ -9,6 +9,8 @@ const DEFAULT_MAPS_ROOT: &str = "maps";
 /// `--debug` with no explicit path. A sibling of
 /// `DEFAULT_MAPS_ROOT`/`aurorus::config::DEFAULT_CONFIG_ROOT`.
 const DEFAULT_DEBUGS_ROOT: &str = "debugs";
+/// Default folder the Benchmark panel writes its runs into.
+const DEFAULT_BENCHMARKS_ROOT: &str = "benchmarks";
 /// Default recording rate for `--debug`, in Hz, when `--debug_frequency` isn't given.
 const DEFAULT_DEBUG_FREQUENCY_HZ: f64 = aurorus::DEFAULT_DEBUG_FREQUENCY_HZ;
 
@@ -17,6 +19,8 @@ pub struct Config {
     pub config_dir: PathBuf,
     /// Folder the Debug panel records into.
     pub debugs_root: PathBuf,
+    /// Folder the Benchmark panel writes its runs into.
+    pub benchmarks_root: PathBuf,
     /// The fully resolved `.debug` file path to record to, or `None` if
     /// `--debug` wasn't given at all. See [`resolve_debug_output`]. Recording
     /// starts right away, as if started from the Debug panel.
@@ -66,6 +70,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          Options:\n  \
          --maps-root DIR       folder to serve/generate maps from (default: {DEFAULT_MAPS_ROOT:?})\n  \
          --config-dir DIR      folder to load config/ files from (default: {:?})\n  \
+         --benchmarks-root DIR folder the Benchmark panel writes into (default: {DEFAULT_BENCHMARKS_ROOT:?})\n  \
          --debug [PATH]        start recording every written topic to a .debug session file right\n  \
          \x20                    away, until stopped from the Debug panel, a restart, or Ctrl+C -\n  \
          \x20                    no PATH: {DEFAULT_DEBUGS_ROOT:?}/<generated name>.debug\n  \
@@ -84,6 +89,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
 
     let mut maps_root = PathBuf::from(DEFAULT_MAPS_ROOT);
     let mut config_dir = PathBuf::from(aurorus::config::DEFAULT_CONFIG_ROOT);
+    let mut benchmarks_root = PathBuf::from(DEFAULT_BENCHMARKS_ROOT);
     let mut debug_arg = DebugCliArg::Disabled;
     let mut debug_frequency_hz = DEFAULT_DEBUG_FREQUENCY_HZ;
 
@@ -100,6 +106,11 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
             }
             "--config-dir" => {
                 config_dir = args.next().map(PathBuf::from).unwrap_or_else(|| {
+                    fail(format!("Missing value for {flag}"));
+                })
+            }
+            "--benchmarks-root" => {
+                benchmarks_root = args.next().map(PathBuf::from).unwrap_or_else(|| {
                     fail(format!("Missing value for {flag}"));
                 })
             }
@@ -127,6 +138,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
         maps_root,
         config_dir,
         debugs_root: PathBuf::from(DEFAULT_DEBUGS_ROOT),
+        benchmarks_root,
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
     }

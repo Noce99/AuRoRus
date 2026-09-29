@@ -31,6 +31,7 @@ pub use core::{
 pub mod actuators;
 pub mod algorithms;
 pub mod autonomous_control;
+pub mod benchmark;
 pub mod config;
 pub mod debug_format;
 pub mod environment;

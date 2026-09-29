@@ -17,4 +17,4 @@ pub use race_line_publisher::RaceLinePublisher;
 pub use random_lidar::{RandomLidar, RandomLidarConfig};
 pub use simulated_imu::{SimulatedImu, SimulatedImuConfig};
 pub use simulated_lidar::{SimulatedLidar, SimulatedLidarConfig};
-pub use web_gui::{WebGui, WebGuiConfig};
+pub use web_gui::{BenchmarkSetup, WebGui, WebGuiConfig};

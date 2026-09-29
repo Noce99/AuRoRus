@@ -26,6 +26,7 @@
       <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
       <button class="panel-nav-btn" data-panel="opponents">Opponents</button>
       <button class="panel-nav-btn" data-panel="debug">Debug</button>
+      <button class="panel-nav-btn" data-panel="benchmark">Benchmark</button>
     </nav>
   </aside>
 
@@ -213,6 +214,53 @@
       <p id="debug-details" class="parameter-description"></p>
       <p id="debug-error" class="modal-error" hidden></p>
     </section>
+
+    <section id="panel-benchmark" class="panel-section" hidden>
+      <h1>Benchmark</h1>
+      <p class="parameter-description">Drives the ego vehicle alone for <span id="bench-laps"></span> laps from the start/finish line, once per map &times; vehicle model &times; race line picked, and saves each run under <code id="bench-folder"></code>. Everything else is locked while it runs; any WASD key aborts it.</p>
+      <div id="bench-setup">
+        <label id="bench-algorithm-row">Algorithm
+          <select id="bench-algorithm"></select>
+        </label>
+        <details id="bench-maps" class="bench-group">
+          <summary>
+            <span class="bench-group-label">Map Selection</span>
+            <span class="bench-group-count"></span>
+            <button type="button" class="bench-all" title="Pick every map">All</button>
+            <button type="button" class="bench-none" title="Pick no map">None</button>
+          </summary>
+          <ul class="bench-options"></ul>
+        </details>
+        <details id="bench-models" class="bench-group">
+          <summary>
+            <span class="bench-group-label">Vehicle Models</span>
+            <span class="bench-group-count"></span>
+            <button type="button" class="bench-all" title="Pick every vehicle model">All</button>
+            <button type="button" class="bench-none" title="Pick no vehicle model">None</button>
+          </summary>
+          <ul class="bench-options"></ul>
+        </details>
+        <details id="bench-lines" class="bench-group">
+          <summary>
+            <span class="bench-group-label">Race Lines</span>
+            <span class="bench-group-count"></span>
+            <button type="button" class="bench-all" title="Pick every race line">All</button>
+            <button type="button" class="bench-none" title="Pick no race line">None</button>
+          </summary>
+          <div class="bench-options"></div>
+        </details>
+        <p id="bench-plan" class="parameter-description"></p>
+        <button type="button" id="bench-start-btn" title="Run every combination picked, one after the other">&#9654; Start benchmark</button>
+      </div>
+      <div id="bench-progress" hidden>
+        <p id="bench-state"></p>
+        <p id="bench-progress-details" class="parameter-description"></p>
+        <div id="bench-bar"><div id="bench-bar-fill"></div></div>
+        <button type="button" id="bench-abort-btn" title="Stop the benchmark - the run in progress is saved as aborted">&#9632; Abort</button>
+      </div>
+      <p id="bench-error" class="modal-error" hidden></p>
+      <ul id="bench-results"></ul>
+    </section>
   </aside>
 
   <div id="generate-overlay" hidden>
@@ -326,5 +374,6 @@
 <script src="/draw_layers.js"></script>
 <script src="/lap_panel.js"></script>
 <script src="/app.js"></script>
+<script src="/benchmark.js"></script>
 </body>
 </html>

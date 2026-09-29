@@ -4,7 +4,7 @@ use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig
 use aurorus::opponents::OpponentsManager;
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
-    MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
+    BenchmarkSetup, MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
     SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
@@ -52,6 +52,10 @@ fn main() {
             config.maps_root.clone(),
             config.debugs_root.clone(),
             recorder.clone(),
+            BenchmarkSetup {
+                root: config.benchmarks_root.clone(),
+                pose_source: lap_telemetry_config.pose_source,
+            },
             web_gui_config,
         )
         .boxed(),

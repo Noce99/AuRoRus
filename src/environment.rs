@@ -20,7 +20,8 @@ pub use info::{
     GenerationInfo, ImageOrigin, MapInfo, MapSource, StartFinishLine, WorldPoint, now_rfc3339,
 };
 pub use map::{
-    CENTERLINE_FILE_NAME, Map, MapLoadError, MapSaveError, map_folder, read_info, save, write_line,
+    CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, Map, MapLoadError, MapSaveError,
+    RACE_LINES_DIR_NAME, map_folder, read_info, save, write_line,
 };
 pub use race_line::{RaceLineWriteError, SpeedPoint};
 pub use race_lines::{RaceLineEntry, RaceLineMethod};

@@ -117,7 +117,7 @@ fn available_algorithms(captain: &Captain) -> Vec<AvailableAlgorithm> {
         .unwrap_or_default()
 }
 
-fn opponents(captain: &Captain) -> Opponents {
+pub(super) fn opponents(captain: &Captain) -> Opponents {
     captain
         .try_topic::<Opponents>(OPPONENTS_TOPIC_NAME)
         .map(|topic| topic.read().into_value())
@@ -182,7 +182,7 @@ struct Queued {
 }
 
 /// Appends `request` to `opponent_requests`, returning its number.
-fn queue(captain: &Captain, writer_id: u16, request: OpponentRequest) -> u64 {
+pub(super) fn queue(captain: &Captain, writer_id: u16, request: OpponentRequest) -> u64 {
     let topic = captain.topic::<OpponentRequests>(OPPONENT_REQUESTS_TOPIC_NAME);
     let mut requests = topic.read().into_value();
     let number = requests.push(request);
@@ -277,12 +277,35 @@ pub fn start_race(
         );
     }
 
+    if let Err(err) = line_up(captain, writer_id, &body.order, config) {
+        return bad_request(&err);
+    }
+    json_response(
+        &RaceStarted {
+            go_in_ms: config.race_countdown_ms,
+        },
+        200,
+    )
+}
+
+/// Lines `order` up on the loaded map's starting grid (see
+/// [`starting_grid::slots`]), pole position first, and releases them all at
+/// once after [`WebGuiConfig::race_countdown_ms`] - the race start, also
+/// used by a benchmark with the ego vehicle alone. Like any placement of the
+/// ego vehicle, turns SLAM's mapping off. Returns when the vehicles are
+/// released, in [`now_ms`]'s clock.
+pub(super) fn line_up(
+    captain: &Captain,
+    writer_id: u16,
+    order: &[Racer],
+    config: &WebGuiConfig,
+) -> Result<u64, String> {
     let map = captain
         .topic::<SelectedMap>(MAP_TOPIC_NAME)
         .read()
         .into_value();
     let (Some(folder), Some(info)) = (&map.path, &map.info) else {
-        return bad_request("Load a map first.");
+        return Err("Load a map first.".to_string());
     };
     let centerline = race_lines::read(folder, CENTERLINE_FILE_NAME).unwrap_or_default();
     let is_free = |x_m: f64, y_m: f64| {
@@ -298,17 +321,15 @@ pub fn start_race(
         gap_m: config.grid_gap_m,
         margin_m: config.grid_margin_m,
     };
-    let poses = match starting_grid::slots(
+    let poses = starting_grid::slots(
         &centerline,
         &info.start_finish_line,
-        body.order.len(),
+        order.len(),
         spacing,
         is_free,
-    ) {
-        Ok(poses) => poses,
-        Err(err) => return bad_request(&err),
-    };
+    )?;
 
+    let go_at_ms = now_ms() + config.race_countdown_ms;
     let topic = captain.topic::<RaceStart>(RACE_START_TOPIC_NAME);
     let sequence = topic.read().sequence.wrapping_add(1);
     topic
@@ -316,21 +337,15 @@ pub fn start_race(
             writer_id,
             RaceStart {
                 sequence,
-                slots: body
-                    .order
+                slots: order
                     .iter()
                     .zip(poses)
                     .map(|(&racer, pose)| GridSlot { racer, pose })
                     .collect(),
-                go_at_ms: now_ms() + config.race_countdown_ms,
+                go_at_ms,
             },
         )
         .expect("lost writer authorization for the race_start topic");
     stop_mapping(captain, writer_id);
-    json_response(
-        &RaceStarted {
-            go_in_ms: config.race_countdown_ms,
-        },
-        200,
-    )
+    Ok(go_at_ms)
 }

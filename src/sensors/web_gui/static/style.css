@@ -796,3 +796,202 @@
 #opponent-form-hint[hidden] {
   display: none;
 }
+
+/* ---------- benchmark panel ---------- */
+
+#bench-setup,
+#bench-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#bench-setup[hidden],
+#bench-progress[hidden] {
+  display: none;
+}
+
+#bench-algorithm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#bench-algorithm {
+  flex: 1 1 auto;
+}
+
+.bench-group {
+  border: 1px solid #303640;
+  border-radius: 6px;
+  background: #1d2127;
+}
+
+.bench-group summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bench-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.bench-group summary::before {
+  content: "\25B8";
+  color: #9aa4b2;
+  width: 10px;
+}
+
+.bench-group[open] summary::before {
+  content: "\25BE";
+}
+
+.bench-group-label {
+  flex: 1 1 auto;
+}
+
+.bench-group-count {
+  color: #9aa4b2;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.bench-group summary button {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.bench-group.disabled {
+  opacity: 0.5;
+}
+
+.bench-group.disabled summary button {
+  pointer-events: none;
+}
+
+.bench-options {
+  margin: 0;
+  padding: 0 8px 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.bench-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bench-group li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  font-size: 13px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.bench-line-map h3 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa4b2;
+}
+
+.bench-line-map.disabled {
+  opacity: 0.45;
+}
+
+#bench-plan {
+  margin: 0;
+}
+
+#bench-state {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #7fd18b;
+}
+
+#bench-progress-details {
+  margin: 0;
+  white-space: pre-line;
+}
+
+#bench-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #2b323b;
+  overflow: hidden;
+}
+
+#bench-bar-fill {
+  height: 100%;
+  width: 0;
+  background: #3f6dc9;
+  transition: width 0.3s;
+}
+
+#bench-results {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#bench-results li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #22272e;
+  font-size: 12px;
+}
+
+.bench-result-numbers {
+  grid-column: 2;
+  color: #9aa4b2;
+  font-variant-numeric: tabular-nums;
+}
+
+.bench-badge {
+  font-weight: 600;
+}
+
+.bench-badge.completed {
+  color: #7fd18b;
+}
+
+.bench-badge.timeout {
+  color: #f59e0b;
+}
+
+.bench-badge.aborted_by_user,
+.bench-badge.skipped {
+  color: #ef4444;
+}
+
+/* While a benchmark runs, everything else is locked (the server refuses it
+   anyway): only the Benchmark panel, the map view and the panel switcher
+   stay usable. */
+body.benchmark-active #right-panel .panel-section:not(#panel-benchmark) button,
+body.benchmark-active #right-panel .panel-section:not(#panel-benchmark) input,
+body.benchmark-active #right-panel .panel-section:not(#panel-benchmark) select,
+body.benchmark-active #right-panel .panel-section:not(#panel-benchmark) li,
+body.benchmark-active #place-pose-btn {
+  pointer-events: none;
+  opacity: 0.5;
+}

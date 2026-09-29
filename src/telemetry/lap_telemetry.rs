@@ -57,7 +57,7 @@ impl Default for LapTelemetryConfig {
 }
 
 /// Where [`LapTelemetryRecorder`] gets the vehicle's pose and speed from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TelemetryPoseSource {
     /// The simulator's `vehicle_status`.

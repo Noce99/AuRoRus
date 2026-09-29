@@ -1,8 +1,10 @@
 //! Routes an incoming request to the right handler and writes back its
 //! response.
 
+use super::BenchmarkSetup;
 use super::WebGuiConfig;
 use super::assets;
+use super::benchmark_api::{self, Benchmark};
 use super::debug_api;
 use super::draw_api;
 use super::live_api;
@@ -22,6 +24,12 @@ pub struct Debug<'a> {
     pub recorder: &'a DebugRecorder,
 }
 
+/// What the Benchmark panel's routes need - see [`benchmark_api`].
+pub struct Benchmarks<'a> {
+    pub setup: &'a BenchmarkSetup,
+    pub benchmark: &'a Benchmark,
+}
+
 /// Handles one request end to end: routes it, then sends the response.
 /// `writer_id` is this `WebGui`'s own executor id, used to authorize its
 /// writes to `human_vesc_command`/`map_selection`.
@@ -29,6 +37,7 @@ pub fn handle(
     mut request: Request,
     maps_root: &Path,
     debug: &Debug,
+    benchmarks: &Benchmarks,
     captain: &Captain,
     writer_id: u16,
     config: &WebGuiConfig,
@@ -49,9 +58,14 @@ pub fn handle(
     }
 
     let response = match (&method, path.as_str()) {
+        // Nothing that changes the setup while a benchmark runs.
+        (method, path) if benchmark_api::blocks(benchmarks.benchmark, method, path) => {
+            benchmark_api::refused()
+        }
         (Method::Get, "/" | "/index.html") => assets::respond("index.html"),
         (Method::Get, "/style.css") => assets::respond("style.css"),
         (Method::Get, "/app.js") => assets::respond("app.js"),
+        (Method::Get, "/benchmark.js") => assets::respond("benchmark.js"),
         (Method::Get, "/api/config") => live_api::config(config),
         (Method::Get, "/api/maps") => maps_api::list(maps_root),
         (Method::Get, "/api/generate/defaults") => maps_api::generate_defaults(),
@@ -141,6 +155,16 @@ pub fn handle(
             debug_api::start(&mut request, captain, debug.recorder, debug.root)
         }
         (Method::Post, "/api/debug/stop") => debug_api::stop(captain, debug.recorder),
+        (Method::Get, "/api/benchmark") => {
+            benchmark_api::status(benchmarks.benchmark, benchmarks.setup, config)
+        }
+        (Method::Get, "/api/benchmark/options") => {
+            benchmark_api::options(captain, maps_root, config)
+        }
+        (Method::Post, "/api/benchmark/start") => {
+            benchmark_api::start(&mut request, captain, maps_root, benchmarks.benchmark)
+        }
+        (Method::Post, "/api/benchmark/abort") => benchmark_api::abort(benchmarks.benchmark),
         (Method::Post, "/api/race_line_selection") => {
             race_lines_api::select(&mut request, captain, writer_id)
         }
