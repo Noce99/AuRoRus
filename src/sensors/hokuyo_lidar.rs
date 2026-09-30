@@ -7,6 +7,7 @@
 
 mod scip;
 
+use crate::hardware::CarCalibration;
 use crate::localization::{VehiclePose, WorldPose};
 use crate::topics::{Color, Drawing, LidarScan, Shape, VehicleTopics};
 use crate::{Captain, Executor};
@@ -22,8 +23,10 @@ const POLL: Duration = Duration::from_millis(50);
 
 /// Every tunable parameter [`HokuyoLidar`] needs - loaded from
 /// `config/sensors/hokuyo_lidar.toml` (see [`Default`]) or from an
-/// arbitrary path via [`crate::config::load`].
+/// arbitrary path via [`crate::config::load`]. How the sensor is mounted is
+/// the car's calibration instead - see [`Mounting`].
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HokuyoLidarConfig {
     /// The sensor's `host:port`.
     pub address: String,
@@ -42,23 +45,40 @@ pub struct HokuyoLidarConfig {
     /// the closest of them; odd, so the middle reading points straight
     /// ahead. `1` keeps every step.
     pub cluster: u32,
-    /// Whether to publish the readings in reverse order - for a sensor
-    /// mounted so it sends the car's right-most reading first, since a
-    /// [`LidarScan`]'s first is the car's left (positive angles are to the
-    /// right, as the GUI draws them).
-    pub upside_down: bool,
     /// Readings at or below this distance, in meters, are published as
     /// "nothing hit" - see [`LidarScan::min_distance`].
     pub min_distance_m: f32,
     /// Readings at or beyond this distance, in meters, are published as
     /// "nothing hit" - see [`LidarScan::max_distance`].
     pub max_distance_m: f32,
-    /// Where the sensor sits on the vehicle, in meters, forward of the
-    /// vehicle's reference point - see [`LidarScan::mount_x_m`].
-    pub mount_x_m: f32,
-    /// Where the sensor sits on the vehicle, in meters, left of the
-    /// vehicle's reference point - see [`LidarScan::mount_y_m`].
-    pub mount_y_m: f32,
+}
+
+/// How the sensor is mounted on its car - see
+/// [`crate::hardware::LidarMounting`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Mounting {
+    /// Whether to publish the readings in reverse order - for a sensor
+    /// mounted so it sends the car's right-most reading first, since a
+    /// [`LidarScan`]'s first is the car's left (positive angles are to the
+    /// right, as the GUI draws them).
+    pub upside_down: bool,
+    /// Where the sensor sits on the vehicle, in meters, forward of and to
+    /// the right of the vehicle's reference point - see
+    /// [`LidarScan::mount_x_m`].
+    pub x_m: f32,
+    pub y_m: f32,
+}
+
+impl Mounting {
+    /// How the lidar is mounted on `car`.
+    pub fn of(car: &CarCalibration) -> Self {
+        let (x_m, y_m) = car.lidar_mount_m();
+        Self {
+            upside_down: car.lidar.upside_down,
+            x_m: x_m as f32,
+            y_m: y_m as f32,
+        }
+    }
 }
 
 impl Default for HokuyoLidarConfig {
@@ -78,15 +98,17 @@ pub struct HokuyoLidar {
     id: u16,
     name: String,
     config: HokuyoLidarConfig,
+    mounting: Mounting,
     vehicle: VehicleTopics,
 }
 
 impl HokuyoLidar {
-    pub fn new(name: impl Into<String>, config: HokuyoLidarConfig) -> Self {
+    pub fn new(name: impl Into<String>, config: HokuyoLidarConfig, mounting: Mounting) -> Self {
         Self {
             id: 0,
             name: name.into(),
             config,
+            mounting,
             vehicle: VehicleTopics::ego(),
         }
     }
@@ -160,7 +182,7 @@ impl HokuyoLidar {
 
         while let Some(block) = sensor.reply(captain, self.id)? {
             let readings = scip::parse_scan(&block, layout.num_points)?;
-            let scan = to_scan(&self.config, parameters, layout, &readings);
+            let scan = to_scan(&self.config, self.mounting, parameters, layout, &readings);
 
             let hits = vehicle_pose
                 .current()
@@ -197,6 +219,7 @@ impl Executor for HokuyoLidar {
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
         let config = self.config.clone();
+        let mounting = self.mounting;
         captain.claim_writer::<LidarScan>(&self.vehicle.lidar_scan(), self.id, move || {
             LidarScan::new(
                 Vec::new(),
@@ -205,7 +228,7 @@ impl Executor for HokuyoLidar {
                 config.max_distance_m,
                 config.fov_rad,
             )
-            .mounted_at(config.mount_x_m, config.mount_y_m)
+            .mounted_at(mounting.x_m, mounting.y_m)
         });
         captain.claim_drawing(self.id);
     }
@@ -237,7 +260,11 @@ impl Executor for HokuyoLidar {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(HokuyoLidar::new(self.name.clone(), self.config.clone()))
+        Box::new(HokuyoLidar::new(
+            self.name.clone(),
+            self.config.clone(),
+            self.mounting,
+        ))
     }
 }
 
@@ -325,10 +352,11 @@ fn is_timeout(err: &std::io::Error) -> bool {
 /// for. Anything the sensor flags as an error (outside its own range) or
 /// that's outside the configured one reads as "nothing hit" - the maximum
 /// distance with no intensity, as [`super::SimulatedLidar`] reports a miss.
-/// Reversed if [`HokuyoLidarConfig::upside_down`] - exactly a mirror image,
-/// since `layout` is centered on the front.
+/// Reversed if [`Mounting::upside_down`] - exactly a mirror image, since
+/// `layout` is centered on the front.
 fn to_scan(
     config: &HokuyoLidarConfig,
+    mounting: Mounting,
     parameters: &Parameters,
     layout: &Layout,
     readings: &Readings,
@@ -350,7 +378,7 @@ fn to_scan(
             }
         })
         .unzip();
-    if config.upside_down {
+    if mounting.upside_down {
         points.reverse();
         intensities.reverse();
     }
@@ -361,7 +389,7 @@ fn to_scan(
         config.max_distance_m,
         layout.fov_rad,
     )
-    .mounted_at(config.mount_x_m, config.mount_y_m)
+    .mounted_at(mounting.x_m, mounting.y_m)
 }
 
 /// Where every reading of `scan` that hit something is, in the world, with
@@ -393,9 +421,12 @@ mod tests {
     fn readings_become_meters_and_errors_read_as_nothing_hit() {
         let config = HokuyoLidarConfig {
             max_distance_m: 10.0,
-            mount_x_m: 0.2,
-            upside_down: false,
             ..HokuyoLidarConfig::default()
+        };
+        let mounting = Mounting {
+            x_m: 0.2,
+            y_m: -0.05,
+            ..Mounting::default()
         };
         let parameters = utm_30lx_ew();
         let layout = Layout::new(&parameters, 1.0, 1).unwrap();
@@ -407,19 +438,19 @@ mod tests {
             intensities: vec![900, 5, 800, 7],
         };
 
-        let scan = to_scan(&config, &parameters, &layout, &readings);
+        let scan = to_scan(&config, mounting, &parameters, &layout, &readings);
 
         assert_eq!(scan.points, vec![1.5, 10.0, 10.0, 10.0]);
         assert_eq!(scan.intensities, vec![900.0, 0.0, 0.0, 0.0]);
         assert_eq!(scan.fov, layout.fov_rad);
-        assert_eq!((scan.mount_x_m, scan.mount_y_m), (0.2, config.mount_y_m));
+        assert_eq!((scan.mount_x_m, scan.mount_y_m), (0.2, -0.05));
     }
 
     #[test]
     fn an_upside_down_sensors_readings_are_mirrored() {
-        let config = HokuyoLidarConfig {
+        let mounting = Mounting {
             upside_down: true,
-            ..HokuyoLidarConfig::default()
+            ..Mounting::default()
         };
         let parameters = utm_30lx_ew();
         let layout = Layout::new(&parameters, 1.0, 1).unwrap();
@@ -429,7 +460,13 @@ mod tests {
             intensities: vec![10, 20, 30],
         };
 
-        let scan = to_scan(&config, &parameters, &layout, &readings);
+        let scan = to_scan(
+            &HokuyoLidarConfig::default(),
+            mounting,
+            &parameters,
+            &layout,
+            &readings,
+        );
 
         assert_eq!(scan.points, vec![3.0, 2.0, 1.0]);
         assert_eq!(scan.intensities, vec![30.0, 20.0, 10.0]);
@@ -464,7 +501,13 @@ mod tests {
         let block = scip::tests::scan_block(42, &readings);
 
         let parsed = scip::parse_scan(&block, layout.num_points).unwrap();
-        let scan = to_scan(&HokuyoLidarConfig::default(), &parameters, &layout, &parsed);
+        let scan = to_scan(
+            &HokuyoLidarConfig::default(),
+            Mounting::default(),
+            &parameters,
+            &layout,
+            &parsed,
+        );
 
         assert_eq!(scan.num_lidar_points, 1081);
         assert_eq!(scan.points[540], 1.54);

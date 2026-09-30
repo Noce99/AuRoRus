@@ -13,7 +13,7 @@ mod simulated_imu;
 mod simulated_lidar;
 mod web_gui;
 
-pub use hokuyo_lidar::{HokuyoLidar, HokuyoLidarConfig};
+pub use hokuyo_lidar::{HokuyoLidar, HokuyoLidarConfig, Mounting as LidarMounting};
 pub use map_server::{MapServer, MapServerConfig};
 pub use race_line_publisher::RaceLinePublisher;
 pub use random_lidar::{RandomLidar, RandomLidarConfig};

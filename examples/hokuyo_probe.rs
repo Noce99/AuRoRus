@@ -3,8 +3,9 @@
 //! closest - e.g. to check the mounting by holding a hand on one side.
 //!
 //! `cargo run --release --example hokuyo_probe [SECONDS]` (default 10), with
-//! `config/sensors/hokuyo_lidar.toml`.
-use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig};
+//! `config/sensors/hokuyo_lidar.toml` and the mounting of the car `CAR_NAME`
+//! names (unmounted without one).
+use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig, LidarMounting};
 use aurorus::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 use aurorus::{Captain, Executor, Runner};
 use std::any::Any;
@@ -94,7 +95,12 @@ fn main() {
         .unwrap_or_else(|_| HokuyoLidarConfig::default());
 
     let mut runner = Runner::new();
-    runner.add_executor(HokuyoLidar::new("HokuyoLidar", config).boxed());
+    let mounting = match aurorus::hardware::load_this_car(Path::new("config")) {
+        Ok(Some(car)) => LidarMounting::of(&car),
+        Ok(None) => LidarMounting::default(),
+        Err(err) => panic!("{err}"),
+    };
+    runner.add_executor(HokuyoLidar::new("HokuyoLidar", config, mounting).boxed());
     runner.add_executor(Probe { id: 0 }.boxed());
     let stop_handle = runner.stop_handle();
     runner.run_all();

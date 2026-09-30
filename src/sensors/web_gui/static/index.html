@@ -119,16 +119,16 @@
         <dt>Temperature</dt><dd id="vesc-temperature"></dd>
         <dt>Tachometer</dt><dd id="vesc-tachometer"></dd>
       </dl>
-      <h2 class="parameter-group-title">Calibration</h2>
-      <p class="parameter-description">From config/actuators/vesc.toml, applied live - a change that would leave an invalid calibration (e.g. servo_min above servo_max) is refused. The port and the IMU's axes only change in the file.</p>
+      <h2 class="parameter-group-title">Settings</h2>
+      <p class="parameter-description">How the car is driven, from config/actuators/vesc.toml, applied live - a change that would leave an invalid config (e.g. stop_speed_mps above the car's min_speed_mps) is refused. The port only changes in the file. The car's own calibration (steering, motor, IMU, lidar) is config/hardware/&lt;car&gt;.toml, measured by car_calibration.</p>
       <div id="vesc-calibration-parameters" class="parameter-list" hidden></div>
       <div id="vesc-calibration-save" class="parameter-save" hidden>
-        <button type="button" id="vesc-calibration-save-btn" class="parameter-save-btn" title="Write this calibration into config/actuators/vesc.toml">Save calibration</button>
-        <button type="button" id="vesc-calibration-load-btn" class="parameter-load-btn" title="Drive with the calibration in config/actuators/vesc.toml again, dropping unsaved changes">Load from file</button>
+        <button type="button" id="vesc-calibration-save-btn" class="parameter-save-btn" title="Write these settings into config/actuators/vesc.toml">Save settings</button>
+        <button type="button" id="vesc-calibration-load-btn" class="parameter-load-btn" title="Drive with the settings in config/actuators/vesc.toml again, dropping unsaved changes">Load from file</button>
         <p id="vesc-calibration-save-status"></p>
       </div>
       <h2 class="parameter-group-title">Actuator limits</h2>
-      <p class="parameter-description">What the car is driven within, also given to the autonomous algorithms. max_steering_angle_rad should match servo_min/servo_max through steering_gain.</p>
+      <p class="parameter-description">What the car is driven within, also given to the autonomous algorithms along with the car's largest steering angle - the smaller of its two sides, from its calibration.</p>
       <div id="vesc-limits-parameters" class="parameter-list" hidden></div>
       <div id="vesc-limits-save" class="parameter-save" hidden>
         <button type="button" id="vesc-limits-save-btn" class="parameter-save-btn" title="Write these limits into config/actuators/vesc.toml">Save limits</button>

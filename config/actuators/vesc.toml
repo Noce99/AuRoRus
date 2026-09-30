@@ -1,7 +1,9 @@
-# Configuration for `aurorus::actuators::Vesc`, the real car's VESC 6 MkV
-# motor controller - driving its motor and steering servo, and reading its
-# IMU. Used by `web_gui --hardware`. Calibrated on the bench, wheels off the
-# ground (2026-09-30).
+# Configuration for `aurorus::actuators::Vesc`, the real car's VESC motor
+# controller - driving its motor and steering servo, and reading its IMU.
+# Used by `web_gui` on a car (see CAR_NAME). How the car itself steers, its
+# ERPM per meter/second, its IMU's axes and its battery's cells are its
+# calibration, config/hardware/<car>.toml - this file is only how it's
+# driven.
 
 # The VESC's serial port (/etc/udev/rules.d/99-vesc.rules names it).
 port = "/dev/sensors/vesc"
@@ -14,54 +16,21 @@ reconnect_delay_s = 1.0
 # Commands older than this, in seconds, count as stale: the car stops.
 command_timeout_s = 0.25
 
-# --- Steering -------------------------------------------------------------
-# servo = servo_offset + steering_gain * angle_rad, then clamped to
-# servo_min..=servo_max. A positive angle steers right (the simulator's
-# convention: D in the GUI), as does this car's servo above the offset.
-# Measured: straight at 0.50, 0.17/0.83 is about +-27.2 degrees (0.475 rad),
-# end stops near 0.15/0.85.
-servo_offset = 0.50
-steering_gain = 0.695
-servo_min = 0.17
-servo_max = 0.83
-
-# --- Speed ----------------------------------------------------------------
-# erpm = speed_mps * speed_to_erpm_gain * speed_compensation. Measured: 366
-# electrical turns for 16 turns of a 9 cm wheel (positive ERPM = forward).
-speed_to_erpm_gain = 4854.0
-# The VESC's speed controller settles about 15% short (2500 -> ~2150 ERPM).
-speed_compensation = 1.16
-# The motor stalls at 1000 ERPM but holds ~2150 (0.44 m/s) smoothly: nonzero
-# speeds below min_speed_mps are raised to it, below stop_speed_mps it brakes.
-min_speed_mps = 0.45
+# Speeds below this, in meters/second, brake instead (nonzero speeds above
+# it are raised to the car's min_speed_mps).
 stop_speed_mps = 0.05
 # The current the motor brakes with, in amperes.
 brake_current_a = 2.0
 
-# --- Battery --------------------------------------------------------------
-# Below this voltage the GUI warns to recharge: 3.5 V per cell of the 4S
-# LiPo (4.2 V per cell full, ~15.4 V measured at rest).
-low_battery_v = 14.0
-# The battery's cells in series, for estimating its charge from its voltage
-# (a LiPo cell's resting voltage, 3.3 V empty to 4.2 V full).
-battery_cells = 4
-
-# --- IMU ------------------------------------------------------------------
-# Which of the VESC's IMU axes ("+x", "-x", "+y", "-y", "+z", "-z") gives
-# ImuReading's x (forward), y (the car's right) and z - so that a right turn
-# reads as a positive yaw rate, as in the simulator (whose frame has y down).
-# Measured by tilting it: the VESC is mounted rotated 90 degrees, its x
-# pointing to the car's left, its y backwards and its z up.
-imu_x = "-y"
-imu_y = "-x"
-imu_z = "-z"
+# Below this voltage per cell, the GUI warns to recharge: 3.5 V (a LiPo
+# cell is 4.2 V full).
+low_battery_cell_v = 3.5
 
 # --- Limits ---------------------------------------------------------------
 # What the car is driven within, published on vehicle_limits for the
-# autonomous algorithms. max_speed_mps is a hard cap on every command.
+# autonomous algorithms along with the car's largest steering angle (the
+# smaller of its two sides). max_speed_mps is a hard cap on every command.
 [limits]
-# Largest steering angle, either way, in radians - servo_min/servo_max's.
-max_steering_angle_rad = 0.475
 # Fastest the steering angle can change, in radians/second.
 max_steering_rate_rad_s = 4.0
 # Fastest the car is driven, either way, in meters/second.

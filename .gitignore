@@ -4,3 +4,8 @@
 /debugs
 other_repos/
 /benchmarks
+
+# The car this machine drives, and every car's older calibrations - see
+# src/hardware.rs.
+/CAR_NAME
+/config/hardware/history/

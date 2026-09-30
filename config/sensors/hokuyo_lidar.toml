@@ -1,7 +1,7 @@
 # Configuration for `aurorus::sensors::HokuyoLidar`, the real car's Hokuyo
-# UTM-30LX-EW, streamed over Ethernet (SCIP 2.0). Used by `web_gui --hardware`.
-# The sensor's rate (40 Hz) and step layout (0.25 degrees) come from the
-# sensor itself.
+# UTM-30LX-EW, streamed over Ethernet (SCIP 2.0). Used by `web_gui` on a
+# car (see CAR_NAME). The sensor's rate (40 Hz) and step layout (0.25
+# degrees) come from the sensor itself.
 
 # The sensor's host:port (factory default: 192.168.0.10:10940).
 address = "192.168.0.10:10940"
@@ -20,22 +20,11 @@ fov_rad = 4.71238898038469
 # reporting the closest of them. Odd; 1 keeps all 1081 readings, 3 gives
 # 359 at 0.75 degrees.
 cluster = 1
-# Whether to publish the readings in reverse order. A scan's first reading is
-# the car's left (positive angles are to the right, as the GUI draws them);
-# this sensor, as mounted, sends its right-most first, hence true. If
-# obstacles on the car's left show up on its right in the GUI, flip this.
-upside_down = true
-
 # Readings at or below min_distance_m, or at or beyond max_distance_m, in
 # meters, are published as "nothing hit" (max_distance_m, no intensity) -
 # as are the sensor's own error codes. UTM-30LX-EW: 0.1 to 30.
 min_distance_m = 0.1
 max_distance_m = 30.0
 
-# Where the sensor sits on the vehicle, in meters, from the vehicle's
-# reference point (its center of gravity): mount_x_m forward, mount_y_m to
-# the car's right - positive angles and y are to the right, as the GUI draws
-# them (the simulator's frame has y down). Keep
-# simulated_lidar.toml's equal.
-mount_x_m = 0.0
-mount_y_m = 0.0
+# Whether it is mounted upside down, and where on the car, is the car's
+# calibration: config/hardware/<car>.toml's [lidar].

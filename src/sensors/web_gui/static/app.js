@@ -2437,7 +2437,7 @@ async function pollVesc() {
   renderVesc(await fetchJSON("/api/vesc"));
 }
 
-// The VESC's calibration and limits, tuned live like a vehicle model's -
+// The VESC's settings and limits, tuned live like a vehicle model's -
 // both groups go through the same endpoints, told apart by `group`.
 const vescParameterPanel = (group) =>
   createParameterPanel({
@@ -2461,7 +2461,7 @@ async function pollVescParameters() {
 // Startup
 // ---------------------------------------------------------------------
 
-// Which binary this is decides what's polled: the real car (`--hardware`)
+// Which binary this is decides what's polled: the real car (`web_gui` on a car)
 // has a VESC and no simulated vehicle, opponents or benchmarks.
 fetchJSON("/api/config")
   .then((config) => {

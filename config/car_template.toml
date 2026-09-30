@@ -1,0 +1,42 @@
+# The starting point of a new car's first calibration (see src/hardware.rs,
+# CarCalibration::template): a roughly 1/10-scale RC car. car_calibration
+# replaces every value it measures. Positive y and angles are the car's
+# right everywhere.
+
+schema_version = 1
+name = "template"
+calibrated_at = "2026-09-30 00:00:00"
+
+[geometry]
+wheelbase_m = 0.32
+rear_axle_to_cg_m = 0.16
+track_width_m = 0.2
+body_length_m = 0.45
+body_width_m = 0.25
+mass_kg = 3.5
+
+[steering]
+# Servo position -> steering angle, the servo's ends first and last.
+points = [
+    { servo = 0.2, angle_rad = -0.4 },
+    { servo = 0.5, angle_rad = 0.0 },
+    { servo = 0.8, angle_rad = 0.4 },
+]
+
+[motor]
+speed_to_erpm_gain = 4600.0
+speed_compensation = 1.0
+min_speed_mps = 0.5
+
+[battery]
+cells = 4
+
+[imu]
+x = "+x"
+y = "-y"
+z = "-z"
+
+[lidar]
+upside_down = false
+x_from_rear_axle_m = 0.16
+y_m = 0.0

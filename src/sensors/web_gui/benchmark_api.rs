@@ -777,7 +777,7 @@ fn drive(
 
     let ego = VehicleTopics::ego();
     // Laps are scored against the simulator's ground truth, which a real car
-    // (`--hardware`) doesn't have.
+    // (`web_gui` on a car) doesn't have.
     let status_topic = captain
         .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)
         .ok_or_else(|| Halt::Failed("benchmarks need the simulated vehicle".into()))?;

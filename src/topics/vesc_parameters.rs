@@ -1,5 +1,5 @@
-//! The [`VescParametersStatus`]/[`VescParameters`] topic pair: the real
-//! car's calibration (`config/actuators/vesc.toml`) tuned live, like a
+//! The [`VescParametersStatus`]/[`VescParameters`] topic pair: how the real
+//! car is driven (`config/actuators/vesc.toml`) tuned live, like a
 //! vehicle model's (see [`crate::topics::VehicleModelStatus`]).
 //! [`crate::actuators::Vesc`] lists every numeric value of its config with
 //! the value in effect, and applies whatever a driver (e.g. `web_gui`) asks
@@ -18,8 +18,9 @@ pub const VESC_PARAMETERS_TOPIC_NAME: &str = "vesc_parameters";
 pub struct VescParametersStatus {
     /// Every tunable top-level value of `vesc.toml`, with the value in effect.
     pub parameters: Vec<AlgorithmParameter>,
-    /// Every actuator limit (its `[limits]` table, see
-    /// [`crate::topics::ActuatorLimits`]), with the value in effect.
+    /// Every actuator limit but the steering angle, which is the car's (its
+    /// `[limits]` table, see [`crate::actuators::VescLimits`]), with the
+    /// value in effect.
     pub limits: Vec<AlgorithmParameter>,
 }
 

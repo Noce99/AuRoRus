@@ -2,13 +2,14 @@ use aurorus::actuators::{
     SimulatedVehicle, SimulatedVehicleConfig, Vesc, VescConfig, default_model,
 };
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
+use aurorus::hardware::CarCalibration;
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
 use aurorus::opponents::OpponentsManager;
 use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
-    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, MapServer, MapServerConfig, SimulatedImu,
-    SimulatedImuConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
+    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, LidarMounting, MapServer, MapServerConfig,
+    SimulatedImu, SimulatedImuConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
 use aurorus::topics::VehicleModelKind;
@@ -16,8 +17,37 @@ use aurorus::{DEBUG_GROUP, DebugRecorder, Executor, Runner};
 
 mod cli;
 
+/// The car to run as: `--car`'s, or else the one `CAR_NAME` names - `None`
+/// with neither. Exits on a bad `CAR_NAME` or car file rather than falling
+/// back to simulation on a car.
+fn car(config: &cli::Config) -> Option<CarCalibration> {
+    let exit = |err: String| -> ! {
+        eprintln!("{err}");
+        std::process::exit(1);
+    };
+    let name = match &config.car {
+        Some(name) => Some(name.clone()),
+        None => {
+            aurorus::hardware::read_car_name(&config.config_dir).unwrap_or_else(|err| exit(err))
+        }
+    }?;
+    Some(
+        aurorus::hardware::load_car(&config.config_dir, &name)
+            .unwrap_or_else(|err| exit(format!("car {name:?}: {err}"))),
+    )
+}
+
 fn main() {
     let config = cli::parse_config(std::env::args());
+    let car = car(&config);
+    // On a car unless `--sim`: its sensors and actuators, and no simulated
+    // ones.
+    let hardware = car.as_ref().filter(|_| !config.sim);
+    match (&car, hardware) {
+        (Some(car), Some(_)) => println!("Running on the car {:?}", car.name),
+        (Some(car), None) => println!("Simulating, --sim on the car {:?}", car.name),
+        (None, _) => println!("Simulating: no CAR_NAME file names a car to run on"),
+    }
 
     let web_gui_config = aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml"))
         .unwrap_or_else(|_| WebGuiConfig::default());
@@ -72,11 +102,13 @@ fn main() {
         .boxed(),
     );
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
-    // `--hardware`: the real car's sensors and actuators, and no simulated
-    // ones. The VESC also stands in for the IMU dead reckoning integrates.
-    if config.hardware {
-        runner.add_executor(HokuyoLidar::new("HokuyoLidar", hokuyo_lidar_config).boxed());
-        runner.add_executor(Vesc::new("Vesc", vesc_config).boxed());
+    // On a car: its sensors and actuators, and no simulated ones. The VESC
+    // also stands in for the IMU dead reckoning integrates.
+    if let Some(car) = hardware {
+        runner.add_executor(
+            HokuyoLidar::new("HokuyoLidar", hokuyo_lidar_config, LidarMounting::of(car)).boxed(),
+        );
+        runner.add_executor(Vesc::new("Vesc", vesc_config, car.clone()).boxed());
     } else {
         runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
         runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
@@ -87,7 +119,7 @@ fn main() {
     runner.add_executor(UbmDetector::new("UbmDetector", detector_config).boxed());
     // Opponents copy the ego vehicle's configs - see `OpponentsManager`.
     // There are none on the real track.
-    if !config.hardware {
+    if hardware.is_none() {
         runner.add_executor(
             OpponentsManager::new(
                 "OpponentsManager",
@@ -97,7 +129,7 @@ fn main() {
             .boxed(),
         );
     }
-    if !config.hardware {
+    if hardware.is_none() {
         runner.add_executor(
             SimulatedVehicle::new(
                 "SimulatedVehicle",

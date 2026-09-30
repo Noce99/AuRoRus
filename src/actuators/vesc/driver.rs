@@ -1,12 +1,13 @@
 //! [`Vesc`]: drives the real car through its VESC - the counterpart of
-//! [`crate::actuators::SimulatedVehicle`] under `web_gui --hardware`.
+//! [`crate::actuators::SimulatedVehicle`] when `web_gui` runs on a car.
 
 use super::VescPort;
 use super::control::{
-    Motor, Setpoint, VescConfig, battery_charge, imu_reading, motor, servo_position,
+    Motor, Setpoint, VescConfig, battery_charge, imu_reading, low_battery, motor, servo_position,
 };
 use super::protocol::Fault;
 use crate::actuators::simulated_vehicle::select_command_within;
+use crate::hardware::CarCalibration;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, HUMAN_VESC_COMMAND_TOPIC_NAME,
     IMU_TOPIC_NAME, ImuReading, VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME,
@@ -33,32 +34,49 @@ const BATTERY_SMOOTHING_S: f64 = 3.0;
 /// command to act on - the human's over the autonomous one, as
 /// [`crate::actuators::SimulatedVehicle`] picks it, stale after
 /// [`VescConfig::command_timeout_s`] - moved towards within
-/// [`VescConfig::limits`], and publishes what the VESC reads: its IMU and
+/// [`VescConfig::actuator_limits`] and steered through the car's
+/// [`crate::hardware::SteeringTable`], and publishes what the VESC reads: its IMU and
 /// wheel speed on [`IMU_TOPIC_NAME`] (for dead reckoning), and its own state
 /// on [`VESC_STATUS_TOPIC_NAME`]. Publishes the limits on
 /// [`VehicleTopics::vehicle_limits`].
 ///
-/// Its calibration can be tuned live: it publishes the values in effect on
+/// Its [`VescConfig`] can be tuned live - the car's calibration can't: it
+/// publishes the values in effect on
 /// [`VESC_PARAMETERS_STATUS_TOPIC_NAME`] and applies what
 /// [`VESC_PARAMETERS_TOPIC_NAME`] asks for (see [`VescConfig::apply`]),
 /// republishing the limits when they change.
 ///
-/// Brakes and centers the steering whenever it stops. Losing the VESC is
+/// Brakes and steers straight whenever it stops. Losing the VESC is
 /// logged and retried every [`VescConfig::reconnect_delay_s`], publishing
 /// nothing meanwhile; the VESC's own timeout stops the motor.
 pub struct Vesc {
     id: u16,
     name: String,
     config: VescConfig,
+    car: CarCalibration,
     vehicle: VehicleTopics,
 }
 
 impl Vesc {
-    pub fn new(name: impl Into<String>, config: VescConfig) -> Self {
+    /// Drives `car` as `config` says.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `config` isn't valid for `car` (see
+    /// [`VescConfig::validate`]) - caught at startup, before anything moves.
+    pub fn new(name: impl Into<String>, config: VescConfig, car: CarCalibration) -> Self {
+        let name = name.into();
+        if let Err(err) = config.validate(&car) {
+            panic!(
+                "{name}: config/actuators/vesc.toml doesn't suit the car {:?}: {err}",
+                car.name
+            );
+        }
         Self {
             id: 0,
-            name: name.into(),
+            name,
             config,
+            car,
             vehicle: VehicleTopics::ego(),
         }
     }
@@ -105,6 +123,7 @@ impl Vesc {
         while captain.is_running(self.id) {
             tuning.update(self.id);
             let config = &tuning.config;
+            let car = &self.car;
             if config.rate_hz != rate_hz {
                 rate_hz = config.rate_hz;
                 ticker = Ticker::new(rate_hz);
@@ -115,9 +134,9 @@ impl Vesc {
                 human_topic.read(),
                 Duration::from_secs_f64(config.command_timeout_s),
             );
-            setpoint = setpoint.toward(command, &config.limits, dt_s);
-            let servo = servo_position(config, setpoint.steering_rad);
-            let motor = motor(config, setpoint.speed_mps);
+            setpoint = setpoint.toward(command, &config.actuator_limits(car), dt_s);
+            let servo = servo_position(car, setpoint.steering_rad);
+            let motor = motor(config, car, setpoint.speed_mps);
             port.set_servo(servo)?;
             match motor {
                 Motor::Erpm(erpm) => port.set_rpm(erpm)?,
@@ -136,21 +155,21 @@ impl Vesc {
             };
             battery_v = Some(smoothed_v);
             imu_topic
-                .write(self.id, imu_reading(config, values.erpm, &imu))
+                .write(self.id, imu_reading(car, values.erpm, &imu))
                 .expect("lost writer authorization for the imu topic");
             status_topic
                 .write(
                     self.id,
                     VescStatus {
                         input_voltage_v: values.input_voltage_v,
-                        low_battery: values.input_voltage_v < config.low_battery_v,
-                        battery_charge: battery_charge(config, smoothed_v),
+                        low_battery: low_battery(config, car.battery.cells, values.input_voltage_v),
+                        battery_charge: battery_charge(car.battery.cells, smoothed_v),
                         input_current_a: values.input_current_a,
                         motor_current_a: values.motor_current_a,
                         temp_fet_c: values.temp_fet_c,
                         temp_motor_c: values.temp_motor_c,
                         erpm: values.erpm,
-                        wheel_speed_mps: values.erpm / config.speed_to_erpm_gain,
+                        wheel_speed_mps: values.erpm / car.motor.speed_to_erpm_gain,
                         tachometer: values.tachometer,
                         fault: fault.name().to_string(),
                         timed_out: values.timed_out,
@@ -169,7 +188,7 @@ impl Vesc {
     }
 
     /// Brakes until the motor stops (or [`STOP_BRAKING_FOR`] passes),
-    /// releases it and centers the steering - best effort, since the VESC
+    /// releases it and steers straight - best effort, since the VESC
     /// may already be gone.
     fn stop(&self, port: &mut VescPort, config: &VescConfig) {
         let braking = Instant::now();
@@ -184,11 +203,11 @@ impl Vesc {
             }
         }
         let _ = port.release();
-        let _ = port.set_servo(config.servo_offset);
+        let _ = port.set_servo(self.car.steering.straight_servo());
     }
 }
 
-/// The calibration [`Vesc`] drives with, tuned live - kept across
+/// The config [`Vesc`] drives with, tuned live - kept across
 /// reconnects, so losing the VESC doesn't undo any tuning.
 struct Tuning {
     config: VescConfig,
@@ -199,13 +218,15 @@ struct Tuning {
     wanted: Option<Arc<RwLockTopic<VescParameters>>>,
     status: Arc<RwLockTopic<VescParametersStatus>>,
     limits: Arc<RwLockTopic<ActuatorLimits>>,
+    /// The car, which `config` must suit.
+    car: CarCalibration,
     name: String,
 }
 
 impl Tuning {
     /// Applies a new [`VescParameters`] request, if there is one, and
     /// publishes the result - refused whole, and logged, if it would leave an
-    /// invalid calibration (see [`VescConfig::validate`]); the status is
+    /// invalid config (see [`VescConfig::validate`]); the status is
     /// republished anyway, so a slider moved to a refused value snaps back.
     fn update(&mut self, id: u16) {
         let Some(wanted) = &self.wanted else {
@@ -217,12 +238,12 @@ impl Tuning {
         let request = wanted.read();
         self.seen_write_count = request.meta.write_count;
         let limits_before = self.config.limits;
-        if let Err(err) = self.config.apply(&request.value) {
+        if let Err(err) = self.config.apply(&request.value, &self.car) {
             eprintln!("{}: tuning refused - {err}", self.name);
         }
         if self.config.limits != limits_before {
             self.limits
-                .write(id, self.config.limits)
+                .write(id, self.config.actuator_limits(&self.car))
                 .expect("lost writer authorization for the vehicle_limits topic");
         }
         self.status
@@ -239,7 +260,7 @@ impl Executor for Vesc {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<ImuReading>(IMU_TOPIC_NAME, self.id, ImuReading::default);
         captain.claim_writer::<VescStatus>(VESC_STATUS_TOPIC_NAME, self.id, VescStatus::default);
-        let limits: ActuatorLimits = self.config.limits;
+        let limits: ActuatorLimits = self.config.actuator_limits(&self.car);
         captain.claim_writer::<ActuatorLimits>(
             &self.vehicle.vehicle_limits(),
             self.id,
@@ -262,6 +283,7 @@ impl Executor for Vesc {
             wanted: captain.try_topic::<VescParameters>(VESC_PARAMETERS_TOPIC_NAME),
             status: captain.topic::<VescParametersStatus>(VESC_PARAMETERS_STATUS_TOPIC_NAME),
             limits: captain.topic::<ActuatorLimits>(&self.vehicle.vehicle_limits()),
+            car: self.car.clone(),
             name: self.name.clone(),
         };
         while captain.is_running(self.id) {
@@ -292,6 +314,10 @@ impl Executor for Vesc {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(Vesc::new(self.name.clone(), self.config.clone()))
+        Box::new(Vesc::new(
+            self.name.clone(),
+            self.config.clone(),
+            self.car.clone(),
+        ))
     }
 }

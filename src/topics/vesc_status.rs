@@ -12,7 +12,7 @@ pub struct VescStatus {
     /// Battery voltage, in volts.
     pub input_voltage_v: f64,
     /// Whether the battery is below the voltage it should be recharged at
-    /// (see [`crate::actuators::VescConfig::low_battery_v`]).
+    /// (see [`crate::actuators::VescConfig::low_battery_cell_v`]).
     pub low_battery: bool,
     /// The battery's estimated charge, `0.0` (empty) to `1.0` (full), from
     /// its voltage averaged over a few seconds - reading emptier than it is

@@ -26,9 +26,11 @@ pub struct Config {
     /// starts right away, as if started from the Debug panel.
     pub debug_output: Option<PathBuf>,
     pub debug_frequency_hz: f64,
-    /// `--hardware`: run on the real car - its sensors and VESC instead of
-    /// the simulated ones, and no simulated opponents.
-    pub hardware: bool,
+    /// `--sim`: simulate, even on a car.
+    pub sim: bool,
+    /// `--car NAME`: the car to run as, instead of the one `CAR_NAME` names
+    /// (see [`aurorus::hardware::read_car_name`]).
+    pub car: Option<String>,
 }
 
 /// The raw, unresolved state of `--debug`, before filesystem rules are applied -
@@ -80,8 +82,10 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          \x20                    PATH is a directory: <PATH>/<generated name>.debug\n  \
          \x20                    otherwise: PATH itself (overwritten if it already exists)\n  \
          --debug_frequency HZ  debug recording rate, in Hz (default: {DEFAULT_DEBUG_FREQUENCY_HZ})\n  \
-         --hardware            run on the real car: the Hokuyo lidar and the VESC instead of\n  \
-         \x20                    the simulated lidar, IMU and vehicle, and no simulated opponents\n  \
+         --sim                 simulate, even on a car - without it, a machine whose CAR_NAME\n  \
+         \x20                    file names a car (config/hardware/<car>.toml) runs on it: its\n  \
+         \x20                    Hokuyo lidar and VESC, and no simulated opponents\n  \
+         --car NAME            the car to run as, instead of the one CAR_NAME names\n  \
          -h, --help            print this message",
         aurorus::config::DEFAULT_CONFIG_ROOT,
     );
@@ -97,7 +101,8 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     let mut benchmarks_root = PathBuf::from(DEFAULT_BENCHMARKS_ROOT);
     let mut debug_arg = DebugCliArg::Disabled;
     let mut debug_frequency_hz = DEFAULT_DEBUG_FREQUENCY_HZ;
-    let mut hardware = false;
+    let mut sim = false;
+    let mut car = None;
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -136,7 +141,16 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
                     fail(format!("Invalid numeric value for {flag}: {value:?}"))
                 });
             }
-            "--hardware" => hardware = true,
+            "--sim" => sim = true,
+            "--car" => {
+                let name = args
+                    .next()
+                    .unwrap_or_else(|| fail(format!("Missing value for {flag}")));
+                if let Err(err) = aurorus::hardware::valid_name(&name) {
+                    fail(err);
+                }
+                car = Some(name);
+            }
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
@@ -148,7 +162,8 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
         benchmarks_root,
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
-        hardware,
+        sim,
+        car,
     }
 }
 
@@ -212,9 +227,13 @@ mod tests {
     }
 
     #[test]
-    fn hardware_is_off_unless_asked_for() {
-        assert!(!args(&[]).hardware);
-        assert!(args(&["--hardware"]).hardware);
+    fn sim_and_car_are_read() {
+        let config = args(&[]);
+        assert!(!config.sim);
+        assert_eq!(config.car, None);
+        let config = args(&["--sim", "--car", "tom"]);
+        assert!(config.sim);
+        assert_eq!(config.car.as_deref(), Some("tom"));
     }
 
     #[test]

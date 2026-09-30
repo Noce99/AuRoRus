@@ -35,6 +35,7 @@ pub mod benchmark;
 pub mod config;
 pub mod debug_format;
 pub mod environment;
+pub mod hardware;
 pub mod localization;
 pub mod opponents;
 pub mod perception;

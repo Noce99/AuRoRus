@@ -41,7 +41,7 @@ use tiny_http::{Request, ResponseBox};
 struct FrontendConfig {
     human_max_speed_mps: f64,
     human_max_steering_rad: f64,
-    /// Whether this is the real car (`--hardware`): its VESC drives the ego
+    /// Whether this is the real car (`web_gui` on a car): its VESC drives the ego
     /// vehicle, and nothing simulates one.
     hardware: bool,
 }
@@ -414,7 +414,7 @@ pub fn vehicle_model(captain: &Captain) -> ResponseBox {
 }
 
 /// What the running vehicle model publishes on `vehicle_model_status` -
-/// `None` on the real car (`--hardware`), which runs no model.
+/// `None` on the real car, which runs no model.
 fn running_model(captain: &Captain) -> Option<Stamped<VehicleModelStatus>> {
     captain
         .try_topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)

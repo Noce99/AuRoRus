@@ -133,7 +133,7 @@ impl Executor for DeadReckoning {
         let placement_topics = PlacementTopics::new(captain);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
         // In simulation the true vehicle is drawn, and this one is only for
-        // comparing against it; on the real car (`--hardware`) it's the only
+        // comparing against it; on the real car it's the only
         // one there is from the start, so it's shown by default.
         let show_vehicle = captain
             .try_topic::<VehicleStatus>(&VehicleTopics::ego().vehicle_status())
