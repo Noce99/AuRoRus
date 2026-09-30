@@ -2437,6 +2437,26 @@ async function pollVesc() {
   renderVesc(await fetchJSON("/api/vesc"));
 }
 
+// The VESC's calibration and limits, tuned live like a vehicle model's -
+// both groups go through the same endpoints, told apart by `group`.
+const vescParameterPanel = (group) =>
+  createParameterPanel({
+    containerEl: document.getElementById(`vesc-${group}-parameters`),
+    saveEl: document.getElementById(`vesc-${group}-save`),
+    setUrl: "/api/vesc_parameter",
+    saveUrl: "/api/vesc_parameters_save",
+    loadUrl: "/api/vesc_parameters_load",
+    ownerKey: "group",
+  });
+const syncVescCalibration = vescParameterPanel("calibration");
+const syncVescLimits = vescParameterPanel("limits");
+
+async function pollVescParameters() {
+  const live = (await fetchJSON("/api/vesc_parameters")).value;
+  syncVescCalibration("calibration", live.parameters);
+  syncVescLimits("limits", live.limits);
+}
+
 // ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
@@ -2499,6 +2519,7 @@ function startHardwarePanels() {
   }
   vescNavBtn.hidden = false;
   startPolling(pollVesc, VESC_POLL_MS);
+  startPolling(pollVescParameters, SELECTION_POLL_MS);
 }
 
 // ---------------------------------------------------------------------

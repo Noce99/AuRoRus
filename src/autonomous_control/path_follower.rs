@@ -11,12 +11,14 @@
 //! and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
-use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi};
+use crate::autonomous_control::shared::race_line::{
+    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi,
+};
 use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd};
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing,
-    SelectedRaceLine, Shape, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
+    Shape, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -29,7 +31,11 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(PathFollower { id: 0, instance, config })
+    Box::new(PathFollower {
+        id: 0,
+        instance,
+        config,
+    })
 }
 
 /// [`PathFollowerConfig::controller`]: PD on the heading error toward the lookahead point.
@@ -103,8 +109,12 @@ pub struct PathFollowerConfig {
 
 impl Default for PathFollowerConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/path_follower.toml"))
-            .expect("config/autonomous_control/path_follower.toml must deserialize into PathFollowerConfig")
+        toml::from_str(include_str!(
+            "../../config/autonomous_control/path_follower.toml"
+        ))
+        .expect(
+            "config/autonomous_control/path_follower.toml must deserialize into PathFollowerConfig",
+        )
     }
 }
 
@@ -130,12 +140,19 @@ fn parameters() -> [AlgorithmParameter; 21] {
         AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0)
             .unit("Hz")
             .description("Rate at which a new control is published."),
-        AlgorithmParameter::int("pose_source", 0, 1, 1)
-            .description("0 = localization (only while localizing), 1 = ground truth (simulation only)."),
-        AlgorithmParameter::int("controller", CONTROLLER_PD.into(), CONTROLLER_STANLEY.into(), 1)
-            .description("Steering law: 0 = PD, 1 = P-enhanced, 2 = Stanley."),
-        AlgorithmParameter::int("feedforward", 0, 2, 1)
-            .description("Feedforward: 0 = none, 1 = from the line's curvature, 2 = learned per point."),
+        AlgorithmParameter::int("pose_source", 0, 1, 1).description(
+            "0 = localization (only while localizing), 1 = ground truth (simulation only).",
+        ),
+        AlgorithmParameter::int(
+            "controller",
+            CONTROLLER_PD.into(),
+            CONTROLLER_STANLEY.into(),
+            1,
+        )
+        .description("Steering law: 0 = PD, 1 = P-enhanced, 2 = Stanley."),
+        AlgorithmParameter::int("feedforward", 0, 2, 1).description(
+            "Feedforward: 0 = none, 1 = from the line's curvature, 2 = learned per point.",
+        ),
         AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
             .unit("m")
             .description("Distance between the front and rear axles."),
@@ -165,10 +182,10 @@ fn parameters() -> [AlgorithmParameter; 21] {
         AlgorithmParameter::float("min_look_ahead_m", 0.1, 5.0, 0.05)
             .unit("m")
             .description("Lookahead distance at standstill."),
-        AlgorithmParameter::float("delay_ff_action", 0.0, 50.0, 1.0)
-            .description("Feedforward delay: meters ahead (path-based) or points behind (learned)."),
-        AlgorithmParameter::float("beta_ff_gain", 0.0, 2.0, 0.05)
-            .description("Feedforward gain."),
+        AlgorithmParameter::float("delay_ff_action", 0.0, 50.0, 1.0).description(
+            "Feedforward delay: meters ahead (path-based) or points behind (learned).",
+        ),
+        AlgorithmParameter::float("beta_ff_gain", 0.0, 2.0, 0.05).description("Feedforward gain."),
         AlgorithmParameter::float("averaging_ff_gain", 0.0, 1.0, 0.05)
             .description("Learned feedforward: weight of the previous value (1 = never update)."),
         AlgorithmParameter::float("scale_speed", 0.0, 1.5, 0.05)
@@ -230,7 +247,9 @@ impl Executor for PathFollower {
             }
 
             // Nothing may publish a race line at all (e.g. a binary without `MapServer`).
-            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line()) {
+            if let Some(topic) =
+                captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line())
+            {
                 let write_count = topic.meta().write_count;
                 if line.as_ref().is_none_or(|(seen, _)| *seen != write_count) {
                     line = Some((write_count, Line::new(topic.read().into_value().points)));
@@ -239,17 +258,33 @@ impl Executor for PathFollower {
                 }
             }
             let line = line.as_ref().and_then(|(_, line)| line.as_ref());
-            let pose = pose(captain, &self.instance.vehicle, self.config.pose_source)
-                .and_then(|pose| Ok((pose, speed(captain, &self.instance.vehicle, self.config.pose_source)?)));
+            let pose =
+                pose(captain, &self.instance.vehicle, self.config.pose_source).and_then(|pose| {
+                    Ok((
+                        pose,
+                        speed(captain, &self.instance.vehicle, self.config.pose_source)?,
+                    ))
+                });
 
             // A stationary command, and why, unless following the line.
             let stopped = |why: String| (VescCommand::new(0.0, 0.0), Drawing::default(), Some(why));
             let (command, drawing, message) = match (line, pose) {
-                (None, _) => stopped("No race line on the selected map - vehicle held stopped.".into()),
+                (None, _) => {
+                    stopped("No race line on the selected map - vehicle held stopped.".into())
+                }
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
                 (Some(line), Ok((pose, speed_mps))) => {
                     let limits = limits_topic.read();
-                    match control(&self.config, line, pose, speed_mps, hint, &limits, &mut state, Instant::now()) {
+                    match control(
+                        &self.config,
+                        line,
+                        pose,
+                        speed_mps,
+                        hint,
+                        &limits,
+                        &mut state,
+                        Instant::now(),
+                    ) {
                         Ok(control) => {
                             hint = Some(control.nearest.segment);
                             (
@@ -361,7 +396,15 @@ fn control(
         (steering, back, [target.x, target.y])
     };
     let steering = steering.clamp(-max_steering, max_steering);
-    let steering_rad = steering + feedforward(config, line, &nearest, steering, max_steering, &mut state.learned);
+    let steering_rad = steering
+        + feedforward(
+            config,
+            line,
+            &nearest,
+            steering,
+            max_steering,
+            &mut state.learned,
+        );
 
     let speed_mps = if config.constant_speed > 0.0 {
         config.constant_speed
@@ -475,7 +518,11 @@ mod tests {
     use std::f64::consts::PI;
 
     fn point(x: f64, y: f64) -> SpeedPoint {
-        SpeedPoint { x, y, speed_mps: 2.0 }
+        SpeedPoint {
+            x,
+            y,
+            speed_mps: 2.0,
+        }
     }
 
     fn limits() -> ActuatorLimits {
@@ -511,39 +558,77 @@ mod tests {
     }
 
     fn config(controller: u8) -> PathFollowerConfig {
-        PathFollowerConfig { controller, feedforward: 0, constant_speed: 0.0, ..Default::default() }
+        PathFollowerConfig {
+            controller,
+            feedforward: 0,
+            constant_speed: 0.0,
+            ..Default::default()
+        }
     }
 
     fn run(config: &PathFollowerConfig, line: &Line, pose: Pose, speed_mps: f64) -> Control {
-        control(config, line, pose, speed_mps, None, &limits(), &mut State::default(), Instant::now()).unwrap()
+        control(
+            config,
+            line,
+            pose,
+            speed_mps,
+            None,
+            &limits(),
+            &mut State::default(),
+            Instant::now(),
+        )
+        .unwrap()
     }
 
     #[test]
     fn on_a_straight_line_every_controller_steers_straight() {
         let line = hairpin();
-        let pose = Pose { x_m: 5.0, y_m: 0.0, heading_rad: 0.0 };
+        let pose = Pose {
+            x_m: 5.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
         for controller in [CONTROLLER_PD, CONTROLLER_P_ENHANCED, CONTROLLER_STANLEY] {
             let control = run(&config(controller), &line, pose, 2.0);
-            assert!(control.steering_rad.abs() < 1e-9, "{controller}: {}", control.steering_rad);
+            assert!(
+                control.steering_rad.abs() < 1e-9,
+                "{controller}: {}",
+                control.steering_rad
+            );
         }
     }
 
     #[test]
     fn on_a_circle_the_controllers_steer_toward_increasing_heading() {
         let line = circle(3.0);
-        let pose = Pose { x_m: 3.0, y_m: 0.0, heading_rad: PI / 2.0 };
+        let pose = Pose {
+            x_m: 3.0,
+            y_m: 0.0,
+            heading_rad: PI / 2.0,
+        };
         for controller in [CONTROLLER_PD, CONTROLLER_P_ENHANCED, CONTROLLER_STANLEY] {
             let control = run(&config(controller), &line, pose, 2.0);
-            assert!(control.steering_rad > 0.0, "{controller}: {}", control.steering_rad);
+            assert!(
+                control.steering_rad > 0.0,
+                "{controller}: {}",
+                control.steering_rad
+            );
         }
     }
 
     #[test]
     fn stanley_steers_back_toward_the_line() {
         let line = hairpin();
-        let config = PathFollowerConfig { tdp: 0, ..config(CONTROLLER_STANLEY) };
+        let config = PathFollowerConfig {
+            tdp: 0,
+            ..config(CONTROLLER_STANLEY)
+        };
         // Heading along +x, displaced toward increasing heading (+y).
-        let pose = Pose { x_m: 5.0, y_m: 0.2, heading_rad: 0.0 };
+        let pose = Pose {
+            x_m: 5.0,
+            y_m: 0.2,
+            heading_rad: 0.0,
+        };
         let nearest = line.nearest(pose.x_m, pose.y_m, None, 0.0);
         let (steering, target) = stanley(&config, &line, &nearest, pose, 2.0);
         assert!(steering < 0.0, "{steering}");
@@ -554,7 +639,11 @@ mod tests {
     fn path_feedforward_follows_the_curvature() {
         let radius_m = 3.0;
         let line = circle(radius_m);
-        let config = PathFollowerConfig { feedforward: FEEDFORWARD_PATH, delay_ff_action: 0.0, ..config(0) };
+        let config = PathFollowerConfig {
+            feedforward: FEEDFORWARD_PATH,
+            delay_ff_action: 0.0,
+            ..config(0)
+        };
         let nearest = line.nearest(radius_m, 0.0, None, 0.0);
         let action = feedforward(&config, &line, &nearest, 0.0, 0.4, &mut Vec::new());
         let expected = config.beta_ff_gain * (config.wheelbase_m / radius_m).atan();
@@ -576,7 +665,10 @@ mod tests {
         };
         let nearest = line.nearest(5.0, 0.0, None, 0.0);
         let mut learned = Vec::new();
-        assert_eq!(feedforward(&config, &line, &nearest, 0.2, 0.4, &mut learned), 0.1);
+        assert_eq!(
+            feedforward(&config, &line, &nearest, 0.2, 0.4, &mut learned),
+            0.1
+        );
         assert_eq!(learned.len(), line.points.len());
         assert_eq!(learned[nearest.segment], 0.1);
     }
@@ -584,26 +676,50 @@ mod tests {
     #[test]
     fn speed_follows_the_scaled_profile_or_the_constant() {
         let line = hairpin();
-        let pose = Pose { x_m: 5.0, y_m: 0.0, heading_rad: 0.0 };
-        let config = PathFollowerConfig { scale_speed: 0.5, ..config(CONTROLLER_PD) };
+        let pose = Pose {
+            x_m: 5.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
+        let config = PathFollowerConfig {
+            scale_speed: 0.5,
+            ..config(CONTROLLER_PD)
+        };
         assert!((run(&config, &line, pose, 1.0).speed_mps - 1.0).abs() < 1e-9);
-        let config = PathFollowerConfig { constant_speed: 3.0, ..config };
+        let config = PathFollowerConfig {
+            constant_speed: 3.0,
+            ..config
+        };
         assert_eq!(run(&config, &line, pose, 1.0).speed_mps, 3.0);
     }
 
     #[test]
     fn too_far_from_the_line_is_an_error() {
         let line = hairpin();
-        let pose = Pose { x_m: 5.0, y_m: -2.0, heading_rad: 0.0 };
-        let err = control(&config(0), &line, pose, 1.0, None, &limits(), &mut State::default(), Instant::now())
-            .unwrap_err();
+        let pose = Pose {
+            x_m: 5.0,
+            y_m: -2.0,
+            heading_rad: 0.0,
+        };
+        let err = control(
+            &config(0),
+            &line,
+            pose,
+            1.0,
+            None,
+            &limits(),
+            &mut State::default(),
+            Instant::now(),
+        )
+        .unwrap_err();
         assert!((err.distance_m - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn every_config_field_is_tunable() {
         let config = PathFollowerConfig::default();
-        let info = AutonomousAlgorithmInfo::new("Path Follower", "").with_parameters(&config, parameters());
+        let info = AutonomousAlgorithmInfo::new("Path Follower", "")
+            .with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

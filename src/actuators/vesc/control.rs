@@ -3,7 +3,12 @@
 //! tested without the car.
 
 use super::protocol::Imu;
-use crate::topics::{ActuatorLimits, ImuReading, VescCommand};
+use crate::topics::{
+    ActuatorLimits, AlgorithmParameter, ImuReading, VescCommand, VescParameters,
+    VescParametersStatus,
+};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// A LiPo cell's resting voltage at each tenth of its charge, `0.0` (empty)
 /// to `1.0` (full).
@@ -16,8 +21,9 @@ const G_MPS2: f64 = 9.806_65;
 
 /// Every parameter [`super::Vesc`] needs - the car's calibration, loaded from
 /// `config/actuators/vesc.toml` (see [`Default`]) or from an arbitrary path
-/// via [`crate::config::load`].
-#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+/// via [`crate::config::load`]. Its numeric values can also be tuned live
+/// (see [`VescConfig::tunable_parameters`]).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VescConfig {
     /// The VESC's serial port.
     pub port: String,
@@ -81,8 +87,163 @@ impl Default for VescConfig {
     }
 }
 
+impl VescConfig {
+    /// Every top-level value that can be tuned while the car runs - all the
+    /// numeric ones: the port and the IMU's axes only change in the file.
+    /// The `[limits]` are [`ActuatorLimits::tunable_parameters`]. Values
+    /// read once per connection (`reply_timeout_s`) apply from the next
+    /// reconnect.
+    pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+        vec![
+            AlgorithmParameter::float("rate_hz", 10.0, 200.0, 1.0)
+                .unit("Hz")
+                .description("How often the command is sent and the VESC read."),
+            AlgorithmParameter::float("reply_timeout_s", 0.005, 0.5, 0.005)
+                .unit("s")
+                .description("How long the VESC may take to answer - from the next reconnect."),
+            AlgorithmParameter::float("reconnect_delay_s", 0.1, 10.0, 0.1)
+                .unit("s")
+                .description("How long to wait before reconnecting after losing the VESC."),
+            AlgorithmParameter::float("command_timeout_s", 0.05, 2.0, 0.05)
+                .unit("s")
+                .description("Commands older than this count as stale: the car stops."),
+            AlgorithmParameter::float("servo_offset", 0.0, 1.0, 0.005)
+                .description("The servo position that points the wheels straight ahead."),
+            AlgorithmParameter::float("steering_gain", -2.0, 2.0, 0.005)
+                .unit("1/rad")
+                .description("Servo units per radian: servo = servo_offset + steering_gain * angle. Positive when a larger servo position steers right."),
+            AlgorithmParameter::float("servo_min", 0.0, 1.0, 0.005)
+                .description("The lowest servo position ever sent - just short of the end stop."),
+            AlgorithmParameter::float("servo_max", 0.0, 1.0, 0.005)
+                .description("The highest servo position ever sent - just short of the end stop."),
+            AlgorithmParameter::float("speed_to_erpm_gain", 1000.0, 10000.0, 1.0)
+                .unit("ERPM/(m/s)")
+                .description("Motor ERPM per meter/second - also how measured ERPM becomes wheel speed."),
+            AlgorithmParameter::float("speed_compensation", 0.5, 2.0, 0.01)
+                .description("Multiplies every commanded ERPM, making up for the VESC's speed controller settling short."),
+            AlgorithmParameter::float("min_speed_mps", 0.0, 2.0, 0.01)
+                .unit("m/s")
+                .description("The slowest speed the motor holds smoothly: slower nonzero speeds are raised to it."),
+            AlgorithmParameter::float("stop_speed_mps", 0.0, 1.0, 0.01)
+                .unit("m/s")
+                .description("Speeds below this brake instead."),
+            AlgorithmParameter::float("brake_current_a", 0.0, 20.0, 0.1)
+                .unit("A")
+                .description("The current the motor brakes with."),
+            AlgorithmParameter::float("low_battery_v", 0.0, 30.0, 0.1)
+                .unit("V")
+                .description("Below this battery voltage, the GUI warns to recharge."),
+            AlgorithmParameter::int("battery_cells", 1, 12, 1)
+                .description("The battery's cells in series, for estimating its charge."),
+        ]
+    }
+
+    /// Checks the values the car couldn't be driven with - e.g. `servo_min`
+    /// above `servo_max`, which [`servo_position`] can't clamp to.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.servo_min > self.servo_max {
+            return Err("servo_min must not be above servo_max".to_string());
+        }
+        if !(self.servo_min..=self.servo_max).contains(&self.servo_offset) {
+            return Err("servo_offset must be within servo_min..=servo_max".to_string());
+        }
+        if self.rate_hz <= 0.0 {
+            return Err("rate_hz must be positive".to_string());
+        }
+        if self.speed_to_erpm_gain <= 0.0 {
+            return Err("speed_to_erpm_gain must be positive".to_string());
+        }
+        if self.stop_speed_mps > self.min_speed_mps {
+            return Err("stop_speed_mps must not be above min_speed_mps".to_string());
+        }
+        self.limits.validate()
+    }
+
+    /// Applies `wanted`, sanitized (see [`crate::config::apply_parameters`]),
+    /// but only if the result still [`validate`](Self::validate)s: a bad
+    /// combination is refused whole and the values in effect stay. Returns
+    /// whether anything changed.
+    pub fn apply(&mut self, wanted: &VescParameters) -> Result<bool, String> {
+        use crate::config::apply_parameters;
+        let mut next = self.clone();
+        let values_changed =
+            apply_parameters(&mut next, &Self::tunable_parameters(), &wanted.values);
+        let limits_changed = apply_parameters(
+            &mut next.limits,
+            &ActuatorLimits::tunable_parameters(),
+            &wanted.limits,
+        );
+        if !values_changed && !limits_changed {
+            return Ok(false);
+        }
+        next.validate()?;
+        *self = next;
+        Ok(true)
+    }
+
+    /// What [`super::Vesc`] publishes on
+    /// [`crate::topics::VESC_PARAMETERS_STATUS_TOPIC_NAME`] while driving
+    /// with this config.
+    pub fn parameters_status(&self) -> VescParametersStatus {
+        let mut parameters = Self::tunable_parameters();
+        crate::config::refresh_parameter_values(&mut parameters, self);
+        let mut limits = ActuatorLimits::tunable_parameters();
+        crate::config::refresh_parameter_values(&mut limits, &self.limits);
+        VescParametersStatus { parameters, limits }
+    }
+}
+
+/// The file the car's calibration is saved to and reloaded from:
+/// `config/actuators/vesc.toml`.
+pub fn config_path() -> PathBuf {
+    Path::new(crate::config::DEFAULT_CONFIG_ROOT)
+        .join("actuators")
+        .join("vesc.toml")
+}
+
+/// The table of [`config_path`] `parameters` live in: the top level for
+/// [`VescConfig::tunable_parameters`], `[limits]` for the limits.
+fn table(limits: bool) -> Option<&'static str> {
+    limits.then_some("limits")
+}
+
+/// Writes `parameters`' values into [`config_path`] - its `[limits]` table
+/// if `limits` - leaving everything else in the file untouched. Returns the
+/// file's path.
+pub fn save_parameters(limits: bool, parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
+    let path = config_path();
+    let values: Vec<(&str, String)> = parameters
+        .iter()
+        .map(|parameter| {
+            (
+                parameter.name.as_str(),
+                crate::config::parameter_toml_value(parameter),
+            )
+        })
+        .collect();
+    crate::config::save_toml_values(&path, table(limits), &values)?;
+    Ok(path)
+}
+
+/// The values [`config_path`] holds for `parameters` - in its `[limits]`
+/// table if `limits` - by name, and the file's path.
+pub fn saved_values(
+    limits: bool,
+    parameters: &[AlgorithmParameter],
+) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
+    let path = config_path();
+    let names: Vec<&str> = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect();
+    Ok((
+        crate::config::load_toml_values(&path, table(limits), &names)?,
+        path,
+    ))
+}
+
 /// One of the IMU's axes, possibly reversed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ImuAxis {
     #[serde(rename = "+x")]
     PlusX,
@@ -344,5 +505,94 @@ mod tests {
         assert!(close(reading.yaw_rate_rad_s, -std::f64::consts::FRAC_PI_2));
         assert!(close(reading.ax_mps2, 0.25 * G_MPS2));
         assert!(close(reading.ay_mps2, -0.5 * G_MPS2));
+    }
+
+    fn wanted(values: &[(&str, f64)], limits: &[(&str, f64)]) -> VescParameters {
+        let map = |pairs: &[(&str, f64)]| {
+            pairs
+                .iter()
+                .map(|&(name, value)| (name.to_string(), value))
+                .collect()
+        };
+        VescParameters {
+            values: map(values),
+            limits: map(limits),
+        }
+    }
+
+    #[test]
+    fn every_numeric_value_is_tunable_and_reported() {
+        let config = config();
+        let status = config.parameters_status();
+        let value = |name: &str| {
+            status
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap_or_else(|| panic!("{name} isn't tunable"))
+                .value
+        };
+        assert_eq!(value("steering_gain"), config.steering_gain);
+        assert_eq!(value("battery_cells"), f64::from(config.battery_cells));
+        assert_eq!(
+            status.limits.len(),
+            ActuatorLimits::tunable_parameters().len()
+        );
+    }
+
+    #[test]
+    fn tuning_applies_calibration_and_limits() {
+        let mut config = config();
+        let changed = config
+            .apply(&wanted(
+                &[("steering_gain", 1.06)],
+                &[("max_steering_angle_rad", 0.31)],
+            ))
+            .unwrap();
+        assert!(changed);
+        assert_eq!(config.steering_gain, 1.06);
+        assert_eq!(config.limits.max_steering_angle_rad, 0.31);
+        // Asking for what's already in effect changes nothing.
+        let same = wanted(&[("steering_gain", 1.06)], &[]);
+        assert!(!config.apply(&same).unwrap());
+    }
+
+    #[test]
+    fn tuning_to_an_invalid_calibration_is_refused_whole() {
+        let mut config = config();
+        let before = config.clone();
+        let refused = config.apply(&wanted(&[("steering_gain", 1.0), ("servo_min", 0.9)], &[]));
+        assert!(refused.is_err());
+        assert_eq!(config, before);
+    }
+
+    #[test]
+    fn the_calibrated_config_is_valid() {
+        assert!(config().validate().is_ok());
+    }
+
+    #[test]
+    fn saving_the_values_in_effect_keeps_the_calibration() {
+        let original = std::fs::read_to_string(config_path()).unwrap();
+        let copy = std::env::temp_dir().join(format!("aurorus_vesc_{}.toml", std::process::id()));
+        std::fs::write(&copy, &original).unwrap();
+        let status = config().parameters_status();
+        for (section, parameters) in [(None, &status.parameters), (Some("limits"), &status.limits)]
+        {
+            let values: Vec<(&str, String)> = parameters
+                .iter()
+                .map(|parameter| {
+                    (
+                        parameter.name.as_str(),
+                        crate::config::parameter_toml_value(parameter),
+                    )
+                })
+                .collect();
+            crate::config::save_toml_values(&copy, section, &values).unwrap();
+        }
+        // Only how a number is written may change (`0.50` -> `0.5`).
+        let saved: VescConfig = crate::config::load(&copy).unwrap();
+        assert_eq!(saved, config());
+        std::fs::remove_file(copy).unwrap();
     }
 }

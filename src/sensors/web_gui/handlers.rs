@@ -69,6 +69,16 @@ pub fn handle(
         (Method::Get, "/benchmark.js") => assets::respond("benchmark.js"),
         (Method::Get, "/api/config") => live_api::config(config, captain),
         (Method::Get, "/api/vesc") => live_api::vesc(captain),
+        (Method::Get, "/api/vesc_parameters") => live_api::vesc_parameters(captain),
+        (Method::Post, "/api/vesc_parameter") => {
+            live_api::set_vesc_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/vesc_parameters_save") => {
+            live_api::save_vesc_parameters(&mut request, captain)
+        }
+        (Method::Post, "/api/vesc_parameters_load") => {
+            live_api::load_vesc_parameters(&mut request, captain, writer_id)
+        }
         (Method::Get, "/api/maps") => maps_api::list(maps_root),
         (Method::Get, "/api/generate/defaults") => maps_api::generate_defaults(),
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),

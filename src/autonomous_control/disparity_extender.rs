@@ -12,8 +12,8 @@ use crate::autonomous_control::shared::reactive::{
 };
 use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
-    Shape, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan, Shape,
+    VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -94,7 +94,9 @@ fn parameters() -> [AlgorithmParameter; 11] {
             .description("Multiplies the number of readings a disparity is extended over."),
         AlgorithmParameter::float("ray_eq_thr_m", 0.0, 5.0, 0.05)
             .unit("m")
-            .description("Readings within this of the farthest are equally good; 0 picks the farthest."),
+            .description(
+                "Readings within this of the farthest are equally good; 0 picks the farthest.",
+            ),
         AlgorithmParameter::float("angle_eq_thr_rad", 0.0, 1.0, 0.01)
             .unit("rad")
             .description("Equally good directions within this of the straightest one tie."),
@@ -159,7 +161,10 @@ impl Executor for DisparityExtender {
             };
 
             command_topic
-                .write(self.id, VescCommand::new(control.steering_rad as f64, control.speed_mps as f64))
+                .write(
+                    self.id,
+                    VescCommand::new(control.steering_rad as f64, control.speed_mps as f64),
+                )
                 .expect("lost writer authorization for this algorithm's command topic");
 
             let mut drawing = Drawing::default();
@@ -172,12 +177,21 @@ impl Executor for DisparityExtender {
                 drawing = drawing
                     .element(
                         "Extended ranges",
-                        [Shape::Points { points: processed, radius_px: 2.0, color: Color::GREEN }],
+                        [Shape::Points {
+                            points: processed,
+                            radius_px: 2.0,
+                            color: Color::GREEN,
+                        }],
                         false,
                     )
                     .element(
                         "Chosen direction",
-                        [ray(origin, control.target_rad, control.processed[control.target], Color::PURPLE)],
+                        [ray(
+                            origin,
+                            control.target_rad,
+                            control.processed[control.target],
+                            Color::PURPLE,
+                        )],
                         false,
                     );
             }
@@ -222,7 +236,11 @@ struct Control {
 }
 
 /// The disparity extender on `scan` - `None` if it has too few readings.
-fn control(config: &DisparityExtenderConfig, scan: &LidarScan, limits: &ActuatorLimits) -> Option<Control> {
+fn control(
+    config: &DisparityExtenderConfig,
+    scan: &LidarScan,
+    limits: &ActuatorLimits,
+) -> Option<Control> {
     let window = fov_window(scan, config.desired_fov_deg.to_radians());
     if window.len() < 2 {
         return None;
@@ -232,9 +250,21 @@ fn control(config: &DisparityExtenderConfig, scan: &LidarScan, limits: &Actuator
     let target_rad = scan.angle_rad(target);
     let max_steering = limits.max_steering_angle_rad as f32;
     let steering_rad = target_rad.clamp(-max_steering, max_steering);
-    let speed_mps = speed_proportional_steering(steering_rad, max_steering, config.max_speed, config.min_speed)
-        .clamp(0.0, limits.max_speed_mps as f32);
-    Some(Control { steering_rad, speed_mps, window, processed, target, target_rad })
+    let speed_mps = speed_proportional_steering(
+        steering_rad,
+        max_steering,
+        config.max_speed,
+        config.min_speed,
+    )
+    .clamp(0.0, limits.max_speed_mps as f32);
+    Some(Control {
+        steering_rad,
+        speed_mps,
+        window,
+        processed,
+        target,
+        target_rad,
+    })
 }
 
 /// `scan`'s readings clipped to `max_range_m`, with every disparity in
@@ -242,8 +272,16 @@ fn control(config: &DisparityExtenderConfig, scan: &LidarScan, limits: &Actuator
 /// nearer) enough readings on the farther side, starting at the farther
 /// one, to cover half the car's width at its distance - times
 /// `r_multiplier`.
-fn extend_disparities(config: &DisparityExtenderConfig, scan: &LidarScan, window: Range<usize>) -> Vec<f32> {
-    let clipped: Vec<f32> = scan.points.iter().map(|&r| r.min(config.max_range_m)).collect();
+fn extend_disparities(
+    config: &DisparityExtenderConfig,
+    scan: &LidarScan,
+    window: Range<usize>,
+) -> Vec<f32> {
+    let clipped: Vec<f32> = scan
+        .points
+        .iter()
+        .map(|&r| r.min(config.max_range_m))
+        .collect();
     let mut processed = clipped.clone();
     let step = ray_step_rad(scan);
     for i in window.start + 1..window.end {
@@ -269,18 +307,32 @@ fn extend_disparities(config: &DisparityExtenderConfig, scan: &LidarScan, window
 
 /// The reading in `window` to steer toward - see
 /// [`DisparityExtenderConfig::ray_eq_thr_m`] and the fields after it.
-fn choose(config: &DisparityExtenderConfig, scan: &LidarScan, processed: &[f32], window: Range<usize>) -> usize {
+fn choose(
+    config: &DisparityExtenderConfig,
+    scan: &LidarScan,
+    processed: &[f32],
+    window: Range<usize>,
+) -> usize {
     let toward_positive = config.angle_priority == 1;
-    let farthest = window.clone().map(|i| processed[i]).fold(f32::MIN, f32::max);
+    let farthest = window
+        .clone()
+        .map(|i| processed[i])
+        .fold(f32::MIN, f32::max);
     // Lower indices are the more negative angles.
     let pick = |candidates: Vec<usize>| {
-        if toward_positive { *candidates.last().unwrap() } else { candidates[0] }
+        if toward_positive {
+            *candidates.last().unwrap()
+        } else {
+            candidates[0]
+        }
     };
 
     if config.ray_eq_thr_m <= 0.0 {
         return pick(window.filter(|&i| processed[i] >= farthest).collect());
     }
-    let good: Vec<usize> = window.filter(|&i| processed[i] >= farthest - config.ray_eq_thr_m).collect();
+    let good: Vec<usize> = window
+        .filter(|&i| processed[i] >= farthest - config.ray_eq_thr_m)
+        .collect();
     let straightest = good
         .iter()
         .copied()
@@ -329,7 +381,11 @@ mod tests {
         scan.points[..90].fill(2.0);
         let processed = extend_disparities(&config(), &scan, 0..181);
         // atan(0.15 / 2) = 4.3 degrees -> 4 readings, times 2.
-        assert!(processed[90..98].iter().all(|&r| r == 2.0), "{:?}", &processed[88..100]);
+        assert!(
+            processed[90..98].iter().all(|&r| r == 2.0),
+            "{:?}",
+            &processed[88..100]
+        );
         assert_eq!(processed[98], 5.0);
         assert!(processed[..90].iter().all(|&r| r == 2.0));
     }
@@ -339,7 +395,10 @@ mod tests {
         let scan = scan(181, PI, 5.0);
         let processed = scan.points.clone();
         assert_eq!(choose(&config(), &scan, &processed, 0..181), 0);
-        let right = DisparityExtenderConfig { angle_priority: 1, ..config() };
+        let right = DisparityExtenderConfig {
+            angle_priority: 1,
+            ..config()
+        };
         assert_eq!(choose(&right, &scan, &processed, 0..181), 180);
     }
 
@@ -348,7 +407,11 @@ mod tests {
         let mut scan = scan(181, PI, 5.0);
         scan.points[20] = 5.05;
         let processed = scan.points.clone();
-        let tolerant = DisparityExtenderConfig { ray_eq_thr_m: 0.1, angle_eq_thr_rad: 0.0, ..config() };
+        let tolerant = DisparityExtenderConfig {
+            ray_eq_thr_m: 0.1,
+            angle_eq_thr_rad: 0.0,
+            ..config()
+        };
         assert_eq!(choose(&tolerant, &scan, &processed, 0..181), 90);
         // Without the tolerance, the farthest wins.
         assert_eq!(choose(&config(), &scan, &processed, 0..181), 20);
@@ -370,7 +433,8 @@ mod tests {
     #[test]
     fn every_config_field_is_tunable() {
         let config = DisparityExtenderConfig::default();
-        let info = AutonomousAlgorithmInfo::new("Disparity extender", "").with_parameters(&config, parameters());
+        let info = AutonomousAlgorithmInfo::new("Disparity extender", "")
+            .with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

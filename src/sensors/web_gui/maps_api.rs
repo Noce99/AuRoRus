@@ -400,7 +400,8 @@ mod tests {
         let bytes = std::fs::read(folder.join("map.tiff")).unwrap();
         std::fs::remove_dir_all(&folder).ok();
 
-        let (decoded_width, decoded_height, gray) = environment::decode_tiff_grayscale(&bytes).unwrap();
+        let (decoded_width, decoded_height, gray) =
+            environment::decode_tiff_grayscale(&bytes).unwrap();
         assert_eq!((decoded_width, decoded_height), (width, height));
         let expected: Vec<u8> = white.iter().map(|&w| if w { 255 } else { 0 }).collect();
         assert_eq!(gray, expected);

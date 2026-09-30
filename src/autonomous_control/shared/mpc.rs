@@ -512,7 +512,7 @@ pub(crate) fn solve(
         return Err("MPC solution is not finite".into());
     }
     Ok(Solution {
-        controls: u.chunks_exact(2).map(|c| [c[0], c[1]]).collect(),
+        controls: u.as_chunks::<2>().0.to_vec(),
         states: mpc.rollout(u),
         cost,
         converged: status.exit_status() == ExitStatus::Converged,

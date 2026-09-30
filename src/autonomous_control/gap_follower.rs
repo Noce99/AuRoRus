@@ -2,7 +2,9 @@
 //! f1tenth documentation: https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html
 
 use crate::autonomous_control::{Instance, ParameterTuner, load_config};
-use crate::topics::{AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, Shape, Color, VescCommand};
+use crate::topics::{
+    AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, Shape, VescCommand,
+};
 // use crate::topics::{VEHICLE_LIMITS_TOPIC_NAME, ActuatorLimits};
 use crate::topics::LidarScan;
 use crate::topics::VehicleStatus;
@@ -39,8 +41,12 @@ pub struct GapFollowerConfig {
 
 impl Default for GapFollowerConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/gap_follower.toml"))
-            .expect("config/autonomous_control/gap_follower.toml must deserialize into GapFollowerConfig")
+        toml::from_str(include_str!(
+            "../../config/autonomous_control/gap_follower.toml"
+        ))
+        .expect(
+            "config/autonomous_control/gap_follower.toml must deserialize into GapFollowerConfig",
+        )
     }
 }
 
@@ -95,7 +101,8 @@ impl Executor for GapFollower {
         // let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
         let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         // Only for drawing, and absent on the real car.
-        let vehicle_topic = captain.try_topic::<VehicleStatus>(&self.instance.vehicle.vehicle_status());
+        let vehicle_topic =
+            captain.try_topic::<VehicleStatus>(&self.instance.vehicle.vehicle_status());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -103,7 +110,7 @@ impl Executor for GapFollower {
         let mut ticker = Ticker::new(self.config.rate_hz as f64);
         let mut stale_after = drawing_stale_after(&self.config);
 
-        let mut steering:f32 = 0.0;
+        let mut steering: f32 = 0.0;
 
         while captain.is_running(self.id) {
             if tuner.update(captain, &mut self.config) {
@@ -115,7 +122,6 @@ impl Executor for GapFollower {
             // if !captain.is_selected_algorithm(&self.name) { ticker.wait(); continue; }
 
             // let limits = limits_topic.read();
-
 
             let vehicle_status = vehicle_topic
                 .as_ref()
@@ -130,7 +136,7 @@ impl Executor for GapFollower {
 
             let points = &scan.points;
             let fov = scan.fov;
-            let rad_per_point = fov / (scan.num_lidar_points-1) as f32;
+            let rad_per_point = fov / (scan.num_lidar_points - 1) as f32;
 
             let mut gaps: Vec<Gap> = Vec::new();
             let mut last_gap_start: Option<usize> = None;
@@ -147,25 +153,25 @@ impl Executor for GapFollower {
             let mut gap_shapes: Vec<Shape> = Vec::new();
 
             let mut add_gap = |i: usize, length: usize, mean: f32| {
-                let start_angle: f32 = -fov/2. + (i-length) as f32*rad_per_point;
-                let end_angle: f32 = -fov/2. + (i-1) as f32*rad_per_point;
+                let start_angle: f32 = -fov / 2. + (i - length) as f32 * rad_per_point;
+                let end_angle: f32 = -fov / 2. + (i - 1) as f32 * rad_per_point;
                 let direction: f32 = (start_angle + end_angle) / 2.;
-                let a_gap: Gap = Gap{
+                let a_gap: Gap = Gap {
                     mean_distance: mean,
                     // size: length,
-                    direction: direction,
+                    direction,
                     start_angle: start_angle + vehicle_heading,
                     end_angle: end_angle + vehicle_heading,
                 };
                 gaps.push(a_gap);
-                match current_best_gap_length{
+                match current_best_gap_length {
                     None => {
-                        current_best_gap = Some(gaps.len()-1);
+                        current_best_gap = Some(gaps.len() - 1);
                         current_best_gap_length = Some(length);
-                    },
+                    }
                     Some(best_length) => {
                         if length > best_length {
-                            current_best_gap = Some(gaps.len()-1);
+                            current_best_gap = Some(gaps.len() - 1);
                             current_best_gap_length = Some(length);
                         }
                     }
@@ -175,45 +181,51 @@ impl Executor for GapFollower {
             let mut closer_i: usize = 0;
             let mut closer_distance: f32 = points[0];
 
-            for i in 1..points.len(){
-                if points[i] < closer_distance{
-                    closer_i  = i;
-                    closer_distance = points[i];
+            for (i, &distance) in points.iter().enumerate().skip(1) {
+                if distance < closer_distance {
+                    closer_i = i;
+                    closer_distance = distance;
                 }
             }
 
-            obstacle_shapes.push(
-                Shape::CircularSector {
-                    x_m: vehice_x as f64,
-                    y_m: vehice_y as f64,
-                    radius_m: closer_distance as f64,
-                    start_rad: (-fov/2. + closer_i.saturating_sub(self.config.b_radius) as f32*rad_per_point + vehicle_heading) as f64,
-                    end_rad: (-fov/2. + (closer_i+self.config.b_radius).min(points.len()-1) as f32*rad_per_point + vehicle_heading) as f64,
-                    filled: false,
-                    color: Color::RED,
-                }
-            );
+            obstacle_shapes.push(Shape::CircularSector {
+                x_m: vehice_x as f64,
+                y_m: vehice_y as f64,
+                radius_m: closer_distance as f64,
+                start_rad: (-fov / 2.
+                    + closer_i.saturating_sub(self.config.b_radius) as f32 * rad_per_point
+                    + vehicle_heading) as f64,
+                end_rad: (-fov / 2.
+                    + (closer_i + self.config.b_radius).min(points.len() - 1) as f32
+                        * rad_per_point
+                    + vehicle_heading) as f64,
+                filled: false,
+                color: Color::RED,
+            });
 
-            for i in 0..points.len(){
-                if points[i] >= self.config.t_m && i.abs_diff(closer_i) > self.config.b_radius{
-                    match last_gap_start{
+            for (i, &distance) in points.iter().enumerate() {
+                if distance >= self.config.t_m && i.abs_diff(closer_i) > self.config.b_radius {
+                    match last_gap_start {
                         None => {
                             last_gap_start = Some(i);
-                            last_gap_mean_d = Some(points[i]);
+                            last_gap_mean_d = Some(distance);
                             last_gap_length = Some(1);
-                        },
+                        }
                         Some(_) => {
-                            if let Some(length) = last_gap_length 
-                            && let Some(mean) = last_gap_mean_d{
-                                last_gap_length = Some(length+1);
-                                last_gap_mean_d = Some(mean + (points[i] - mean)/(length+1) as f32);
+                            if let Some(length) = last_gap_length
+                                && let Some(mean) = last_gap_mean_d
+                            {
+                                last_gap_length = Some(length + 1);
+                                last_gap_mean_d =
+                                    Some(mean + (distance - mean) / (length + 1) as f32);
                             }
                         }
                     }
-                }else{
+                } else {
                     if let Some(length) = last_gap_length
-                    && let Some(mean) = last_gap_mean_d{
-                        if length > self.config.n{
+                        && let Some(mean) = last_gap_mean_d
+                    {
+                        if length > self.config.n {
                             add_gap(i, length, mean);
                         }
                         last_gap_start = None;
@@ -229,41 +241,43 @@ impl Executor for GapFollower {
                 add_gap(points.len(), length, mean);
             }
 
-            for i_gap in 0..gaps.len(){
+            for (i_gap, gap) in gaps.iter().enumerate() {
                 let color;
-                if let Some(best_gap) = current_best_gap && i_gap == best_gap{
+                if let Some(best_gap) = current_best_gap
+                    && i_gap == best_gap
+                {
                     color = Color::PURPLE;
-                    steering = gaps[i_gap].direction;
-                }else{
+                    steering = gap.direction;
+                } else {
                     color = Color::GREEN;
                 }
-                gap_shapes.push(
-                    Shape::CircularSector {
-                        x_m: vehice_x as f64,
-                        y_m: vehice_y as f64,
-                        radius_m: gaps[i_gap].mean_distance as f64,
-                        start_rad: gaps[i_gap].start_angle as f64,
-                        end_rad: gaps[i_gap].end_angle as f64,
-                        filled: false,
-                        color: color,
-                    }
-                );
+                gap_shapes.push(Shape::CircularSector {
+                    x_m: vehice_x as f64,
+                    y_m: vehice_y as f64,
+                    radius_m: gap.mean_distance as f64,
+                    start_rad: gap.start_angle as f64,
+                    end_rad: gap.end_angle as f64,
+                    filled: false,
+                    color,
+                });
             }
 
             let command = VescCommand::new(
-                steering as f64 /* steering, rad */,
-                self.config.speed as f64/* speed, m/s */
+                steering as f64,          /* steering, rad */
+                self.config.speed as f64, /* speed, m/s */
             );
             command_topic
                 .write(self.id, command)
                 .expect("lost writer authorization for this algorithm's command topic");
-            drawing_topic.write(
-                self.id,
-                Drawing::default()
-                    .element("Closest obstacle", obstacle_shapes, false)
-                    .element("Gaps", gap_shapes, false)
-                    .stale_after(stale_after),
-            ).expect("lost writer authorization for the gap follower drawing topic");
+            drawing_topic
+                .write(
+                    self.id,
+                    Drawing::default()
+                        .element("Closest obstacle", obstacle_shapes, false)
+                        .element("Gaps", gap_shapes, false)
+                        .stale_after(stale_after),
+                )
+                .expect("lost writer authorization for the gap follower drawing topic");
             ticker.wait();
         }
     }
@@ -287,7 +301,7 @@ fn drawing_stale_after(config: &GapFollowerConfig) -> Duration {
     Drawing::DEFAULT_STALE_AFTER.max(Duration::from_secs_f64(3.0 / config.rate_hz as f64))
 }
 
-struct Gap{
+struct Gap {
     // Mean distance of the lidar points that created this gap, in meters.
     mean_distance: f32,
     // Size of the gap in number of lidar points, pure number.
@@ -297,5 +311,5 @@ struct Gap{
     // Start angle, in rad.
     start_angle: f32,
     // End angle, in rad.
-    end_angle: f32
+    end_angle: f32,
 }

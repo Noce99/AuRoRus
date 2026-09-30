@@ -10,8 +10,12 @@
 //! algorithms panel (see [`report_message`]). See
 //! `documentation/autonomous_algorithms.md`.
 
-use super::potential_field::{PotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters};
-use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi};
+use super::potential_field::{
+    PotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters,
+};
+use crate::autonomous_control::shared::race_line::{
+    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi,
+};
 use crate::autonomous_control::shared::reactive::{Field, potential_field};
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::environment::SpeedPoint;
@@ -29,7 +33,11 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(PotentialPursuit { id: 0, instance, config })
+    Box::new(PotentialPursuit {
+        id: 0,
+        instance,
+        config,
+    })
 }
 
 /// Every tunable parameter [`PotentialPursuit`] needs - loaded from
@@ -110,8 +118,9 @@ fn parameters() -> Vec<AlgorithmParameter> {
         AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0)
             .unit("Hz")
             .description("Rate at which a new control is published."),
-        AlgorithmParameter::int("pose_source", 0, 1, 1)
-            .description("0 = localization (only while localizing), 1 = ground truth (simulation only)."),
+        AlgorithmParameter::int("pose_source", 0, 1, 1).description(
+            "0 = localization (only while localizing), 1 = ground truth (simulation only).",
+        ),
         AlgorithmParameter::float("min_look_ahead_m", 0.1, 5.0, 0.05)
             .unit("m")
             .description("Shortest lookahead distance."),
@@ -177,7 +186,9 @@ impl Executor for PotentialPursuit {
             }
 
             // Nothing may publish a race line at all (e.g. a binary without `MapServer`).
-            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line()) {
+            if let Some(topic) =
+                captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line())
+            {
                 let write_count = topic.meta().write_count;
                 if line.as_ref().is_none_or(|(seen, _)| *seen != write_count) {
                     line = Some((write_count, Line::new(topic.read().into_value().points)));
@@ -191,7 +202,9 @@ impl Executor for PotentialPursuit {
             // A stationary command, and why, unless driving.
             let stopped = |why: String| (VescCommand::new(0.0, 0.0), Drawing::default(), Some(why));
             let (command, drawing, message) = match (line, pose) {
-                (None, _) => stopped("No race line on the selected map - vehicle held stopped.".into()),
+                (None, _) => {
+                    stopped("No race line on the selected map - vehicle held stopped.".into())
+                }
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
                 (Some(line), Ok(pose)) => match control(&self.config, line, pose, hint, &scan) {
                     Err(Lost::OffLine(nearest)) => {
@@ -202,11 +215,17 @@ impl Executor for PotentialPursuit {
                             nearest.distance_m
                         ))
                     }
-                    Err(Lost::NoScan) => stopped("No LIDAR scan yet - vehicle held stopped.".into()),
+                    Err(Lost::NoScan) => {
+                        stopped("No LIDAR scan yet - vehicle held stopped.".into())
+                    }
                     Ok(control) => {
                         hint = Some(control.nearest.segment);
-                        let (steering_rad, speed_mps) =
-                            command(&self.config.potential_field(), &scan, &control.field, &limits_topic.read());
+                        let (steering_rad, speed_mps) = command(
+                            &self.config.potential_field(),
+                            &scan,
+                            &control.field,
+                            &limits_topic.read(),
+                        );
                         (
                             VescCommand::new(steering_rad as f64, speed_mps as f64),
                             control.drawing(captain, &self.instance.vehicle, &scan),
@@ -278,16 +297,24 @@ fn control(
         return Err(Lost::OffLine(nearest));
     }
     let reference_mps = line.at(nearest.s_m).speed_mps.max(0.0);
-    let lookahead_m = config.min_look_ahead_m.max(config.look_ahead_gain_s * reference_mps);
+    let lookahead_m = config
+        .min_look_ahead_m
+        .max(config.look_ahead_gain_s * reference_mps);
     let target = line.at(nearest.s_m + lookahead_m);
-    let pursuit_rad = wrap_to_pi((target.y - pose.y_m).atan2(target.x - pose.x_m) - pose.heading_rad) as f32;
+    let pursuit_rad =
+        wrap_to_pi((target.y - pose.y_m).atan2(target.x - pose.x_m) - pose.heading_rad) as f32;
 
     let weight = config.max_distance_weight.clamp(0.0, 1.0);
     let field = potential_field(scan, &config.potential_field().field(), |longest_rad| {
         (1.0 - weight) * pursuit_rad + weight * longest_rad
     })
     .ok_or(Lost::NoScan)?;
-    Ok(Control { nearest, target, pursuit_rad, field })
+    Ok(Control {
+        nearest,
+        target,
+        pursuit_rad,
+        field,
+    })
 }
 
 impl Control {
@@ -321,7 +348,11 @@ mod tests {
     use std::f32::consts::PI;
 
     fn point(x: f64, y: f64) -> SpeedPoint {
-        SpeedPoint { x, y, speed_mps: 2.0 }
+        SpeedPoint {
+            x,
+            y,
+            speed_mps: 2.0,
+        }
     }
 
     /// A dense circle of radius `radius_m` around the origin, driven in
@@ -340,7 +371,11 @@ mod tests {
     }
 
     fn config() -> PotentialPursuitConfig {
-        PotentialPursuitConfig { max_distance_weight: 0.0, desired_fov_deg: 180.0, ..Default::default() }
+        PotentialPursuitConfig {
+            max_distance_weight: 0.0,
+            desired_fov_deg: 180.0,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -348,11 +383,19 @@ mod tests {
         // On a circle, heading along it: the pursuit point is on the
         // increasing-heading (positive) side.
         let line = circle(3.0);
-        let pose = Pose { x_m: 3.0, y_m: 0.0, heading_rad: std::f64::consts::PI / 2.0 };
+        let pose = Pose {
+            x_m: 3.0,
+            y_m: 0.0,
+            heading_rad: std::f64::consts::PI / 2.0,
+        };
         let control = control(&config(), &line, pose, None, &scan(181, PI, 5.0)).unwrap();
         assert!(control.pursuit_rad > 0.0);
         let attractive = control.field.angle_rad(control.field.attractive_cell);
-        assert!((attractive - control.pursuit_rad).abs() < 0.01, "{attractive} vs {}", control.pursuit_rad);
+        assert!(
+            (attractive - control.pursuit_rad).abs() < 0.01,
+            "{attractive} vs {}",
+            control.pursuit_rad
+        );
         // Nothing repels, so there's no minimum but the attraction's.
         assert_eq!(control.field.chosen_cell, control.field.attractive_cell);
     }
@@ -360,7 +403,11 @@ mod tests {
     #[test]
     fn too_far_from_the_line_is_lost() {
         let line = circle(3.0);
-        let pose = Pose { x_m: 6.0, y_m: 0.0, heading_rad: 0.0 };
+        let pose = Pose {
+            x_m: 6.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
         let lost = control(&config(), &line, pose, None, &scan(181, PI, 5.0)).unwrap_err();
         assert!(matches!(lost, Lost::OffLine(nearest) if (nearest.distance_m - 3.0).abs() < 1e-6));
     }
@@ -368,7 +415,8 @@ mod tests {
     #[test]
     fn every_config_field_is_tunable() {
         let config = PotentialPursuitConfig::default();
-        let info = AutonomousAlgorithmInfo::new("Potential pursuit", "").with_parameters(&config, parameters());
+        let info = AutonomousAlgorithmInfo::new("Potential pursuit", "")
+            .with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

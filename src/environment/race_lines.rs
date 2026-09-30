@@ -296,11 +296,18 @@ mod tests {
     #[test]
     fn saved_lines_list_newest_first_with_their_method() {
         let folder = temp_map("list");
-        race_line::write(&square(), &{
-            std::fs::create_dir_all(race_lines_dir(&folder)).unwrap();
-            race_lines_dir(&folder).join(CENTERLINE_FILE_NAME)
-        })
-        .unwrap();
+        std::fs::create_dir_all(race_lines_dir(&folder)).unwrap();
+        let centerline = race_lines_dir(&folder).join(CENTERLINE_FILE_NAME);
+        race_line::write(&square(), &centerline).unwrap();
+        // Dated by its modification time, which could otherwise land in the
+        // same millisecond as the saves below - and the name tie-break would
+        // then list it first.
+        std::fs::File::options()
+            .write(true)
+            .open(&centerline)
+            .unwrap()
+            .set_modified(SystemTime::now() - std::time::Duration::from_secs(60))
+            .unwrap();
         let first = save_new(&folder, RaceLineMethod::MinCurvature, &square()).unwrap();
         let second = save_new(&folder, RaceLineMethod::MinTime, &square()).unwrap();
 

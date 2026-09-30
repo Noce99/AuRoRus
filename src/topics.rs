@@ -22,6 +22,7 @@ mod vehicle_model;
 mod vehicle_status;
 mod vehicle_topics;
 mod vesc_command;
+mod vesc_parameters;
 mod vesc_status;
 
 pub use autonomous_control::{
@@ -75,5 +76,9 @@ pub use vehicle_topics::{AlgorithmTopics, OPPONENT_TOPIC_PREFIX, VehicleTopics};
 pub use vesc_command::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
     VescCommand,
+};
+pub use vesc_parameters::{
+    VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME, VescParameters,
+    VescParametersStatus,
 };
 pub use vesc_status::{VESC_STATUS_TOPIC_NAME, VescStatus};

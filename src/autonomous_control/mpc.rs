@@ -25,13 +25,15 @@
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::mpc::{
-    Bounds, Cache, DistanceField, MIN_HORIZON, Mpc as MpcProblem, Opponent, Solution, SolverSettings,
-    State as MpcState, Target, Walls, Weights, solve,
+    Bounds, Cache, DistanceField, MIN_HORIZON, Mpc as MpcProblem, Opponent, Solution,
+    SolverSettings, State as MpcState, Target, Walls, Weights, solve,
 };
 use crate::autonomous_control::shared::race_line::{
     Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed,
 };
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message, report_stats};
+use crate::autonomous_control::{
+    Instance, ParameterTuner, load_config, report_message, report_stats,
+};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color,
     DETECTED_OPPONENT_TOPIC_NAME, DetectedOpponent, Drawing, MAP_TOPIC_NAME, SelectedMap,
@@ -713,7 +715,10 @@ impl State {
     /// `None` without a plan.
     fn stats(&self) -> Option<String> {
         self.plan.as_ref().map(|plan| {
-            format!("{:.1} ms, {} iterations", plan.solve_ms, plan.solution.iterations)
+            format!(
+                "{:.1} ms, {} iterations",
+                plan.solve_ms, plan.solution.iterations
+            )
         })
     }
 }
@@ -968,8 +973,7 @@ mod tests {
     #[test]
     fn every_config_field_is_tunable() {
         let config = MpcConfig::default();
-        let info =
-            AutonomousAlgorithmInfo::new("MPC", "").with_parameters(&config, parameters());
+        let info = AutonomousAlgorithmInfo::new("MPC", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

@@ -30,7 +30,10 @@ impl Executor for AlwaysLeft {
         captain.claim_autonomous_control(
             self.id,
             &self.instance.algorithm_topics(),
-            AutonomousAlgorithmInfo::new("Always left", "Full left steering lock at full speed. A structural placeholder."),
+            AutonomousAlgorithmInfo::new(
+                "Always left",
+                "Full left steering lock at full speed. A structural placeholder.",
+            ),
         );
     }
 
@@ -43,7 +46,10 @@ impl Executor for AlwaysLeft {
             let limits = limits_topic.read();
             // Negative steers left - see `VescCommand::servo_position_rad`.
             command_topic
-                .write(self.id, VescCommand::new(-limits.max_steering_angle_rad, limits.max_speed_mps))
+                .write(
+                    self.id,
+                    VescCommand::new(-limits.max_steering_angle_rad, limits.max_speed_mps),
+                )
                 .expect("lost writer authorization for this algorithm's command topic");
             ticker.wait();
         }

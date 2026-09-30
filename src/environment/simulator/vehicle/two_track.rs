@@ -294,8 +294,8 @@ fn regularized_vx(vx_mps: f64) -> f64 {
 }
 
 /// Scales a wheel's tire force to `0.0` as its true (unfloored) relative
-/// speed - the vector `(vx_wheel, vy_wheel)` its contact patch actually sees
-/// - approaches zero, saturating to `1.0` once that speed reaches
+/// speed (the vector `(vx_wheel, vy_wheel)` its contact patch actually sees)
+/// approaches zero, saturating to `1.0` once that speed reaches
 /// [`LOW_SPEED_FLOOR_MPS`] - see
 /// `crate::environment::simulator::vehicle::dynamic_bicycle::low_speed_force_scale`,
 /// which this is needed for the same reason as: flooring the `atan2`

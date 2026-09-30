@@ -43,7 +43,8 @@ use crate::topics::{
     PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_START_TOPIC_NAME, RaceLineSelection,
     RaceStart, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest,
     VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VehicleModelParameters, VehicleModelSelection, VescCommand,
+    VESC_PARAMETERS_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
+    VescParameters,
 };
 use crate::{Captain, DebugRecorder, Executor};
 use std::any::Any;
@@ -180,6 +181,11 @@ impl Executor for WebGui {
             VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
             self.id,
             VehicleModelParameters::default,
+        );
+        captain.claim_writer::<VescParameters>(
+            VESC_PARAMETERS_TOPIC_NAME,
+            self.id,
+            VescParameters::default,
         );
         captain.claim_writer::<AutonomousAlgorithmSelection>(
             AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,

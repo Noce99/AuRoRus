@@ -7,13 +7,13 @@
 //! `potential_field.cpp`. See `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::reactive::{
-    Field, FieldConfig, field_shapes, fov_window, potential_field, scan_origin, speed_proportional_steering,
-    speed_steer_and_fov,
+    Field, FieldConfig, field_shapes, fov_window, potential_field, scan_origin,
+    speed_proportional_steering, speed_steer_and_fov,
 };
 use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan,
-    VehicleTopics, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan, VehicleTopics,
+    VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -99,8 +99,9 @@ pub(crate) fn field_parameters() -> Vec<AlgorithmParameter> {
             .description("Multiplies the chosen direction to get the steering angle."),
         AlgorithmParameter::int("include_global_minima", 0, 1, 1)
             .description("1 = also consider the field's global minimum, not only local ones."),
-        AlgorithmParameter::int("use_minima_near_attractive", 0, 1, 1)
-            .description("1 = pick the minimum nearest to the attractive direction, 0 = the lowest."),
+        AlgorithmParameter::int("use_minima_near_attractive", 0, 1, 1).description(
+            "1 = pick the minimum nearest to the attractive direction, 0 = the lowest.",
+        ),
         AlgorithmParameter::int("use_speed_distance_gains", 0, 1, 1)
             .description("1 = the speed also grows with the room ahead and drops near a wall."),
         AlgorithmParameter::float("front_fov_deg", 1.0, 90.0, 1.0)
@@ -160,11 +161,22 @@ pub(crate) fn command(
     limits: &ActuatorLimits,
 ) -> (f32, f32) {
     let max_steering = limits.max_steering_angle_rad as f32;
-    let steering_rad = (config.steering_gain * field.chosen_rad()).clamp(-max_steering, max_steering);
-    let mut speed = speed_proportional_steering(steering_rad, max_steering, config.max_speed, config.min_speed);
+    let steering_rad =
+        (config.steering_gain * field.chosen_rad()).clamp(-max_steering, max_steering);
+    let mut speed = speed_proportional_steering(
+        steering_rad,
+        max_steering,
+        config.max_speed,
+        config.min_speed,
+    );
     if config.use_speed_distance_gains == 1 {
         let front = fov_window(scan, config.front_fov_deg.to_radians());
-        speed = speed_steer_and_fov(speed, &scan.points[front], config.speed_distance_gain, config.brake_gain);
+        speed = speed_steer_and_fov(
+            speed,
+            &scan.points[front],
+            config.speed_distance_gain,
+            config.brake_gain,
+        );
     }
     (steering_rad, speed.clamp(0.0, limits.max_speed_mps as f32))
 }
@@ -230,17 +242,27 @@ impl Executor for PotentialField {
             }
 
             let scan = scan_topic.read().into_value();
-            let Some(field) = potential_field(&scan, &self.config.field(), |longest_rad| longest_rad) else {
+            let Some(field) =
+                potential_field(&scan, &self.config.field(), |longest_rad| longest_rad)
+            else {
                 ticker.wait();
                 continue;
             };
-            let (steering_rad, speed_mps) = command(&self.config, &scan, &field, &limits_topic.read());
+            let (steering_rad, speed_mps) =
+                command(&self.config, &scan, &field, &limits_topic.read());
 
             command_topic
-                .write(self.id, VescCommand::new(steering_rad as f64, speed_mps as f64))
+                .write(
+                    self.id,
+                    VescCommand::new(steering_rad as f64, speed_mps as f64),
+                )
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
-                .write(self.id, field_drawing(captain, &self.instance.vehicle, &scan, &field).stale_after(stale_after))
+                .write(
+                    self.id,
+                    field_drawing(captain, &self.instance.vehicle, &scan, &field)
+                        .stale_after(stale_after),
+                )
                 .expect("lost writer authorization for the potential field drawing topic");
             ticker.wait();
         }
@@ -287,14 +309,25 @@ mod tests {
         let scan = scan(361, 4.2, 6.0);
         let field = potential_field(&scan, &config.field(), |longest| longest).unwrap();
         // Nothing repels; with no steering gain, the vehicle drives straight.
-        let (steering, speed) = command(&PotentialFieldConfig { steering_gain: 0.0, ..config }, &scan, &field, &limits());
+        let (steering, speed) = command(
+            &PotentialFieldConfig {
+                steering_gain: 0.0,
+                ..config
+            },
+            &scan,
+            &field,
+            &limits(),
+        );
         assert_eq!(steering, 0.0);
         assert_eq!(speed, config.max_speed);
     }
 
     #[test]
     fn an_obstacle_on_the_positive_side_steers_negative() {
-        let config = PotentialFieldConfig { desired_fov_deg: 180.0, ..Default::default() };
+        let config = PotentialFieldConfig {
+            desired_fov_deg: 180.0,
+            ..Default::default()
+        };
         let mut scan = scan(181, PI, 5.0);
         for i in 92..110 {
             scan.points[i] = 1.0;
@@ -309,7 +342,10 @@ mod tests {
 
     #[test]
     fn steering_is_clamped_to_the_limit() {
-        let config = PotentialFieldConfig { steering_gain: 2.0, ..Default::default() };
+        let config = PotentialFieldConfig {
+            steering_gain: 2.0,
+            ..Default::default()
+        };
         let scan = scan(181, PI, 5.0);
         let mut field = potential_field(&scan, &config.field(), |_| 1.2).unwrap();
         field.chosen_cell = field.attractive_cell;
@@ -319,7 +355,8 @@ mod tests {
     #[test]
     fn every_config_field_is_tunable() {
         let config = PotentialFieldConfig::default();
-        let info = AutonomousAlgorithmInfo::new("Potential field", "").with_parameters(&config, parameters());
+        let info = AutonomousAlgorithmInfo::new("Potential field", "")
+            .with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };

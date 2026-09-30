@@ -10,12 +10,14 @@
 //! is held stopped, and why is reported in the autonomous algorithms panel
 //! (see [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
-use crate::autonomous_control::shared::race_line::{Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi};
+use crate::autonomous_control::shared::race_line::{
+    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi,
+};
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::environment::SpeedPoint;
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing,
-    SelectedRaceLine, Shape, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
+    Shape, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -29,7 +31,11 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
     if instance.is_opponent() {
         config.pose_source = POSE_GROUND_TRUTH;
     }
-    Box::new(PurePursuit { id: 0, instance, config })
+    Box::new(PurePursuit {
+        id: 0,
+        instance,
+        config,
+    })
 }
 
 /// Every tunable parameter [`PurePursuit`] needs - loaded from
@@ -67,8 +73,12 @@ pub struct PurePursuitConfig {
 
 impl Default for PurePursuitConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/autonomous_control/pure_pursuit.toml"))
-            .expect("config/autonomous_control/pure_pursuit.toml must deserialize into PurePursuitConfig")
+        toml::from_str(include_str!(
+            "../../config/autonomous_control/pure_pursuit.toml"
+        ))
+        .expect(
+            "config/autonomous_control/pure_pursuit.toml must deserialize into PurePursuitConfig",
+        )
     }
 }
 
@@ -81,8 +91,9 @@ fn parameters() -> [AlgorithmParameter; 12] {
         AlgorithmParameter::float("rate_hz", 5.0, 200.0, 1.0)
             .unit("Hz")
             .description("Rate at which a new control is published."),
-        AlgorithmParameter::int("pose_source", 0, 1, 1)
-            .description("0 = localization (only while localizing), 1 = ground truth (simulation only)."),
+        AlgorithmParameter::int("pose_source", 0, 1, 1).description(
+            "0 = localization (only while localizing), 1 = ground truth (simulation only).",
+        ),
         AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
             .unit("m")
             .description("Distance between the front and rear axles."),
@@ -105,7 +116,9 @@ fn parameters() -> [AlgorithmParameter; 12] {
             .description("Multiplies the race line's speed profile."),
         AlgorithmParameter::float("speed_preview_s", 0.0, 1.0, 0.01)
             .unit("s")
-            .description("How far ahead (in time) the profile speed is read, to cover actuator lag."),
+            .description(
+                "How far ahead (in time) the profile speed is read, to cover actuator lag.",
+            ),
         AlgorithmParameter::float("constant_speed", 0.0, 10.0, 0.1)
             .unit("m/s")
             .description("If > 0, drive at this speed instead of the profile's."),
@@ -162,7 +175,9 @@ impl Executor for PurePursuit {
             }
 
             // Nothing may publish a race line at all (e.g. a binary without `MapServer`).
-            if let Some(topic) = captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line()) {
+            if let Some(topic) =
+                captain.try_topic::<SelectedRaceLine>(&self.instance.vehicle.race_line())
+            {
                 let write_count = topic.meta().write_count;
                 if line.as_ref().is_none_or(|(seen, _)| *seen != write_count) {
                     line = Some((write_count, Line::new(topic.read().into_value().points)));
@@ -175,7 +190,9 @@ impl Executor for PurePursuit {
             // A stationary command, and why, unless following the line.
             let stopped = |why: String| (VescCommand::new(0.0, 0.0), Drawing::default(), Some(why));
             let (command, drawing, message) = match (line, pose) {
-                (None, _) => stopped("No race line on the selected map - vehicle held stopped.".into()),
+                (None, _) => {
+                    stopped("No race line on the selected map - vehicle held stopped.".into())
+                }
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
                 (Some(line), Ok(pose)) => {
                     let limits = limits_topic.read();
@@ -259,11 +276,15 @@ fn control(
     }
 
     let reference_mps = line.at(nearest.s_m).speed_mps.max(0.0);
-    let lookahead_m = (config.lookahead_base_m + config.lookahead_gain_s * reference_mps)
-        .clamp(config.lookahead_min_m, config.lookahead_max_m.max(config.lookahead_min_m));
+    let lookahead_m = (config.lookahead_base_m + config.lookahead_gain_s * reference_mps).clamp(
+        config.lookahead_min_m,
+        config.lookahead_max_m.max(config.lookahead_min_m),
+    );
     let target = line.at(nearest.s_m + lookahead_m);
-    let steering_rad = steering(rear_axle, target.x, target.y, config.wheelbase_m)
-        .clamp(-limits.max_steering_angle_rad, limits.max_steering_angle_rad);
+    let steering_rad = steering(rear_axle, target.x, target.y, config.wheelbase_m).clamp(
+        -limits.max_steering_angle_rad,
+        limits.max_steering_angle_rad,
+    );
 
     let speed_mps = if config.constant_speed > 0.0 {
         config.constant_speed
@@ -301,25 +322,25 @@ impl Control {
         let rear = self.rear_axle;
         let (x, y) = (self.target.x, self.target.y);
         let nearest = Shape::Circle {
-                x_m: self.nearest.x_m,
-                y_m: self.nearest.y_m,
-                radius_m: 0.06,
-                filled: true,
-                color: Color::BLUE,
-            };
+            x_m: self.nearest.x_m,
+            y_m: self.nearest.y_m,
+            radius_m: 0.06,
+            filled: true,
+            color: Color::BLUE,
+        };
         let lookahead = Shape::Circle {
-                x_m: x,
-                y_m: y,
-                radius_m: 0.08,
-                filled: true,
-                color: Color::PURPLE,
-            };
+            x_m: x,
+            y_m: y,
+            radius_m: 0.08,
+            filled: true,
+            color: Color::PURPLE,
+        };
         let chord = Shape::Polyline {
-                points: vec![[rear.x_m as f32, rear.y_m as f32], [x as f32, y as f32]],
-                closed: false,
-                width_px: 1.0,
-                color: Color::PURPLE.with_alpha(128),
-            };
+            points: vec![[rear.x_m as f32, rear.y_m as f32], [x as f32, y as f32]],
+            closed: false,
+            width_px: 1.0,
+            color: Color::PURPLE.with_alpha(128),
+        };
         let mut arc = None;
 
         // Signed radius, positive toward increasing heading: ld / (2 sin(alpha)).
@@ -332,7 +353,11 @@ impl Control {
             let from = (rear.y_m - cy).atan2(rear.x_m - cx);
             let to = (y - cy).atan2(x - cx);
             // Driven in increasing angle for a positive radius.
-            let (start, end) = if radius_m > 0.0 { (from, to) } else { (to, from) };
+            let (start, end) = if radius_m > 0.0 {
+                (from, to)
+            } else {
+                (to, from)
+            };
             arc = Some(Shape::CircularArc {
                 x_m: cx,
                 y_m: cy,
@@ -351,13 +376,16 @@ impl Control {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn point(x: f64, y: f64) -> SpeedPoint {
-        SpeedPoint { x, y, speed_mps: 2.0 }
+        SpeedPoint {
+            x,
+            y,
+            speed_mps: 2.0,
+        }
     }
 
     fn limits() -> ActuatorLimits {
@@ -395,13 +423,28 @@ mod tests {
     #[test]
     fn on_a_straight_line_steering_is_zero() {
         let line = hairpin();
-        let config = PurePursuitConfig { lr_m: 0.0, ..Default::default() };
-        let pose = Pose { x_m: 3.0, y_m: 0.0, heading_rad: 0.0 };
+        let config = PurePursuitConfig {
+            lr_m: 0.0,
+            ..Default::default()
+        };
+        let pose = Pose {
+            x_m: 3.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
         let control = control(&config, &line, pose, None, &limits()).unwrap();
-        assert!(control.steering_rad.abs() < 1e-9, "{}", control.steering_rad);
+        assert!(
+            control.steering_rad.abs() < 1e-9,
+            "{}",
+            control.steering_rad
+        );
         let lookahead_m = (config.lookahead_base_m + config.lookahead_gain_s * 2.0)
             .clamp(config.lookahead_min_m, config.lookahead_max_m);
-        assert!((control.target.x - (3.0 + lookahead_m)).abs() < 1e-9, "{:?}", control.target);
+        assert!(
+            (control.target.x - (3.0 + lookahead_m)).abs() < 1e-9,
+            "{:?}",
+            control.target
+        );
     }
 
     #[test]
@@ -414,7 +457,11 @@ mod tests {
             ..Default::default()
         };
         // On the circle at angle 0, heading along increasing angle.
-        let pose = Pose { x_m: radius_m, y_m: 0.0, heading_rad: PI / 2.0 };
+        let pose = Pose {
+            x_m: radius_m,
+            y_m: 0.0,
+            heading_rad: PI / 2.0,
+        };
         let control = control(&config, &line, pose, None, &limits()).unwrap();
         let expected = (config.wheelbase_m / radius_m).atan();
         assert!(
@@ -426,7 +473,11 @@ mod tests {
 
     #[test]
     fn a_target_on_the_increasing_heading_side_steers_positive() {
-        let pose = Pose { x_m: 0.0, y_m: 0.0, heading_rad: 0.0 };
+        let pose = Pose {
+            x_m: 0.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
         // Increasing heading rotates +x toward +y.
         assert!(steering(pose, 1.0, 0.5, 0.32) > 0.0);
         assert!(steering(pose, 1.0, -0.5, 0.32) < 0.0);
@@ -435,9 +486,19 @@ mod tests {
     #[test]
     fn steering_is_clamped_to_the_limit() {
         let line = circle(0.5);
-        let config = PurePursuitConfig { lr_m: 0.0, ..Default::default() };
-        let pose = Pose { x_m: 0.5, y_m: 0.0, heading_rad: PI / 2.0 };
-        let limits = ActuatorLimits { max_steering_angle_rad: 0.2, ..limits() };
+        let config = PurePursuitConfig {
+            lr_m: 0.0,
+            ..Default::default()
+        };
+        let pose = Pose {
+            x_m: 0.5,
+            y_m: 0.0,
+            heading_rad: PI / 2.0,
+        };
+        let limits = ActuatorLimits {
+            max_steering_angle_rad: 0.2,
+            ..limits()
+        };
         let control = control(&config, &line, pose, None, &limits).unwrap();
         assert_eq!(control.steering_rad, 0.2);
     }
@@ -452,7 +513,10 @@ mod tests {
         // Just before the seam (the closing segment from (0, 0.5) to (0, 0)),
         // looking 0.5 m ahead lands past point 0.
         let ahead = line.at(lap_m - 0.2 + 0.5);
-        assert!((ahead.x - 0.3).abs() < 1e-9 && ahead.y.abs() < 1e-9, "{ahead:?}");
+        assert!(
+            (ahead.x - 0.3).abs() < 1e-9 && ahead.y.abs() < 1e-9,
+            "{ahead:?}"
+        );
     }
 
     #[test]
@@ -480,8 +544,16 @@ mod tests {
     #[test]
     fn too_far_from_the_line_is_an_error() {
         let line = hairpin();
-        let config = PurePursuitConfig { lr_m: 0.0, max_cross_track_m: 1.0, ..Default::default() };
-        let pose = Pose { x_m: 5.0, y_m: -2.0, heading_rad: 0.0 };
+        let config = PurePursuitConfig {
+            lr_m: 0.0,
+            max_cross_track_m: 1.0,
+            ..Default::default()
+        };
+        let pose = Pose {
+            x_m: 5.0,
+            y_m: -2.0,
+            heading_rad: 0.0,
+        };
         let err = control(&config, &line, pose, None, &limits()).unwrap_err();
         assert!((err.distance_m - 2.0).abs() < 1e-9);
     }
@@ -489,26 +561,49 @@ mod tests {
     #[test]
     fn speed_follows_the_profile_or_the_constant() {
         let line = hairpin();
-        let pose = Pose { x_m: 3.0, y_m: 0.0, heading_rad: 0.0 };
-        let config = PurePursuitConfig { speed_scale: 0.5, constant_speed: 0.0, ..Default::default() };
+        let pose = Pose {
+            x_m: 3.0,
+            y_m: 0.0,
+            heading_rad: 0.0,
+        };
+        let config = PurePursuitConfig {
+            speed_scale: 0.5,
+            constant_speed: 0.0,
+            ..Default::default()
+        };
         let control_profile = control(&config, &line, pose, None, &limits()).unwrap();
         assert!((control_profile.speed_mps - 1.0).abs() < 1e-9);
-        let config = PurePursuitConfig { constant_speed: 20.0, ..config };
+        let config = PurePursuitConfig {
+            constant_speed: 20.0,
+            ..config
+        };
         let control_constant = control(&config, &line, pose, None, &limits()).unwrap();
         assert_eq!(control_constant.speed_mps, limits().max_speed_mps);
     }
 
     #[test]
     fn the_rear_axle_is_behind_the_reference_point() {
-        let pose = Pose { x_m: 1.0, y_m: 1.0, heading_rad: PI / 2.0 };
+        let pose = Pose {
+            x_m: 1.0,
+            y_m: 1.0,
+            heading_rad: PI / 2.0,
+        };
         let rear = pose.moved_back(0.16);
         assert!((rear.x_m - 1.0).abs() < 1e-12 && (rear.y_m - 0.84).abs() < 1e-12);
     }
 
     #[test]
     fn composing_puts_the_odometry_pose_on_the_map() {
-        let map_to_odom = Pose { x_m: 2.0, y_m: 1.0, heading_rad: PI / 2.0 };
-        let odometry = Pose { x_m: 1.0, y_m: 0.0, heading_rad: 0.3 };
+        let map_to_odom = Pose {
+            x_m: 2.0,
+            y_m: 1.0,
+            heading_rad: PI / 2.0,
+        };
+        let odometry = Pose {
+            x_m: 1.0,
+            y_m: 0.0,
+            heading_rad: 0.3,
+        };
         let pose = map_to_odom.compose(&odometry);
         assert!((pose.x_m - 2.0).abs() < 1e-12);
         assert!((pose.y_m - 2.0).abs() < 1e-12);
@@ -518,7 +613,8 @@ mod tests {
     #[test]
     fn every_config_field_is_tunable() {
         let config = PurePursuitConfig::default();
-        let info = AutonomousAlgorithmInfo::new("Pure pursuit", "").with_parameters(&config, parameters());
+        let info =
+            AutonomousAlgorithmInfo::new("Pure pursuit", "").with_parameters(&config, parameters());
         let serde_json::Value::Object(fields) = serde_json::to_value(config).unwrap() else {
             panic!("the config serializes to an object");
         };
