@@ -17,7 +17,7 @@ use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_me
 use crate::environment::SpeedPoint;
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
-    Shape, VescCommand,
+    Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -41,7 +41,8 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
 /// Every tunable parameter [`PurePursuit`] needs - loaded from
 /// `config/autonomous_control/pure_pursuit.toml` at runtime (see [`load_config`]), falling back
 /// to the copy compiled in (see [`Default`]). Every field can also be tuned live - see
-/// [`parameters`].
+/// [`parameters`]. The wheelbase and where the rear axle is are the
+/// vehicle's, read from its [`VehicleGeometry`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PurePursuitConfig {
     /// Rate at which a new control is published, in Hz.
@@ -49,10 +50,6 @@ pub struct PurePursuitConfig {
     /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
     /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
     pub pose_source: u8,
-    /// Distance between the front and rear axles, in meters.
-    pub wheelbase_m: f64,
-    /// Distance from the pose's reference point back to the rear axle, in meters.
-    pub lr_m: f64,
     /// Lower clamp of the lookahead distance, in meters.
     pub lookahead_min_m: f64,
     /// Upper clamp of the lookahead distance, in meters.
@@ -84,7 +81,7 @@ impl Default for PurePursuitConfig {
 
 /// The live-tunable parameters, one per [`PurePursuitConfig`] field - see
 /// [`ParameterTuner`].
-fn parameters() -> [AlgorithmParameter; 12] {
+fn parameters() -> [AlgorithmParameter; 10] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
         // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
@@ -94,12 +91,6 @@ fn parameters() -> [AlgorithmParameter; 12] {
         AlgorithmParameter::int("pose_source", 0, 1, 1).description(
             "0 = localization (only while localizing), 1 = ground truth (simulation only).",
         ),
-        AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
-            .unit("m")
-            .description("Distance between the front and rear axles."),
-        AlgorithmParameter::float("lr_m", 0.0, 0.5, 0.01)
-            .unit("m")
-            .description("Distance from the center of gravity back to the rear axle."),
         AlgorithmParameter::float("lookahead_min_m", 0.2, 5.0, 0.05)
             .unit("m")
             .description("Shortest lookahead distance."),
@@ -156,6 +147,8 @@ impl Executor for PurePursuit {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -196,7 +189,8 @@ impl Executor for PurePursuit {
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
                 (Some(line), Ok(pose)) => {
                     let limits = limits_topic.read();
-                    match control(&self.config, line, pose, hint, &limits) {
+                    let geometry = geometry_topic.read();
+                    match control(&self.config, line, pose, hint, &limits, &geometry) {
                         Ok(control) => {
                             hint = Some(control.nearest.segment);
                             (
@@ -257,17 +251,18 @@ struct Control {
     target: SpeedPoint,
 }
 
-/// Pure pursuit for `pose` (its reference point `lr_m` ahead of the rear
-/// axle) on `line`, or - if farther than `max_cross_track_m` from it - the
-/// projection that was too far.
+/// Pure pursuit for `pose` (its reference point `geometry.lr_m()` ahead of
+/// the rear axle) on `line`, or - if farther than `max_cross_track_m` from
+/// it - the projection that was too far.
 fn control(
     config: &PurePursuitConfig,
     line: &Line,
     pose: Pose,
     hint: Option<usize>,
     limits: &ActuatorLimits,
+    geometry: &VehicleGeometry,
 ) -> Result<Control, Nearest> {
-    let rear_axle = pose.moved_back(config.lr_m);
+    let rear_axle = pose.moved_back(geometry.lr_m());
     // Past the farthest lookahead, with room for a tick's worth of travel.
     let window_m = 1.5 * config.lookahead_max_m + 1.0;
     let nearest = line.nearest(rear_axle.x_m, rear_axle.y_m, hint, window_m);
@@ -281,7 +276,7 @@ fn control(
         config.lookahead_max_m.max(config.lookahead_min_m),
     );
     let target = line.at(nearest.s_m + lookahead_m);
-    let steering_rad = steering(rear_axle, target.x, target.y, config.wheelbase_m).clamp(
+    let steering_rad = steering(rear_axle, target.x, target.y, geometry.wheelbase_m).clamp(
         -limits.max_steering_angle_rad,
         limits.max_steering_angle_rad,
     );
@@ -398,6 +393,15 @@ mod tests {
         }
     }
 
+    /// A 0.32 m wheelbase, the pose on the rear axle.
+    fn geometry() -> VehicleGeometry {
+        VehicleGeometry {
+            wheelbase_m: 0.32,
+            rear_axle_to_cg_m: 0.0,
+            ..VehicleGeometry::default()
+        }
+    }
+
     /// A dense circle of radius `radius_m` around the origin, driven in
     /// increasing angle.
     fn circle(radius_m: f64) -> Line {
@@ -423,16 +427,13 @@ mod tests {
     #[test]
     fn on_a_straight_line_steering_is_zero() {
         let line = hairpin();
-        let config = PurePursuitConfig {
-            lr_m: 0.0,
-            ..Default::default()
-        };
+        let config = PurePursuitConfig::default();
         let pose = Pose {
             x_m: 3.0,
             y_m: 0.0,
             heading_rad: 0.0,
         };
-        let control = control(&config, &line, pose, None, &limits()).unwrap();
+        let control = control(&config, &line, pose, None, &limits(), &geometry()).unwrap();
         assert!(
             control.steering_rad.abs() < 1e-9,
             "{}",
@@ -451,19 +452,15 @@ mod tests {
     fn on_a_circle_steering_matches_its_curvature() {
         let radius_m = 3.0;
         let line = circle(radius_m);
-        let config = PurePursuitConfig {
-            lr_m: 0.0,
-            wheelbase_m: 0.32,
-            ..Default::default()
-        };
+        let config = PurePursuitConfig::default();
         // On the circle at angle 0, heading along increasing angle.
         let pose = Pose {
             x_m: radius_m,
             y_m: 0.0,
             heading_rad: PI / 2.0,
         };
-        let control = control(&config, &line, pose, None, &limits()).unwrap();
-        let expected = (config.wheelbase_m / radius_m).atan();
+        let control = control(&config, &line, pose, None, &limits(), &geometry()).unwrap();
+        let expected = (geometry().wheelbase_m / radius_m).atan();
         assert!(
             (control.steering_rad - expected).abs() < 1e-3,
             "{} vs {expected}",
@@ -486,10 +483,7 @@ mod tests {
     #[test]
     fn steering_is_clamped_to_the_limit() {
         let line = circle(0.5);
-        let config = PurePursuitConfig {
-            lr_m: 0.0,
-            ..Default::default()
-        };
+        let config = PurePursuitConfig::default();
         let pose = Pose {
             x_m: 0.5,
             y_m: 0.0,
@@ -499,7 +493,7 @@ mod tests {
             max_steering_angle_rad: 0.2,
             ..limits()
         };
-        let control = control(&config, &line, pose, None, &limits).unwrap();
+        let control = control(&config, &line, pose, None, &limits, &geometry()).unwrap();
         assert_eq!(control.steering_rad, 0.2);
     }
 
@@ -545,7 +539,6 @@ mod tests {
     fn too_far_from_the_line_is_an_error() {
         let line = hairpin();
         let config = PurePursuitConfig {
-            lr_m: 0.0,
             max_cross_track_m: 1.0,
             ..Default::default()
         };
@@ -554,7 +547,7 @@ mod tests {
             y_m: -2.0,
             heading_rad: 0.0,
         };
-        let err = control(&config, &line, pose, None, &limits()).unwrap_err();
+        let err = control(&config, &line, pose, None, &limits(), &geometry()).unwrap_err();
         assert!((err.distance_m - 2.0).abs() < 1e-9);
     }
 
@@ -571,13 +564,13 @@ mod tests {
             constant_speed: 0.0,
             ..Default::default()
         };
-        let control_profile = control(&config, &line, pose, None, &limits()).unwrap();
+        let control_profile = control(&config, &line, pose, None, &limits(), &geometry()).unwrap();
         assert!((control_profile.speed_mps - 1.0).abs() < 1e-9);
         let config = PurePursuitConfig {
             constant_speed: 20.0,
             ..config
         };
-        let control_constant = control(&config, &line, pose, None, &limits()).unwrap();
+        let control_constant = control(&config, &line, pose, None, &limits(), &geometry()).unwrap();
         assert_eq!(control_constant.speed_mps, limits().max_speed_mps);
     }
 

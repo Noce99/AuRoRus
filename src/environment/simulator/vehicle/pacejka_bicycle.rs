@@ -47,13 +47,16 @@ pub struct PacejkaBicycleState {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PacejkaTireParams {
     /// Vehicle mass, in kilograms.
+    #[serde(default)]
     pub mass_kg: f64,
     /// Yaw moment of inertia about the vertical axis through the CG, in
     /// kilogram-meters^2.
     pub yaw_inertia_kgm2: f64,
     /// Distance from the CG to the front axle, in meters.
+    #[serde(default)]
     pub lf_m: f64,
     /// Distance from the CG to the rear axle, in meters.
+    #[serde(default)]
     pub lr_m: f64,
     /// Height of the CG above the ground, in meters - drives how much
     /// longitudinal acceleration shifts load between the front and rear
@@ -97,13 +100,7 @@ impl PacejkaTireParams {
     /// The live-tunable parameters, one per field - see
     /// [`crate::actuators::SimulatedVehicle`].
     pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
-        let mut parameters = vec![
-            tunable::mass_kg(),
-            tunable::yaw_inertia_kgm2(),
-            tunable::lf_m(),
-            tunable::lr_m(),
-            tunable::cg_height_m(),
-        ];
+        let mut parameters = vec![tunable::yaw_inertia_kgm2(), tunable::cg_height_m()];
         parameters.extend(tunable::magic_formula("front"));
         parameters.extend(tunable::magic_formula("rear"));
         parameters.extend(tunable::combined_slip());

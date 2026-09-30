@@ -13,7 +13,7 @@ use crate::autonomous_control::shared::reactive::{
 use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan, Shape,
-    VescCommand,
+    VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -41,8 +41,10 @@ pub struct DisparityExtenderConfig {
     pub desired_fov_deg: f32,
     /// Readings are clipped to this, in meters.
     pub max_range_m: f32,
-    /// Vehicle width, in meters.
-    pub car_width_m: f32,
+    /// Room kept on each side of the vehicle (whose width is its
+    /// [`VehicleGeometry`]'s), in meters: disparities are extended over half
+    /// the width plus this.
+    pub width_margin_m: f32,
     /// Two neighbouring readings further apart than this are a disparity, in meters.
     pub disparity_threshold_m: f32,
     /// Multiplies the number of readings a disparity is extended over, pure number.
@@ -84,9 +86,9 @@ fn parameters() -> [AlgorithmParameter; 11] {
         AlgorithmParameter::float("max_range_m", 1.0, 30.0, 0.5)
             .unit("m")
             .description("Readings are clipped to this."),
-        AlgorithmParameter::float("car_width_m", 0.05, 1.0, 0.01)
+        AlgorithmParameter::float("width_margin_m", 0.0, 0.5, 0.005)
             .unit("m")
-            .description("Vehicle width: how far a disparity is extended."),
+            .description("Room kept on each side of the vehicle: disparities are extended over half its width plus this."),
         AlgorithmParameter::float("disparity_threshold_m", 0.05, 5.0, 0.05)
             .unit("m")
             .description("Two neighbouring readings further apart than this are a disparity."),
@@ -139,6 +141,8 @@ impl Executor for DisparityExtender {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
@@ -155,7 +159,8 @@ impl Executor for DisparityExtender {
 
             let scan = scan_topic.read().into_value();
             let limits = limits_topic.read();
-            let Some(control) = control(&self.config, &scan, &limits) else {
+            let body_width_m = geometry_topic.read().body_width_m;
+            let Some(control) = control(&self.config, &scan, &limits, body_width_m) else {
                 ticker.wait();
                 continue;
             };
@@ -235,17 +240,19 @@ struct Control {
     target_rad: f32,
 }
 
-/// The disparity extender on `scan` - `None` if it has too few readings.
+/// The disparity extender on `scan`, for a vehicle `body_width_m` wide -
+/// `None` if it has too few readings.
 fn control(
     config: &DisparityExtenderConfig,
     scan: &LidarScan,
     limits: &ActuatorLimits,
+    body_width_m: f64,
 ) -> Option<Control> {
     let window = fov_window(scan, config.desired_fov_deg.to_radians());
     if window.len() < 2 {
         return None;
     }
-    let processed = extend_disparities(config, scan, window.clone());
+    let processed = extend_disparities(config, scan, window.clone(), body_width_m);
     let target = choose(config, scan, &processed, window.clone());
     let target_rad = scan.angle_rad(target);
     let max_steering = limits.max_steering_angle_rad as f32;
@@ -270,13 +277,15 @@ fn control(
 /// `scan`'s readings clipped to `max_range_m`, with every disparity in
 /// `window` extended: the nearer reading of the pair overwrites (where it's
 /// nearer) enough readings on the farther side, starting at the farther
-/// one, to cover half the car's width at its distance - times
-/// `r_multiplier`.
+/// one, to cover half the car's width (`body_width_m`) plus `width_margin_m`
+/// at its distance - times `r_multiplier`.
 fn extend_disparities(
     config: &DisparityExtenderConfig,
     scan: &LidarScan,
     window: Range<usize>,
+    body_width_m: f64,
 ) -> Vec<f32> {
+    let half_width_m = body_width_m as f32 / 2.0 + config.width_margin_m;
     let clipped: Vec<f32> = scan
         .points
         .iter()
@@ -290,7 +299,7 @@ fn extend_disparities(
             continue;
         }
         let near = before.min(after);
-        let theta = (config.car_width_m / 2.0 / near.max(1e-3)).atan();
+        let theta = (half_width_m / near.max(1e-3)).atan();
         let count = ((theta / step).round() * config.r_multiplier).round() as usize;
         // The farther side, walking away from the nearer reading.
         let far_side: Box<dyn Iterator<Item = usize>> = if after > before {
@@ -362,10 +371,13 @@ mod tests {
         }
     }
 
+    /// With `config`'s margin, 0.30 m in all.
+    const BODY_WIDTH_M: f64 = 0.25;
+
     fn config() -> DisparityExtenderConfig {
         DisparityExtenderConfig {
             desired_fov_deg: 180.0,
-            car_width_m: 0.30,
+            width_margin_m: 0.025,
             disparity_threshold_m: 0.5,
             r_multiplier: 2.0,
             ray_eq_thr_m: 0.0,
@@ -379,7 +391,7 @@ mod tests {
         // 1 degree per reading: near (2 m) up to 89, far (5 m) from 90.
         let mut scan = scan(181, PI, 5.0);
         scan.points[..90].fill(2.0);
-        let processed = extend_disparities(&config(), &scan, 0..181);
+        let processed = extend_disparities(&config(), &scan, 0..181, BODY_WIDTH_M);
         // atan(0.15 / 2) = 4.3 degrees -> 4 readings, times 2.
         assert!(
             processed[90..98].iter().all(|&r| r == 2.0),
@@ -424,7 +436,7 @@ mod tests {
         for i in 0..70 {
             scan.points[i] = 8.0;
         }
-        let control = control(&config(), &scan, &limits()).unwrap();
+        let control = control(&config(), &scan, &limits(), BODY_WIDTH_M).unwrap();
         assert!(control.steering_rad < 0.0);
         assert!(control.steering_rad >= -0.4);
         assert!(control.speed_mps <= config().max_speed);

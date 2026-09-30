@@ -10,7 +10,7 @@
 
 use crate::topics::{
     Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry, Placement,
-    PlacementTopics, Shape, StartState, VehicleStatus, VehicleTopics,
+    PlacementTopics, Shape, StartState, VehicleGeometry, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -42,12 +42,6 @@ pub struct DeadReckoningConfig {
     /// Yaw-rate noise the covariance assumes, standard deviation per reading
     /// in radians/second.
     pub yaw_rate_std_rad_s: f64,
-    /// Distance from the rear axle forward to the point the pose tracks (the
-    /// CG, like [`crate::topics::VehicleStatus`]), in meters. Wheel speed
-    /// and yaw rate alone describe the rear axle's motion; any point ahead
-    /// of it also slides sideways at `yaw_rate * rear_axle_to_cg_m` while
-    /// turning (assuming the rear tires don't slip).
-    pub rear_axle_to_cg_m: f64,
     /// Whether to draw the dead-reckoned vehicle and trail, anchored at the
     /// start pose.
     pub draw: bool,
@@ -77,12 +71,6 @@ const MAX_TRAIL_POINTS: usize = 4000;
 /// forward between two drawings, so it still moves smoothly.
 const DRAWING_PERIOD: Duration = Duration::from_millis(50);
 
-/// Size the dead-reckoned vehicle is drawn at - the same roughly
-/// 1/10-scale RC car [`crate::actuators::SimulatedVehicle`] draws, so the two
-/// overlap exactly when the estimate is right.
-const DRAWN_BODY_LENGTH_M: f64 = 0.45;
-const DRAWN_BODY_WIDTH_M: f64 = 0.25;
-const DRAWN_AXLE_M: f64 = 0.16;
 /// Translucent, so the true vehicle stays visible underneath.
 const DRAWN_COLOR: Color = Color::PURPLE.with_alpha(150);
 /// Above [`crate::actuators::SimulatedVehicle`]'s own drawing (`z_index`
@@ -138,6 +126,15 @@ impl Executor for DeadReckoning {
         let show_vehicle = captain
             .try_topic::<VehicleStatus>(&VehicleTopics::ego().vehicle_status())
             .is_none();
+        // Where the rear axle is, and the size drawn - the template car's if
+        // nothing publishes the vehicle's.
+        let geometry_topic =
+            captain.try_topic::<VehicleGeometry>(&VehicleTopics::ego().vehicle_geometry());
+        let geometry = || {
+            geometry_topic
+                .as_ref()
+                .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value())
+        };
 
         let mut placement = Placement::new(&placement_topics.read());
         let mut odometry = Odometry::default();
@@ -176,7 +173,13 @@ impl Executor for DeadReckoning {
                 if let Some(previous) = last_written_at {
                     let dt = written_at.saturating_duration_since(previous);
                     if !dt.is_zero() && dt <= MAX_INTEGRATION_GAP {
-                        odometry = step(odometry, &reading, dt.as_secs_f64(), &self.config);
+                        odometry = step(
+                            odometry,
+                            &reading,
+                            dt.as_secs_f64(),
+                            &self.config,
+                            geometry().rear_axle_to_cg_m,
+                        );
                         trail.extend(&odometry);
                     }
                 }
@@ -195,7 +198,7 @@ impl Executor for DeadReckoning {
             {
                 last_drawn = Instant::now();
                 drawing_topic
-                    .write(self.id, trail.drawing(&odometry, show_vehicle))
+                    .write(self.id, trail.drawing(&odometry, show_vehicle, &geometry()))
                     .expect("lost writer authorization for dead reckoning's drawing topic");
             }
 
@@ -221,15 +224,22 @@ impl Executor for DeadReckoning {
 /// `P' = F P F^T + G Q G^T` - `F` the pose Jacobian, `G` the Jacobian with
 /// respect to the (speed, yaw rate) inputs, and `Q` their assumed noise from
 /// `config` - both linearized about the interval's mid-heading.
+///
+/// The pose tracks the point `rear_axle_to_cg_m` ahead of the rear axle (the
+/// CG, like [`crate::topics::VehicleStatus`]). Wheel speed and yaw rate
+/// alone describe the rear axle's motion; any point ahead of it also slides
+/// sideways at `yaw_rate * rear_axle_to_cg_m` while turning (assuming the
+/// rear tires don't slip).
 fn step(
     odometry: Odometry,
     reading: &ImuReading,
     dt_s: f64,
     config: &DeadReckoningConfig,
+    rear_axle_to_cg_m: f64,
 ) -> Odometry {
     let v = reading.wheel_speed_mps;
     let w = reading.yaw_rate_rad_s;
-    let lever_m = config.rear_axle_to_cg_m;
+    let lever_m = rear_axle_to_cg_m;
     let (x_m, y_m, heading_rad) = integrate(
         (odometry.x_m, odometry.y_m, odometry.heading_rad),
         (v, w * lever_m),
@@ -367,9 +377,15 @@ impl Trail {
         }
     }
 
-    /// The trail, plus a vehicle at `odometry`'s pose - both in world
-    /// coordinates. Only the vehicle can be shown by default (`show_vehicle`).
-    fn drawing(&self, odometry: &Odometry, show_vehicle: bool) -> Drawing {
+    /// The trail, plus a vehicle the size of `geometry` at `odometry`'s
+    /// pose, both in world coordinates. Only the vehicle can be shown by
+    /// default (`show_vehicle`).
+    fn drawing(
+        &self,
+        odometry: &Odometry,
+        show_vehicle: bool,
+        geometry: &VehicleGeometry,
+    ) -> Drawing {
         let (x_m, y_m) = self.to_world(odometry.x_m, odometry.y_m);
         Drawing::default()
             .element(
@@ -391,10 +407,10 @@ impl Trail {
                     speed_mps: odometry.speed_mps,
                     // Dead reckoning never sees the steering command.
                     steering_rad: 0.0,
-                    length_m: DRAWN_BODY_LENGTH_M,
-                    width_m: DRAWN_BODY_WIDTH_M,
-                    front_axle_m: DRAWN_AXLE_M,
-                    rear_axle_m: DRAWN_AXLE_M,
+                    length_m: geometry.body_length_m,
+                    width_m: geometry.body_width_m,
+                    front_axle_m: geometry.lf_m(),
+                    rear_axle_m: geometry.lr_m(),
                     color: DRAWN_COLOR,
                 }],
                 show_vehicle,
@@ -409,12 +425,9 @@ mod tests {
     use super::*;
     use std::f64::consts::{FRAC_PI_2, PI};
 
-    /// A config tracking the rear axle itself, so the pose follows plain
-    /// unicycle motion.
     fn config(integration: Integration) -> DeadReckoningConfig {
         DeadReckoningConfig {
             integration,
-            rear_axle_to_cg_m: 0.0,
             ..DeadReckoningConfig::default()
         }
     }
@@ -427,7 +440,9 @@ mod tests {
         }
     }
 
-    /// Integrates `seconds` of a constant `reading`, sampled every `dt_s`.
+    /// Integrates `seconds` of a constant `reading`, sampled every `dt_s` -
+    /// tracking the rear axle itself, so the pose follows plain unicycle
+    /// motion.
     fn drive(
         reading: ImuReading,
         seconds: f64,
@@ -436,7 +451,7 @@ mod tests {
     ) -> Odometry {
         let steps = (seconds / dt_s).round() as usize;
         (0..steps).fold(Odometry::default(), |odometry, _| {
-            step(odometry, &reading, dt_s, config)
+            step(odometry, &reading, dt_s, config, 0.0)
         })
     }
 
@@ -485,11 +500,7 @@ mod tests {
             lf_m: 0.16,
             lr_m: 0.16,
         };
-        let config = DeadReckoningConfig {
-            integration: Integration::Midpoint,
-            rear_axle_to_cg_m: params.lr_m,
-            ..DeadReckoningConfig::default()
-        };
+        let config = config(Integration::Midpoint);
         let (steering_rad, dt_s) = (0.3, 0.01);
         let beta = (0.5 * f64::tan(steering_rad)).atan();
         let mut truth = BicycleState {
@@ -504,7 +515,7 @@ mod tests {
                 truth.speed_mps * beta.cos(),
                 truth.speed_mps * beta.sin() / params.lr_m,
             );
-            odometry = step(odometry, &reading, dt_s, &config);
+            odometry = step(odometry, &reading, dt_s, &config, params.lr_m);
             truth = bicycle_step(truth, params, steering_rad, 0.0, dt_s);
         }
         let error_m = (odometry.x_m - truth.x_m).hypot(odometry.y_m - truth.y_m);
@@ -537,7 +548,7 @@ mod tests {
         let mut odometry = Odometry::default();
         let mut previous_trace = 0.0;
         for _ in 0..500 {
-            odometry = step(odometry, &reading(2.0, 0.5), 0.01, &config);
+            odometry = step(odometry, &reading(2.0, 0.5), 0.01, &config, 0.0);
             let p = odometry.covariance;
             let trace = p[0][0] + p[1][1] + p[2][2];
             assert!(trace > previous_trace);
@@ -564,6 +575,7 @@ mod tests {
             &reading(1.0, 0.1),
             0.01,
             &config(Integration::Euler),
+            0.0,
         );
         assert_eq!(stepped.reset_count, 7);
     }
@@ -587,7 +599,11 @@ mod tests {
         let trail = Trail::new(StartState::default());
         let visible = |show_vehicle: bool, name: &str| {
             trail
-                .drawing(&Odometry::default(), show_vehicle)
+                .drawing(
+                    &Odometry::default(),
+                    show_vehicle,
+                    &VehicleGeometry::default(),
+                )
                 .elements
                 .iter()
                 .find(|element| element.name == name)
@@ -612,7 +628,7 @@ mod tests {
             speed_mps: 2.0,
             ..Odometry::default()
         };
-        let drawing = trail.drawing(&odometry, false);
+        let drawing = trail.drawing(&odometry, false, &VehicleGeometry::default());
         let vehicle = drawing
             .shapes
             .iter()

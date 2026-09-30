@@ -63,12 +63,13 @@ pub struct PlannedLines {
     pub min_time: Option<Result<MinTimeLine, PlanError>>,
 }
 
-/// Plans `map`'s race line for `objective` with `config`. `progress` is
-/// told what's going on, and cancels the planning - with
-/// [`PlanError::Cancelled`] - by returning `false`.
+/// Plans `map`'s race line for `objective` with `config`, for a vehicle
+/// `body_width_m` wide. `progress` is told what's going on, and cancels the
+/// planning - with [`PlanError::Cancelled`] - by returning `false`.
 pub fn plan(
     map: &Map,
     config: &PlanningConfig,
+    body_width_m: f64,
     objective: PlanningObjective,
     progress: &mut dyn FnMut(Progress) -> bool,
 ) -> Result<PlannedLines, PlanError> {
@@ -105,7 +106,7 @@ pub fn plan(
     let reference = resample_even_spacing(&reference, config.spacing_m);
 
     stage("Optimizing", progress)?;
-    let optimizer_config = config.min_curvature();
+    let optimizer_config = config.min_curvature(body_width_m);
     let total = optimizer_config.iterations.max(1);
     let line = min_curvature::optimize(&reference, &grid, &optimizer_config, &mut |iteration| {
         progress(Progress::Iteration { total, iteration })
@@ -121,7 +122,7 @@ pub fn plan(
         PlanningObjective::MinCurvature => None,
         PlanningObjective::MinTime => {
             stage("Optimizing the lap time", progress)?;
-            let min_time_config = config.min_time();
+            let min_time_config = config.min_time(body_width_m);
             let total = min_time_config.max_outer_iterations.max(1);
             let optimized = min_time::optimize(&line, &grid, &min_time_config, &mut |iteration| {
                 progress(Progress::MinTimeIteration { total, iteration })
@@ -171,6 +172,8 @@ fn with_speeds(points: &[Point2], speeds: &[f64]) -> Vec<SpeedPoint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BODY_WIDTH_M: f64 = 0.25;
     use crate::environment::{GenerationConfig, generate};
     use crate::planning::track::tests::ring_map;
 
@@ -181,9 +184,13 @@ mod tests {
             spacing_m: 0.05,
             ..PlanningConfig::default()
         };
-        let planned = plan(&map, &config, PlanningObjective::MinCurvature, &mut |_| {
-            true
-        })
+        let planned = plan(
+            &map,
+            &config,
+            BODY_WIDTH_M,
+            PlanningObjective::MinCurvature,
+            &mut |_| true,
+        )
         .unwrap();
 
         let centerline = planned
@@ -194,7 +201,7 @@ mod tests {
         assert!((centerline[0].x - 1.5).abs() < 0.05 && centerline[0].y.abs() < 0.05);
         assert!(centerline[3].y > centerline[0].y);
 
-        let margin = config.vehicle_width_m / 2.0 + config.safety_margin_m;
+        let margin = config.wall_margin_m(BODY_WIDTH_M);
         for point in &planned.race_line {
             let radius = (point.x * point.x + point.y * point.y).sqrt();
             assert!((radius - (2.0 - margin)).abs() < 0.04, "radius {radius}");
@@ -227,17 +234,20 @@ mod tests {
         let map = small_generated_map(&root);
         let config = PlanningConfig::default();
 
-        let planned = plan(&map, &config, PlanningObjective::MinCurvature, &mut |_| {
-            true
-        })
+        let planned = plan(
+            &map,
+            &config,
+            BODY_WIDTH_M,
+            PlanningObjective::MinCurvature,
+            &mut |_| true,
+        )
         .unwrap();
         std::fs::remove_dir_all(&root).ok();
 
         assert!(planned.computed_centerline.is_none());
         let grid = TrackGrid::build(&map).unwrap();
         // A pixel of slack for the rasterized walls.
-        let margin =
-            config.vehicle_width_m / 2.0 + config.safety_margin_m - map.info.resolution_m_per_px;
+        let margin = config.wall_margin_m(BODY_WIDTH_M) - map.info.resolution_m_per_px;
         for point in &planned.race_line {
             for angle in (0..16).map(|i| std::f64::consts::TAU * i as f64 / 16.0) {
                 let (x, y) = (
@@ -270,7 +280,14 @@ mod tests {
         };
 
         let started = std::time::Instant::now();
-        let planned = plan(&map, &config, PlanningObjective::MinTime, &mut |_| true).unwrap();
+        let planned = plan(
+            &map,
+            &config,
+            BODY_WIDTH_M,
+            PlanningObjective::MinTime,
+            &mut |_| true,
+        )
+        .unwrap();
         std::fs::remove_dir_all(&root).ok();
         let min_time = planned
             .min_time
@@ -285,8 +302,7 @@ mod tests {
 
         assert!(min_time.lap_time_s < planned.lap_time_s);
         let grid = TrackGrid::build(&map).unwrap();
-        let margin =
-            config.vehicle_width_m / 2.0 + config.safety_margin_m - map.info.resolution_m_per_px;
+        let margin = config.wall_margin_m(BODY_WIDTH_M) - map.info.resolution_m_per_px;
         for point in &min_time.race_line {
             for angle in (0..16).map(|i| std::f64::consts::TAU * i as f64 / 16.0) {
                 let (x, y) = (

@@ -126,6 +126,11 @@ pub struct VehicleRecord {
     pub parameters: BTreeMap<String, f64>,
     /// The actuator limits it ran with.
     pub limits: BTreeMap<String, f64>,
+    /// The simulated car's size - `None` in runs from before it was a
+    /// car's (see [`crate::hardware::CarCalibration`]), whose `parameters`
+    /// held the model's own axle distances instead.
+    #[serde(default)]
+    pub geometry: Option<crate::topics::VehicleGeometry>,
 }
 
 /// Lap time statistics over the completed laps.
@@ -257,6 +262,7 @@ pub(crate) mod tests {
                 saved_to_config: false,
                 parameters: BTreeMap::from([("wheelbase_m".to_string(), 0.33)]),
                 limits: BTreeMap::from([("max_speed_mps".to_string(), 8.0)]),
+                geometry: Some(crate::topics::VehicleGeometry::default()),
             },
             results: Results::of(&laps, true),
             laps,

@@ -271,6 +271,7 @@ mod tests {
                 saved_to_config: true,
                 parameters: BTreeMap::new(),
                 limits: BTreeMap::new(),
+                geometry: None,
             },
             results: None,
             laps: Vec::new(),

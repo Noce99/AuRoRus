@@ -15,14 +15,15 @@ use crate::environment::simulator::vehicle::{
     NonlinearTireParams, PacejkaBicycleState, PacejkaTireParams, TwoTrackParams, TwoTrackState,
     dynamic_step, nonlinear_step, pacejka_step, step as bicycle_step, two_track_step,
 };
+use crate::hardware::CarCalibration;
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
     HUMAN_VESC_COMMAND_TOPIC_NAME, Placement, PlacementTopics, Shape, StartState,
-    VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
-    VehicleModelKind, VehicleModelParameters, VehicleModelSelection, VehicleModelStatus,
-    VehicleStatus, VehicleTopics, VescCommand, now_ms,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleGeometry, VehicleModelKind,
+    VehicleModelParameters, VehicleModelSelection, VehicleModelStatus, VehicleStatus,
+    VehicleTopics, VescCommand, now_ms,
 };
 use crate::{Captain, Executor, RwLockTopic, Stamped, Ticker};
 use std::any::Any;
@@ -189,7 +190,11 @@ fn kind_of(model: &VehicleModel) -> VehicleModelKind {
 /// the [`ActuatorLimits`] shared by every model kind, and each kind's own
 /// physical parameters - loaded from `config/actuators/simulated_vehicle.toml`
 /// (see [`Default`]) or from an arbitrary path via [`crate::config::load`].
+/// What the simulated car itself is - its size, mass and largest steering
+/// angle - comes from a car's calibration instead: see [`Self::for_car`],
+/// which a loaded config needs before it's used.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulatedVehicleConfig {
     /// How often [`SimulatedVehicle`] advances the model and republishes
     /// [`VehicleStatus`], and how often it checks
@@ -203,6 +208,10 @@ pub struct SimulatedVehicleConfig {
     pub nonlinear_bicycle: NonlinearTireParams,
     pub pacejka_bicycle: PacejkaTireParams,
     pub two_track: TwoTrackParams,
+    /// The simulated car's size, published on
+    /// [`VehicleTopics::vehicle_geometry`] - see [`Self::for_car`].
+    #[serde(skip)]
+    pub geometry: VehicleGeometry,
 }
 
 impl Default for SimulatedVehicleConfig {
@@ -215,14 +224,39 @@ impl Default for SimulatedVehicleConfig {
     /// available. This is a deliberate exception to
     /// [`DynamicParams`]/[`BicycleParams`] having no [`Default`]: a live,
     /// web-selectable model needs *some* starting parameters for a kind the
-    /// caller only names, not configures.
+    /// caller only names, not configures. Simulates the template car (see
+    /// [`CarCalibration::template`]).
     fn default() -> Self {
-        toml::from_str(include_str!(
+        let config: Self = toml::from_str(include_str!(
             "../../config/actuators/simulated_vehicle.toml"
         ))
         .expect(
             "config/actuators/simulated_vehicle.toml must deserialize into SimulatedVehicleConfig",
-        )
+        );
+        config.for_car(&CarCalibration::template("template"))
+    }
+}
+
+impl SimulatedVehicleConfig {
+    /// This config simulating `car`: every model kind with its mass and axle
+    /// distances (and the two-track's track width), steering at most as far
+    /// as it does both ways, and its size published.
+    pub fn for_car(mut self, car: &CarCalibration) -> Self {
+        let geometry = car.vehicle_geometry();
+        let (lf_m, lr_m, mass_kg) = (geometry.lf_m(), geometry.lr_m(), car.geometry.mass_kg);
+        (self.bicycle.lf_m, self.bicycle.lr_m) = (lf_m, lr_m);
+        let dynamic = &mut self.dynamic_bicycle;
+        (dynamic.lf_m, dynamic.lr_m, dynamic.mass_kg) = (lf_m, lr_m, mass_kg);
+        let nonlinear = &mut self.nonlinear_bicycle;
+        (nonlinear.lf_m, nonlinear.lr_m, nonlinear.mass_kg) = (lf_m, lr_m, mass_kg);
+        let pacejka = &mut self.pacejka_bicycle;
+        (pacejka.lf_m, pacejka.lr_m, pacejka.mass_kg) = (lf_m, lr_m, mass_kg);
+        let two_track = &mut self.two_track;
+        (two_track.lf_m, two_track.lr_m, two_track.mass_kg) = (lf_m, lr_m, mass_kg);
+        two_track.track_width_m = geometry.track_width_m;
+        self.limits.max_steering_angle_rad = car.steering.max_angle_rad();
+        self.geometry = geometry;
+        self
     }
 }
 
@@ -317,7 +351,7 @@ fn apply_wanted(
 /// What [`SimulatedVehicle`] publishes on [`VEHICLE_MODEL_STATUS_TOPIC_NAME`]
 /// while running `kind` with `config`.
 fn model_status(kind: VehicleModelKind, config: &SimulatedVehicleConfig) -> VehicleModelStatus {
-    let mut limits = ActuatorLimits::tunable_parameters();
+    let mut limits = ActuatorLimits::tunable_parameters_but_steering_angle();
     crate::config::refresh_parameter_values(&mut limits, &config.limits);
     VehicleModelStatus {
         kind,
@@ -614,6 +648,7 @@ fn axles_of(model: &VehicleModel) -> (f64, f64) {
 /// vehicle at `state`, front wheels turned by `steering_angle_rad`, in `color`.
 fn drawing(
     model: &VehicleModel,
+    geometry: &VehicleGeometry,
     state: &VehicleState,
     steering_angle_rad: f64,
     color: Color,
@@ -630,8 +665,8 @@ fn drawing(
                 // the vehicle between samples moves it backward while reversing.
                 speed_mps: state.longitudinal_speed_mps(),
                 steering_rad: steering_angle_rad,
-                length_m: VEHICLE_BODY_LENGTH_M,
-                width_m: VEHICLE_BODY_WIDTH_M,
+                length_m: geometry.body_length_m,
+                width_m: geometry.body_width_m,
                 front_axle_m,
                 rear_axle_m,
                 color,
@@ -829,6 +864,12 @@ impl Executor for SimulatedVehicle {
             self.id,
             move || limits,
         );
+        let geometry = self.config.geometry;
+        captain.claim_writer::<VehicleGeometry>(
+            &self.vehicle.vehicle_geometry(),
+            self.id,
+            move || geometry,
+        );
         captain.claim_drawing(self.id);
     }
 
@@ -923,7 +964,7 @@ impl Executor for SimulatedVehicle {
                     .is_some_and(|wanted| apply_wanted(applied_kind, &mut config, wanted));
                 let limits_changed = crate::config::apply_parameters(
                     &mut config.limits,
-                    &ActuatorLimits::tunable_parameters(),
+                    &ActuatorLimits::tunable_parameters_but_steering_angle(),
                     &requests.value.limits,
                 );
                 if limits_changed {
@@ -999,7 +1040,14 @@ impl Executor for SimulatedVehicle {
             drawing_topic
                 .write(
                     self.id,
-                    drawing(&self.model, &state, steering_angle_rad, color).z_index(z_index),
+                    drawing(
+                        &self.model,
+                        &config.geometry,
+                        &state,
+                        steering_angle_rad,
+                        color,
+                    )
+                    .z_index(z_index),
                 )
                 .expect("lost writer authorization for the vehicle's drawing topic");
 
@@ -1048,6 +1096,9 @@ impl Executor for SimulatedVehicle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The params' fields that are the car's, set by `for_car`.
+    const CAR_OWNED: [&str; 4] = ["lf_m", "lr_m", "mass_kg", "track_width_m"];
     use crate::WriteMeta;
 
     fn test_model() -> VehicleModel {
@@ -1213,7 +1264,8 @@ mod tests {
     }
 
     /// Every kind declares one tunable parameter per field of its params
-    /// (a mismatched name panics in `tunable_parameters`), each starting
+    /// but the car's own (a mismatched name panics in
+    /// `tunable_parameters`), each starting
     /// from the checked-in config's value and within its own range - so
     /// saving untouched values never changes the file.
     #[test]
@@ -1231,10 +1283,20 @@ mod tests {
                 VehicleModelKind::TwoTrack => serde_json::to_value(config.two_track),
             }
             .unwrap();
+            let fields = json.as_object().unwrap();
+            let own = fields
+                .keys()
+                .filter(|name| !CAR_OWNED.contains(&name.as_str()));
             assert_eq!(
                 parameters.len(),
-                json.as_object().unwrap().len(),
+                own.count(),
                 "{kind:?} doesn't declare every field"
+            );
+            assert!(
+                parameters
+                    .iter()
+                    .all(|parameter| !CAR_OWNED.contains(&parameter.name.as_str())),
+                "{kind:?} tunes the car's own geometry"
             );
             for parameter in &parameters {
                 assert_eq!(
@@ -1252,7 +1314,8 @@ mod tests {
         let config = SimulatedVehicleConfig::default();
         let limits = model_status(VehicleModelKind::Bicycle, &config).limits;
         let json = serde_json::to_value(config.limits).unwrap();
-        assert_eq!(limits.len(), json.as_object().unwrap().len());
+        // All but the steering angle, which is the car's.
+        assert_eq!(limits.len(), json.as_object().unwrap().len() - 1);
         for parameter in &limits {
             assert_eq!(
                 parameter.kind.sanitize(parameter.value),
@@ -1266,15 +1329,22 @@ mod tests {
     #[test]
     fn wanted_values_apply_to_the_running_kind_only() {
         let mut config = SimulatedVehicleConfig::default();
-        let wanted = BTreeMap::from([("lf_m".to_string(), 0.3), ("mass_kg".to_string(), 99.0)]);
+        let wanted = BTreeMap::from([
+            ("yaw_inertia_kgm2".to_string(), 0.3),
+            ("cf_n_per_rad".to_string(), 999.0),
+            // The car's own: ignored.
+            ("lf_m".to_string(), 0.3),
+        ]);
+        let lf_m = config.dynamic_bicycle.lf_m;
         assert!(apply_wanted(
             VehicleModelKind::DynamicBicycle,
             &mut config,
             &wanted
         ));
-        assert_eq!(config.dynamic_bicycle.lf_m, 0.3);
+        assert_eq!(config.dynamic_bicycle.yaw_inertia_kgm2, 0.3);
         // Clamped to its range.
-        assert_eq!(config.dynamic_bicycle.mass_kg, 15.0);
+        assert_eq!(config.dynamic_bicycle.cf_n_per_rad, 300.0);
+        assert_eq!(config.dynamic_bicycle.lf_m, lf_m);
         assert_eq!(config.bicycle, SimulatedVehicleConfig::default().bicycle);
         assert!(!apply_wanted(
             VehicleModelKind::DynamicBicycle,
@@ -1283,8 +1353,33 @@ mod tests {
         ));
 
         let status = model_status(VehicleModelKind::DynamicBicycle, &config);
-        let lf = status.parameters.iter().find(|p| p.name == "lf_m").unwrap();
-        assert_eq!(lf.value, 0.3);
+        let inertia = status
+            .parameters
+            .iter()
+            .find(|p| p.name == "yaw_inertia_kgm2")
+            .unwrap();
+        assert_eq!(inertia.value, 0.3);
+    }
+
+    #[test]
+    fn every_kind_simulates_the_cars_geometry() {
+        let mut car = CarCalibration::template("test");
+        car.geometry.wheelbase_m = 0.4;
+        car.geometry.rear_axle_to_cg_m = 0.15;
+        car.geometry.mass_kg = 2.0;
+        car.geometry.track_width_m = 0.25;
+        car.steering.points[0].angle_rad = -0.3;
+        let config = SimulatedVehicleConfig::default().for_car(&car);
+        for (kind, ..) in VehicleModelKind::ALL {
+            let (lf_m, lr_m) = axles_of(&default_model(*kind, &config));
+            assert!((lf_m - 0.25).abs() < 1e-12 && lr_m == 0.15, "{kind:?}");
+        }
+        assert_eq!(config.dynamic_bicycle.mass_kg, 2.0);
+        assert_eq!(config.two_track.mass_kg, 2.0);
+        assert_eq!(config.two_track.track_width_m, 0.25);
+        // The smaller side.
+        assert_eq!(config.limits.max_steering_angle_rad, 0.3);
+        assert_eq!(config.geometry, car.vehicle_geometry());
     }
 
     #[test]
@@ -1434,7 +1529,7 @@ mod tests {
     #[test]
     fn an_opponent_copies_the_ego_model_with_its_own_limits() {
         let mut ego_config = SimulatedVehicleConfig::default();
-        ego_config.dynamic_bicycle.mass_kg += 1.0;
+        ego_config.dynamic_bicycle.yaw_inertia_kgm2 += 0.01;
         let ego = model_status(VehicleModelKind::DynamicBicycle, &ego_config);
         let limits = ActuatorLimits {
             max_speed_mps: 1.5,

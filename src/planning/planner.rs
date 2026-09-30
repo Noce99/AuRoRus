@@ -10,6 +10,7 @@ use crate::topics::{
     Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
     PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome, PlanningParameters,
     PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
+    VEHICLE_GEOMETRY_TOPIC_NAME, VehicleGeometry,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -106,47 +107,59 @@ impl Planner {
                 // The latest minimum-curvature line, drawn under the
                 // minimum-time one it starts.
                 let mut min_curvature_line: Vec<Point2> = Vec::new();
-                let planned = plan(&map, &self.config, request.objective, &mut |progress| {
-                    let drawing = match progress {
-                        Progress::Stage(stage) => {
-                            status.stage = stage;
-                            None
-                        }
-                        Progress::Iteration { total, iteration } => {
-                            status.stage = format!(
-                                "Optimizing - iteration {}/{total}, moved up to {:.3} m",
-                                iteration.number, iteration.max_move_m
-                            );
-                            min_curvature_line = iteration.solution.to_vec();
-                            Some(progress_drawing(
-                                iteration.reference,
-                                iteration.solution,
-                                Color::AMBER,
-                            ))
-                        }
-                        Progress::MinTimeIteration { total, iteration } => {
-                            status.stage = format!(
-                                "Optimizing the lap time - iteration {}/{total}, lap {:.2} s, \
+                // For the ego vehicle - the template car's size if nothing
+                // publishes one.
+                let body_width_m = captain
+                    .try_topic::<VehicleGeometry>(VEHICLE_GEOMETRY_TOPIC_NAME)
+                    .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value())
+                    .body_width_m;
+                let planned = plan(
+                    &map,
+                    &self.config,
+                    body_width_m,
+                    request.objective,
+                    &mut |progress| {
+                        let drawing = match progress {
+                            Progress::Stage(stage) => {
+                                status.stage = stage;
+                                None
+                            }
+                            Progress::Iteration { total, iteration } => {
+                                status.stage = format!(
+                                    "Optimizing - iteration {}/{total}, moved up to {:.3} m",
+                                    iteration.number, iteration.max_move_m
+                                );
+                                min_curvature_line = iteration.solution.to_vec();
+                                Some(progress_drawing(
+                                    iteration.reference,
+                                    iteration.solution,
+                                    Color::AMBER,
+                                ))
+                            }
+                            Progress::MinTimeIteration { total, iteration } => {
+                                status.stage = format!(
+                                    "Optimizing the lap time - iteration {}/{total}, lap {:.2} s, \
                                  limits exceeded by up to {:.1}%",
-                                iteration.number,
-                                iteration.lap_time_s,
-                                100.0 * iteration.violation
+                                    iteration.number,
+                                    iteration.lap_time_s,
+                                    100.0 * iteration.violation
+                                );
+                                Some(progress_drawing(
+                                    &min_curvature_line,
+                                    iteration.points,
+                                    Color::PURPLE,
+                                ))
+                            }
+                        };
+                        if let Some(drawing) = drawing {
+                            drawing_topic.write(self.id, drawing).expect(
+                                "lost writer authorization for the planner's drawing topic",
                             );
-                            Some(progress_drawing(
-                                &min_curvature_line,
-                                iteration.points,
-                                Color::PURPLE,
-                            ))
                         }
-                    };
-                    if let Some(drawing) = drawing {
-                        drawing_topic
-                            .write(self.id, drawing)
-                            .expect("lost writer authorization for the planner's drawing topic");
-                    }
-                    publish(status);
-                    captain.is_running(self.id)
-                })
+                        publish(status);
+                        captain.is_running(self.id)
+                    },
+                )
                 .map_err(|err| err.to_string())?;
                 save(&map, &planned).map(|saved_to| (planned, saved_to))
             });

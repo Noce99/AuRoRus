@@ -87,7 +87,8 @@ pub(crate) struct FieldConfig {
     pub hysteresis_m: f32,
     /// Weight of the attractive term, pure number.
     pub attractive_power: f32,
-    /// Vehicle width, which widens every obstacle's potential.
+    /// Vehicle width plus a margin on each side, which widens every
+    /// obstacle's potential.
     pub car_width_m: f32,
     /// Also consider the global minimum, not only strict local ones.
     pub include_global_minima: bool,

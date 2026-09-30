@@ -12,8 +12,8 @@ pose_source = 0
 controller = 0
 # Feedforward: 0 = none, 1 = from the line's curvature, 2 = learned per point.
 feedforward = 0
-# Distance between the front and rear axles, in meters (ubm's car: 0.285).
-wheelbase_m = 0.32
+# (The wheelbase is the vehicle's - its vehicle_geometry, from the car's
+# calibration.)
 # Proportional gain on the heading error, pure number.
 kk_s = 0.9
 # Derivative gain on the heading error (PD only), in seconds.

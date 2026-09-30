@@ -37,32 +37,16 @@ pub use two_track::{TwoTrackParams, TwoTrackState, step as two_track_step};
 
 /// Live-tuning declarations for the fields the models' `Params` structs
 /// share, so every model offers each one with the same range - see each
-/// struct's `tunable_parameters`.
+/// struct's `tunable_parameters`. The car's own (`mass_kg`, `lf_m`, `lr_m`,
+/// `track_width_m`, marked `#[serde(default)]`) aren't tuned: they come from
+/// its calibration - see `crate::actuators::SimulatedVehicleConfig::for_car`.
 mod tunable {
     use crate::topics::AlgorithmParameter;
-
-    pub fn mass_kg() -> AlgorithmParameter {
-        AlgorithmParameter::float("mass_kg", 0.5, 15.0, 0.1)
-            .unit("kg")
-            .description("Vehicle mass.")
-    }
 
     pub fn yaw_inertia_kgm2() -> AlgorithmParameter {
         AlgorithmParameter::float("yaw_inertia_kgm2", 0.01, 0.5, 0.01)
             .unit("kg·m²")
             .description("Yaw moment of inertia about the vertical axis through the CG.")
-    }
-
-    pub fn lf_m() -> AlgorithmParameter {
-        AlgorithmParameter::float("lf_m", 0.05, 0.5, 0.01)
-            .unit("m")
-            .description("Distance from the CG to the front axle.")
-    }
-
-    pub fn lr_m() -> AlgorithmParameter {
-        AlgorithmParameter::float("lr_m", 0.05, 0.5, 0.01)
-            .unit("m")
-            .description("Distance from the CG to the rear axle.")
     }
 
     pub fn cg_height_m() -> AlgorithmParameter {

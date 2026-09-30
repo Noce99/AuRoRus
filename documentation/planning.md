@@ -85,7 +85,8 @@ flowchart LR
      `p_i = c_i + α_i·n_i`.
    - Each offset is bounded by the free space either side of the point,
      raycast in the map: `−w_right + m ≤ α_i ≤ w_left − m`, where
-     `m = vehicle_width_m/2 + safety_margin_m`. These are box constraints,
+     `m = w/2 + safety_margin_m`, `w` the vehicle's width (its
+     `vehicle_geometry`, from the car's calibration). These are box constraints,
      which PANOC projects onto exactly.
    - The discrete curvature `κ_i = (d_i × s_i)/|d_i|³` (central first and
      second differences) is linearized in the offsets (a Gauss-Newton
@@ -221,7 +222,7 @@ use that. If you see it, raise `solver_max_iterations`, or `spacing_m`.
 |---|---|
 | `spacing_m` | Distance between the race line's points. |
 | `centerline_smoothing_window` | Points averaged to smooth a centerline computed from the walls. |
-| `vehicle_width_m`, `safety_margin_m` | The line keeps `vehicle_width_m/2 + safety_margin_m` from either wall. |
+| `safety_margin_m` | The line keeps half the vehicle's width (its `vehicle_geometry`) plus `safety_margin_m` from either wall. |
 | `smoothness_weight` | `λ`: penalty on neighboring offsets differing. `0` is pure minimum curvature. |
 | `max_step_m` | Farthest any point may move in one iteration. |
 | `iterations`, `tolerance_m` | Most outer iterations, and the move below which the line has converged. |

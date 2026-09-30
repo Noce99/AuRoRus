@@ -33,7 +33,8 @@ use crate::topics::{
     Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
     Odometry, Placement, PlacementTopics, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME,
     SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap,
-    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState, VehicleTopics,
+    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState, VehicleGeometry,
+    VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use localizer::{Localizer, LocalizerParams};
@@ -208,11 +209,6 @@ impl SlamConfig {
     }
 }
 
-/// Size the estimated vehicle is drawn at - the same roughly 1/10-scale RC
-/// car [`crate::actuators::SimulatedVehicle`] draws.
-const DRAWN_BODY_LENGTH_M: f64 = 0.45;
-const DRAWN_BODY_WIDTH_M: f64 = 0.25;
-const DRAWN_AXLE_M: f64 = 0.16;
 /// Translucent, so the true vehicle stays visible where they overlap.
 const DRAWN_COLOR: Color = Color::GREEN.with_alpha(170);
 /// The vehicle localized on a known map, told apart from mapping's.
@@ -281,6 +277,15 @@ impl Executor for Slam {
         let status_topic = captain.topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME);
         let map_topic = captain.topic::<SlamMap>(SLAM_MAP_TOPIC_NAME);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
+        // The size the vehicle is drawn at - the template car's if nothing
+        // publishes the vehicle's.
+        let geometry_topic =
+            captain.try_topic::<VehicleGeometry>(&VehicleTopics::ego().vehicle_geometry());
+        let geometry = || {
+            geometry_topic
+                .as_ref()
+                .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value())
+        };
 
         let mut state = State::new(&self.config);
         // Where odometry was last reset: the start line, or wherever the
@@ -375,7 +380,10 @@ impl Executor for Slam {
                     state.localization_changed = false;
                     if let Some(drawing_topic) = &drawing_topic {
                         drawing_topic
-                            .write(self.id, localized_drawing(localization.localizer.pose()))
+                            .write(
+                                self.id,
+                                localized_drawing(localization.localizer.pose(), &geometry()),
+                            )
                             .expect("lost writer authorization for SLAM's drawing topic");
                     }
                 }
@@ -394,6 +402,7 @@ impl Executor for Slam {
                                 state.mapper.pose(),
                                 &state.mapper.loop_edges(),
                                 &placement.anchor(),
+                                &geometry(),
                             ),
                         )
                         .expect("lost writer authorization for SLAM's drawing topic");
@@ -649,8 +658,8 @@ fn save_map(
     Ok(folder)
 }
 
-/// What [`Slam`] draws: `map`, its trajectory, and a vehicle at `pose`,
-/// with SLAM's frame placed at `anchor` - where dead reckoning (whose
+/// What [`Slam`] draws: `map`, its trajectory, and a vehicle the size of
+/// `geometry` at `pose`, with SLAM's frame placed at `anchor` - where dead reckoning (whose
 /// `odom` frame SLAM's frame is) was last reset - so it all overlays the
 /// true map. Empty when the map is.
 fn drawing(
@@ -658,6 +667,7 @@ fn drawing(
     pose: Option<Pose2>,
     loop_edges: &[(Pose2, Pose2)],
     anchor: &StartState,
+    geometry: &VehicleGeometry,
 ) -> Drawing {
     let empty = Drawing::default().z_index(DRAWN_Z_INDEX);
     let Some(pose) = pose else {
@@ -708,10 +718,10 @@ fn drawing(
         // extrapolate it forward in between.
         speed_mps: 0.0,
         steering_rad: 0.0,
-        length_m: DRAWN_BODY_LENGTH_M,
-        width_m: DRAWN_BODY_WIDTH_M,
-        front_axle_m: DRAWN_AXLE_M,
-        rear_axle_m: DRAWN_AXLE_M,
+        length_m: geometry.body_length_m,
+        width_m: geometry.body_width_m,
+        front_axle_m: geometry.lf_m(),
+        rear_axle_m: geometry.lr_m(),
         color: DRAWN_COLOR,
     };
     Drawing::default()
@@ -731,9 +741,9 @@ fn drawing(
         .z_index(DRAWN_Z_INDEX)
 }
 
-/// What [`Slam`] draws while localizing: the vehicle at `pose`, already in
-/// the map's frame. Empty before the first scan.
-fn localized_drawing(pose: Option<Pose2>) -> Drawing {
+/// What [`Slam`] draws while localizing: a vehicle the size of `geometry` at
+/// `pose`, already in the map's frame. Empty before the first scan.
+fn localized_drawing(pose: Option<Pose2>, geometry: &VehicleGeometry) -> Drawing {
     let vehicle = pose.map(|pose| Shape::Vehicle {
         x_m: pose.x_m,
         y_m: pose.y_m,
@@ -741,10 +751,10 @@ fn localized_drawing(pose: Option<Pose2>) -> Drawing {
         // Redrawn on every scan only: don't extrapolate in between.
         speed_mps: 0.0,
         steering_rad: 0.0,
-        length_m: DRAWN_BODY_LENGTH_M,
-        width_m: DRAWN_BODY_WIDTH_M,
-        front_axle_m: DRAWN_AXLE_M,
-        rear_axle_m: DRAWN_AXLE_M,
+        length_m: geometry.body_length_m,
+        width_m: geometry.body_width_m,
+        front_axle_m: geometry.lf_m(),
+        rear_axle_m: geometry.lr_m(),
         color: LOCALIZED_COLOR,
     });
     Drawing::default()
@@ -874,7 +884,13 @@ mod tests {
 
     #[test]
     fn nothing_is_drawn_before_the_first_scan() {
-        let drawing = drawing(&SlamMap::default(), None, &[], &StartState::default());
+        let drawing = drawing(
+            &SlamMap::default(),
+            None,
+            &[],
+            &StartState::default(),
+            &VehicleGeometry::default(),
+        );
         assert!(drawing.shapes.is_empty());
     }
 
@@ -887,7 +903,13 @@ mod tests {
             speed_mps: 0.0,
         };
         let edge = (Pose2::new(0.0, 0.0, 0.0), Pose2::new(1.0, 0.0, 0.0));
-        let drawing = drawing(&tiny_map(), Some(Pose2::default()), &[edge], &anchor);
+        let drawing = drawing(
+            &tiny_map(),
+            Some(Pose2::default()),
+            &[edge],
+            &anchor,
+            &VehicleGeometry::default(),
+        );
         let segment = drawing
             .shapes
             .iter()
@@ -914,7 +936,13 @@ mod tests {
             heading_rad: FRAC_PI_2,
             speed_mps: 0.0,
         };
-        let drawing = drawing(&tiny_map(), Some(Pose2::new(1.0, 0.0, 0.2)), &[], &anchor);
+        let drawing = drawing(
+            &tiny_map(),
+            Some(Pose2::new(1.0, 0.0, 0.2)),
+            &[],
+            &anchor,
+            &VehicleGeometry::default(),
+        );
         let vehicle = drawing
             .shapes
             .iter()

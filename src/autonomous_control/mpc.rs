@@ -37,7 +37,7 @@ use crate::autonomous_control::{
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color,
     DETECTED_OPPONENT_TOPIC_NAME, DetectedOpponent, Drawing, MAP_TOPIC_NAME, SelectedMap,
-    SelectedRaceLine, Shape, VescCommand,
+    SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -76,8 +76,6 @@ pub struct MpcConfig {
     /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
     /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
     pub pose_source: u8,
-    /// Distance between the front and rear axles, in meters.
-    pub wheelbase_m: f64,
     /// Steps in the prediction, the vehicle's own pose included.
     pub horizon: usize,
     /// Arc length of one prediction step, in meters.
@@ -182,7 +180,7 @@ impl MpcConfig {
 }
 
 /// The live-tunable parameters, one per [`MpcConfig`] field - see [`ParameterTuner`].
-fn parameters() -> [AlgorithmParameter; 24] {
+fn parameters() -> [AlgorithmParameter; 23] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
         // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
@@ -192,9 +190,6 @@ fn parameters() -> [AlgorithmParameter; 24] {
         AlgorithmParameter::int("pose_source", 0, 1, 1).description(
             "0 = localization (only while localizing), 1 = ground truth (simulation only).",
         ),
-        AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
-            .unit("m")
-            .description("Distance between the front and rear axles."),
         AlgorithmParameter::int("horizon", MIN_HORIZON as i64, 60, 1)
             .unit("steps")
             .description("Steps in the prediction, the vehicle's own pose included."),
@@ -278,6 +273,8 @@ impl Executor for Mpc {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -344,6 +341,7 @@ impl Executor for Mpc {
                         line,
                         pose,
                         limits: &limits,
+                        wheelbase_m: geometry_topic.read().wheelbase_m,
                         walls: field.map(|field| Walls {
                             field,
                             margin_m: self.config.walls_margin_m,
@@ -425,6 +423,8 @@ struct Input<'a> {
     line: &'a Line,
     pose: Pose,
     limits: &'a ActuatorLimits,
+    /// The vehicle's, between its axles, in meters.
+    wheelbase_m: f64,
     /// `None` without a map.
     walls: Option<Walls>,
     /// `None` without a (fresh) detection.
@@ -571,7 +571,7 @@ fn problem(config: &MpcConfig, input: &Input, nearest: &Nearest) -> MpcProblem {
         start: [input.pose.x_m, input.pose.y_m, input.pose.heading_rad],
         targets,
         step_m: config.step_m,
-        wheelbase_m: config.wheelbase_m,
+        wheelbase_m: input.wheelbase_m,
         weights: config.weights(),
         walls: input.walls.clone(),
         opponent: input.opponent,
@@ -749,10 +749,13 @@ mod tests {
             line,
             pose,
             limits,
+            wheelbase_m: WHEELBASE_M,
             walls: None,
             opponent: None,
         }
     }
+
+    const WHEELBASE_M: f64 = 0.32;
 
     fn limits() -> ActuatorLimits {
         ActuatorLimits {
@@ -801,7 +804,7 @@ mod tests {
                 start: [pose.x_m, pose.y_m, pose.heading_rad],
                 targets: vec![[0.0; 3]; 2],
                 step_m: 0.05,
-                wheelbase_m: config.wheelbase_m,
+                wheelbase_m: WHEELBASE_M,
                 weights: Weights::default(),
                 walls: None,
                 opponent: None,
@@ -815,7 +818,7 @@ mod tests {
             control = Some(c);
         }
         let control = control.unwrap();
-        let expected = (config.wheelbase_m / radius).atan();
+        let expected = (WHEELBASE_M / radius).atan();
         assert!(
             (control.steering_rad - expected).abs() < 0.02,
             "{} vs {expected}",

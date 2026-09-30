@@ -18,7 +18,7 @@ use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd}
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
-    Shape, VescCommand,
+    Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -68,8 +68,6 @@ pub struct PathFollowerConfig {
     pub controller: u8,
     /// Feedforward term: 0 = none, [`FEEDFORWARD_PATH`] or [`FEEDFORWARD_LEARNED`].
     pub feedforward: u8,
-    /// Distance between the front and rear axles, in meters.
-    pub wheelbase_m: f64,
     /// Proportional gain on the heading error, pure number.
     pub kk_s: f64,
     /// Derivative gain on the heading error (PD only), in seconds.
@@ -133,7 +131,7 @@ impl PathFollowerConfig {
 
 /// The live-tunable parameters, one per [`PathFollowerConfig`] field -
 /// see [`ParameterTuner`].
-fn parameters() -> [AlgorithmParameter; 21] {
+fn parameters() -> [AlgorithmParameter; 20] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
         // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
@@ -153,9 +151,6 @@ fn parameters() -> [AlgorithmParameter; 21] {
         AlgorithmParameter::int("feedforward", 0, 2, 1).description(
             "Feedforward: 0 = none, 1 = from the line's curvature, 2 = learned per point.",
         ),
-        AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
-            .unit("m")
-            .description("Distance between the front and rear axles."),
         AlgorithmParameter::float("kk_s", 0.0, 5.0, 0.05)
             .description("Proportional gain on the heading error."),
         AlgorithmParameter::float("kd_s", 0.0, 1.0, 0.01)
@@ -227,6 +222,8 @@ impl Executor for PathFollower {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -282,6 +279,7 @@ impl Executor for PathFollower {
                         speed_mps,
                         hint,
                         &limits,
+                        geometry_topic.read().wheelbase_m,
                         &mut state,
                         Instant::now(),
                     ) {
@@ -357,9 +355,9 @@ struct Control {
     target: [f64; 2],
 }
 
-/// The path follower for `pose`, driving at `speed_mps`, on `line` -
-/// or, if farther than `max_cross_track_m` from it, the projection that was
-/// too far.
+/// The path follower for `pose`, driving at `speed_mps`, on `line`, for a
+/// vehicle with `wheelbase_m` between its axles - or, if farther than
+/// `max_cross_track_m` from it, the projection that was too far.
 #[allow(clippy::too_many_arguments)]
 fn control(
     config: &PathFollowerConfig,
@@ -368,6 +366,7 @@ fn control(
     speed_mps: f64,
     hint: Option<usize>,
     limits: &ActuatorLimits,
+    wheelbase_m: f64,
     state: &mut State,
     now: Instant,
 ) -> Result<Control, Nearest> {
@@ -383,7 +382,7 @@ fn control(
         let (steering, target) = stanley(config, line, &nearest, pose, speed_mps);
         (steering, pose, target)
     } else {
-        let back = pose.moved_back(config.wheelbase_m);
+        let back = pose.moved_back(wheelbase_m);
         let target = line.at(nearest.s_m + lookahead_m);
         let error = wrap_to_pi((target.y - back.y_m).atan2(target.x - back.x_m) - back.heading_rad);
         let steering = match config.controller {
@@ -403,6 +402,7 @@ fn control(
             &nearest,
             steering,
             max_steering,
+            wheelbase_m,
             &mut state.learned,
         );
 
@@ -444,20 +444,22 @@ fn stanley(
 }
 
 /// The feedforward term added to `steering` (0 if disabled), clamped so the
-/// sum stays within `max_steering`. The learned kind updates `learned`.
+/// sum stays within `max_steering`, for a vehicle with `wheelbase_m`
+/// between its axles. The learned kind updates `learned`.
 fn feedforward(
     config: &PathFollowerConfig,
     line: &Line,
     nearest: &Nearest,
     steering: f64,
     max_steering: f64,
+    wheelbase_m: f64,
     learned: &mut Vec<f64>,
 ) -> f64 {
     let n = line.points.len();
     let action = match config.feedforward {
         FEEDFORWARD_PATH => {
             let curvature = line.curvature_at(nearest.s_m + config.delay_ff_action);
-            config.beta_ff_gain * (curvature * config.wheelbase_m).atan()
+            config.beta_ff_gain * (curvature * wheelbase_m).atan()
         }
         FEEDFORWARD_LEARNED => {
             if learned.len() != n {
@@ -525,6 +527,8 @@ mod tests {
         }
     }
 
+    const WHEELBASE_M: f64 = 0.32;
+
     fn limits() -> ActuatorLimits {
         ActuatorLimits {
             max_steering_angle_rad: 0.4,
@@ -574,6 +578,7 @@ mod tests {
             speed_mps,
             None,
             &limits(),
+            WHEELBASE_M,
             &mut State::default(),
             Instant::now(),
         )
@@ -645,11 +650,11 @@ mod tests {
             ..config(0)
         };
         let nearest = line.nearest(radius_m, 0.0, None, 0.0);
-        let action = feedforward(&config, &line, &nearest, 0.0, 0.4, &mut Vec::new());
-        let expected = config.beta_ff_gain * (config.wheelbase_m / radius_m).atan();
+        let action = feedforward(&config, &line, &nearest, 0.0, 0.4, WHEELBASE_M, &mut Vec::new());
+        let expected = config.beta_ff_gain * (WHEELBASE_M / radius_m).atan();
         assert!((action - expected).abs() < 1e-3, "{action} vs {expected}");
         // Clamped so the sum stays within the limit.
-        let clamped = feedforward(&config, &line, &nearest, 0.39, 0.4, &mut Vec::new());
+        let clamped = feedforward(&config, &line, &nearest, 0.39, 0.4, WHEELBASE_M, &mut Vec::new());
         assert!((clamped - 0.01).abs() < 1e-12, "{clamped}");
     }
 
@@ -666,7 +671,7 @@ mod tests {
         let nearest = line.nearest(5.0, 0.0, None, 0.0);
         let mut learned = Vec::new();
         assert_eq!(
-            feedforward(&config, &line, &nearest, 0.2, 0.4, &mut learned),
+            feedforward(&config, &line, &nearest, 0.2, 0.4, WHEELBASE_M, &mut learned),
             0.1
         );
         assert_eq!(learned.len(), line.points.len());
@@ -708,6 +713,7 @@ mod tests {
             1.0,
             None,
             &limits(),
+            WHEELBASE_M,
             &mut State::default(),
             Instant::now(),
         )

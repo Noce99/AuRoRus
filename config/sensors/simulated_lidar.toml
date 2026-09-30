@@ -18,13 +18,8 @@ max_distance_m = 30.0
 # direction, in radians (UTM-30LX-EW: 270 degrees = 4.71238898038469).
 fov_rad = 4.71238898038469
 
-# Where the sensor sits on the vehicle, in meters, from the vehicle's
-# reference point (its center of gravity): mount_x_m forward, mount_y_m to
-# the car's right - positive angles and y are to the right, as the GUI draws
-# them (the simulator's frame has y down). Keep equal to
-# hokuyo_lidar.toml's.
-mount_x_m = 0.0
-mount_y_m = 0.0
+# (Where the sensor sits on the vehicle is the simulated car's - its
+# calibration's [lidar], see SimulatedLidarConfig::for_car.)
 
 # Seed for the noise generator: the same seed gives the same noise sequence
 # on every run. 0 picks a fresh random seed each time.

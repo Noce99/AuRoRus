@@ -43,13 +43,16 @@ pub struct DynamicState {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DynamicParams {
     /// Vehicle mass, in kilograms.
+    #[serde(default)]
     pub mass_kg: f64,
     /// Yaw moment of inertia about the vertical axis through the CG, in
     /// kilogram-meters^2.
     pub yaw_inertia_kgm2: f64,
     /// Distance from the CG to the front axle, in meters.
+    #[serde(default)]
     pub lf_m: f64,
     /// Distance from the CG to the rear axle, in meters.
+    #[serde(default)]
     pub lr_m: f64,
     /// Front tire cornering stiffness (lateral force per radian of slip
     /// angle), in newtons/radian.
@@ -69,10 +72,7 @@ impl DynamicParams {
                 .description(format!("{axle} tire cornering stiffness."))
         };
         vec![
-            tunable::mass_kg(),
             tunable::yaw_inertia_kgm2(),
-            tunable::lf_m(),
-            tunable::lr_m(),
             cornering_stiffness("cf_n_per_rad", "Front"),
             cornering_stiffness("cr_n_per_rad", "Rear"),
         ]

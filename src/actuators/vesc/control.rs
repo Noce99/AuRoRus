@@ -74,10 +74,7 @@ impl VescLimits {
     /// The live-tunable limits: [`ActuatorLimits::tunable_parameters`] but
     /// the steering angle.
     pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
-        ActuatorLimits::tunable_parameters()
-            .into_iter()
-            .filter(|parameter| parameter.name != "max_steering_angle_rad")
-            .collect()
+        ActuatorLimits::tunable_parameters_but_steering_angle()
     }
 }
 

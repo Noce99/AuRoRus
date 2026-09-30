@@ -43,13 +43,16 @@ pub struct NonlinearBicycleState {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NonlinearTireParams {
     /// Vehicle mass, in kilograms.
+    #[serde(default)]
     pub mass_kg: f64,
     /// Yaw moment of inertia about the vertical axis through the CG, in
     /// kilogram-meters^2.
     pub yaw_inertia_kgm2: f64,
     /// Distance from the CG to the front axle, in meters.
+    #[serde(default)]
     pub lf_m: f64,
     /// Distance from the CG to the rear axle, in meters.
+    #[serde(default)]
     pub lr_m: f64,
     /// Height of the CG above the ground, in meters - drives how much
     /// longitudinal acceleration shifts load between the front and rear
@@ -76,10 +79,7 @@ impl NonlinearTireParams {
     /// [`crate::actuators::SimulatedVehicle`].
     pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
         vec![
-            tunable::mass_kg(),
             tunable::yaw_inertia_kgm2(),
-            tunable::lf_m(),
-            tunable::lr_m(),
             tunable::cg_height_m(),
             AlgorithmParameter::float("tire_mu", 0.1, 2.0, 0.05)
                 .description("Peak tire/road friction coefficient, front and rear."),

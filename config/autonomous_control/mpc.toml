@@ -12,8 +12,8 @@ rate_hz = 50.0
 # composed onto SLAM's map_to_odom, only while localizing), 1 = ground truth
 # (vehicle_status, simulation only).
 pose_source = 0
-# Distance between the front and rear axles, in meters (ubm's MPC: 0.33).
-wheelbase_m = 0.32
+# (The wheelbase is the vehicle's - its vehicle_geometry, from the car's
+# calibration.)
 
 # Steps in the prediction, the vehicle's own pose included (at least 4).
 horizon = 15

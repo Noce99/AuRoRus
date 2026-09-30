@@ -8,8 +8,8 @@
 
 use super::{
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX, LIDAR_SCAN_TOPIC_NAME,
-    ODOMETRY_TOPIC_NAME, RACE_LINE_TOPIC_NAME, VEHICLE_LIMITS_TOPIC_NAME,
-    VEHICLE_STATUS_TOPIC_NAME,
+    ODOMETRY_TOPIC_NAME, RACE_LINE_TOPIC_NAME, VEHICLE_GEOMETRY_TOPIC_NAME,
+    VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME,
 };
 
 /// Prefix of every opponent's topics: `opponent/<n>/`.
@@ -57,6 +57,10 @@ impl VehicleTopics {
 
     pub fn vehicle_limits(&self) -> String {
         self.name(VEHICLE_LIMITS_TOPIC_NAME)
+    }
+
+    pub fn vehicle_geometry(&self) -> String {
+        self.name(VEHICLE_GEOMETRY_TOPIC_NAME)
     }
 
     pub fn lidar_scan(&self) -> String {

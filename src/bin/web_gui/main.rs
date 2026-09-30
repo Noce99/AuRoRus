@@ -46,8 +46,14 @@ fn main() {
     match (&car, hardware) {
         (Some(car), Some(_)) => println!("Running on the car {:?}", car.name),
         (Some(car), None) => println!("Simulating, --sim on the car {:?}", car.name),
-        (None, _) => println!("Simulating: no CAR_NAME file names a car to run on"),
+        (None, _) => {
+            println!("Simulating the template car: no CAR_NAME file names a car to run on")
+        }
     }
+    // In simulation, the car simulated is the one named, else the template.
+    let simulated_car = car
+        .clone()
+        .unwrap_or_else(|| CarCalibration::template("template"));
 
     let web_gui_config = aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml"))
         .unwrap_or_else(|_| WebGuiConfig::default());
@@ -56,7 +62,8 @@ fn main() {
             .unwrap_or_else(|_| MapServerConfig::default());
     let simulated_lidar_config =
         aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
-            .unwrap_or_else(|_| SimulatedLidarConfig::default());
+            .unwrap_or_else(|_| SimulatedLidarConfig::default())
+            .for_car(&simulated_car);
     let hokuyo_lidar_config =
         aurorus::config::load(&config.config_dir.join("sensors/hokuyo_lidar.toml"))
             .unwrap_or_else(|_| HokuyoLidarConfig::default());
@@ -72,7 +79,8 @@ fn main() {
         .unwrap_or_else(|_| VescConfig::default());
     let vehicle_config =
         aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
-            .unwrap_or_else(|_| SimulatedVehicleConfig::default());
+            .unwrap_or_else(|_| SimulatedVehicleConfig::default())
+            .for_car(&simulated_car);
     let planning_config = aurorus::config::load(&config.config_dir.join("planning/race_line.toml"))
         .unwrap_or_else(|_| PlanningConfig::default());
     let detector_config =

@@ -2,11 +2,18 @@
 //! first - see [`slots`].
 
 use crate::environment::{SpeedPoint, StartFinishLine};
-use crate::topics::{StartState, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M};
+use crate::topics::StartState;
 
-/// How the grid is laid out.
+/// How far either side of a point the centerline's direction is measured
+/// over, in meters - about half a car, so one short segment doesn't skew it.
+const TANGENT_HALF_WINDOW_M: f64 = 0.225;
+
+/// How the grid is laid out, for vehicles of one size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridSpacing {
+    /// Every vehicle's body length and width, in meters.
+    pub body_length_m: f64,
+    pub body_width_m: f64,
     /// Added to half a body length between one slot and the next, along the
     /// centerline - so two slots on the same side are a body length plus
     /// twice this apart.
@@ -37,14 +44,14 @@ pub fn slots(
     let path = Path::new(centerline)
         .ok_or("The map has no centerline - a race needs one to line the grid up on.")?;
     let track_width_m = (line.b.x - line.a.x).hypot(line.b.y - line.a.y);
-    let lateral_m = VEHICLE_BODY_WIDTH_M / 2.0 + spacing.margin_m;
-    if track_width_m > 0.0 && 2.0 * (lateral_m + VEHICLE_BODY_WIDTH_M / 2.0) > track_width_m {
+    let lateral_m = spacing.body_width_m / 2.0 + spacing.margin_m;
+    if track_width_m > 0.0 && 2.0 * (lateral_m + spacing.body_width_m / 2.0) > track_width_m {
         return Err(format!(
             "The track ({track_width_m:.2} m wide) is too narrow for two vehicles side by side."
         ));
     }
-    let stagger_m = VEHICLE_BODY_LENGTH_M / 2.0 + spacing.gap_m;
-    let grid_m = VEHICLE_BODY_LENGTH_M + stagger_m * count.saturating_sub(1) as f64;
+    let stagger_m = spacing.body_length_m / 2.0 + spacing.gap_m;
+    let grid_m = spacing.body_length_m + stagger_m * count.saturating_sub(1) as f64;
     if grid_m >= path.lap_m {
         return Err(format!(
             "A grid of {count} vehicles ({grid_m:.1} m) doesn't fit on a {:.1} m lap.",
@@ -64,7 +71,7 @@ pub fn slots(
 
     (0..count)
         .map(|i| {
-            let back_m = VEHICLE_BODY_LENGTH_M / 2.0 + stagger_m * i as f64;
+            let back_m = spacing.body_length_m / 2.0 + stagger_m * i as f64;
             let s = s0 - forward * back_m;
             let (cx, cy) = path.at(s);
             let (tx, ty) = path.tangent(s);
@@ -78,7 +85,7 @@ pub fn slots(
                 heading_rad: dy.atan2(dx),
                 speed_mps: 0.0,
             };
-            if body_is_free(&slot, &is_free) {
+            if body_is_free(&slot, &spacing, &is_free) {
                 Ok(slot)
             } else {
                 Err(format!(
@@ -92,13 +99,17 @@ pub fn slots(
 
 /// Whether every point of a body at `pose` is drivable, sampled every few
 /// centimeters.
-fn body_is_free(pose: &StartState, is_free: &impl Fn(f64, f64) -> bool) -> bool {
+fn body_is_free(
+    pose: &StartState,
+    spacing: &GridSpacing,
+    is_free: &impl Fn(f64, f64) -> bool,
+) -> bool {
     const STEPS: usize = 8;
     let (cos, sin) = (pose.heading_rad.cos(), pose.heading_rad.sin());
     (0..=STEPS).all(|i| {
         (0..=STEPS).all(|j| {
-            let along = VEHICLE_BODY_LENGTH_M * (i as f64 / STEPS as f64 - 0.5);
-            let across = VEHICLE_BODY_WIDTH_M * (j as f64 / STEPS as f64 - 0.5);
+            let along = spacing.body_length_m * (i as f64 / STEPS as f64 - 0.5);
+            let across = spacing.body_width_m * (j as f64 / STEPS as f64 - 0.5);
             is_free(
                 pose.x_m + along * cos - across * sin,
                 pose.y_m + along * sin + across * cos,
@@ -162,9 +173,9 @@ impl Path {
     }
 
     /// The unit direction of increasing `s` at `s` - a central difference
-    /// over a body length, so one short segment doesn't skew it.
+    /// over [`TANGENT_HALF_WINDOW_M`] either side.
     fn tangent(&self, s: f64) -> (f64, f64) {
-        let h = VEHICLE_BODY_LENGTH_M / 2.0;
+        let h = TANGENT_HALF_WINDOW_M;
         let (ax, ay) = self.at(s - h);
         let (bx, by) = self.at(s + h);
         let length = (bx - ax).hypot(by - ay).max(f64::MIN_POSITIVE);
@@ -196,6 +207,8 @@ mod tests {
     use std::f64::consts::FRAC_PI_2;
 
     const SPACING: GridSpacing = GridSpacing {
+        body_length_m: 0.45,
+        body_width_m: 0.25,
         gap_m: 0.2,
         margin_m: 0.1,
     };
@@ -234,11 +247,11 @@ mod tests {
     #[test]
     fn a_straight_grid_staggers_left_and_right() {
         let slots = slots(&rectangle(), &line_at(20.0), 3, SPACING, |_, _| true).unwrap();
-        let lateral = VEHICLE_BODY_WIDTH_M / 2.0 + SPACING.margin_m;
-        let stagger = VEHICLE_BODY_LENGTH_M / 2.0 + SPACING.gap_m;
+        let lateral = SPACING.body_width_m / 2.0 + SPACING.margin_m;
+        let stagger = SPACING.body_length_m / 2.0 + SPACING.gap_m;
         // Pole: nose on the line, on the driver's left - up the screen,
         // heading along +x with y down.
-        assert!(close(slots[0].x_m + VEHICLE_BODY_LENGTH_M / 2.0, 20.0));
+        assert!(close(slots[0].x_m + SPACING.body_length_m / 2.0, 20.0));
         assert!(close(slots[0].y_m, -lateral));
         assert!(close(slots[1].x_m, slots[0].x_m - stagger));
         assert!(close(slots[1].y_m, lateral));
@@ -256,7 +269,7 @@ mod tests {
         let last = slots.last().unwrap();
         assert!(close(
             last.x_m.abs(),
-            VEHICLE_BODY_WIDTH_M / 2.0 + SPACING.margin_m
+            SPACING.body_width_m / 2.0 + SPACING.margin_m
         ));
         assert!(last.y_m > 0.0);
         assert!(close(last.heading_rad, -FRAC_PI_2));

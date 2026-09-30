@@ -21,7 +21,7 @@ use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_me
 use crate::environment::SpeedPoint;
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
-    SelectedRaceLine, Shape, VehicleTopics, VescCommand,
+    SelectedRaceLine, Shape, VehicleGeometry, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -66,7 +66,7 @@ pub struct PotentialPursuitConfig {
     pub obstacle_threshold_gain: f32,
     pub hysteresis_m: f32,
     pub attractive_power: f32,
-    pub car_width_m: f32,
+    pub width_margin_m: f32,
     pub steering_gain: f32,
     pub include_global_minima: u8,
     pub use_minima_near_attractive: u8,
@@ -95,7 +95,7 @@ impl PotentialPursuitConfig {
             obstacle_threshold_gain: self.obstacle_threshold_gain,
             hysteresis_m: self.hysteresis_m,
             attractive_power: self.attractive_power,
-            car_width_m: self.car_width_m,
+            width_margin_m: self.width_margin_m,
             steering_gain: self.steering_gain,
             include_global_minima: self.include_global_minima,
             use_minima_near_attractive: self.use_minima_near_attractive,
@@ -166,6 +166,8 @@ impl Executor for PotentialPursuit {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
@@ -206,7 +208,14 @@ impl Executor for PotentialPursuit {
                     stopped("No race line on the selected map - vehicle held stopped.".into())
                 }
                 (Some(_), Err(why)) => stopped(format!("{why} Vehicle held stopped.")),
-                (Some(line), Ok(pose)) => match control(&self.config, line, pose, hint, &scan) {
+                (Some(line), Ok(pose)) => match control(
+                    &self.config,
+                    line,
+                    pose,
+                    hint,
+                    &scan,
+                    geometry_topic.read().body_width_m,
+                ) {
                     Err(Lost::OffLine(nearest)) => {
                         // Lost: next tick searches the whole line again.
                         hint = None;
@@ -291,6 +300,7 @@ fn control(
     pose: Pose,
     hint: Option<usize>,
     scan: &LidarScan,
+    body_width_m: f64,
 ) -> Result<Control, Lost> {
     let nearest = line.nearest(pose.x_m, pose.y_m, hint, SEARCH_WINDOW_M);
     if nearest.distance_m > config.max_cross_track_m {
@@ -305,7 +315,7 @@ fn control(
         wrap_to_pi((target.y - pose.y_m).atan2(target.x - pose.x_m) - pose.heading_rad) as f32;
 
     let weight = config.max_distance_weight.clamp(0.0, 1.0);
-    let field = potential_field(scan, &config.potential_field().field(), |longest_rad| {
+    let field = potential_field(scan, &config.potential_field().field(body_width_m), |longest_rad| {
         (1.0 - weight) * pursuit_rad + weight * longest_rad
     })
     .ok_or(Lost::NoScan)?;
@@ -388,7 +398,7 @@ mod tests {
             y_m: 0.0,
             heading_rad: std::f64::consts::PI / 2.0,
         };
-        let control = control(&config(), &line, pose, None, &scan(181, PI, 5.0)).unwrap();
+        let control = control(&config(), &line, pose, None, &scan(181, PI, 5.0), 0.25).unwrap();
         assert!(control.pursuit_rad > 0.0);
         let attractive = control.field.angle_rad(control.field.attractive_cell);
         assert!(
@@ -408,7 +418,7 @@ mod tests {
             y_m: 0.0,
             heading_rad: 0.0,
         };
-        let lost = control(&config(), &line, pose, None, &scan(181, PI, 5.0)).unwrap_err();
+        let lost = control(&config(), &line, pose, None, &scan(181, PI, 5.0), 0.25).unwrap_err();
         assert!(matches!(lost, Lost::OffLine(nearest) if (nearest.distance_m - 3.0).abs() < 1e-6));
     }
 

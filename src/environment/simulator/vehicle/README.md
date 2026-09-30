@@ -21,6 +21,13 @@ function that advances the state by one control input and one time step.
 None of them own a clock, a thread, or a loop — see
 [Contract with the simulation environment](#contract-with-the-simulation-environment).
 
+The car's own values among the params - `mass_kg`, `lf_m`, `lr_m` and
+`track_width_m` - aren't in `config/actuators/simulated_vehicle.toml` nor
+tuned live: `SimulatedVehicleConfig::for_car` fills them in from the
+simulated car's calibration (see `src/hardware.rs`), so the simulation
+drives like the real car. The rest (inertia, tires, CG height) are the
+simulator's own.
+
 ## Kinematic bicycle model
 
 Implemented in [`bicycle.rs`](bicycle.rs).

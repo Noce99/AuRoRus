@@ -27,7 +27,7 @@ use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd}
 use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
-    MAP_TOPIC_NAME, SelectedMap, SelectedRaceLine, Shape, VescCommand,
+    MAP_TOPIC_NAME, SelectedMap, SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -64,7 +64,6 @@ pub struct FrenetOvertakingConfig {
     pub pose_source: u8,
     /// [`CONTROLLER_PD`] or [`CONTROLLER_P_ENHANCED`].
     pub controller: u8,
-    pub wheelbase_m: f64,
     pub kk_s: f64,
     pub kd_s: f64,
     pub min_speed: f64,
@@ -143,7 +142,7 @@ impl FrenetOvertakingConfig {
 /// The live-tunable parameters, one per [`FrenetOvertakingConfig`]
 /// field - see [`ParameterTuner`]. Every step and length has a positive
 /// minimum, so the path sampling always ends.
-fn parameters() -> [AlgorithmParameter; 36] {
+fn parameters() -> [AlgorithmParameter; 35] {
     [
         // At least a few Hz: below 1 Hz every command would be stale on arrival
         // (see `VESC_COMMAND_TIMEOUT`), holding the vehicle stopped.
@@ -154,9 +153,6 @@ fn parameters() -> [AlgorithmParameter; 36] {
             .description("0 = localization (only while localizing), 1 = ground truth (simulation only)."),
         AlgorithmParameter::int("controller", CONTROLLER_PD.into(), CONTROLLER_P_ENHANCED.into(), 1)
             .description("Steering law: 0 = PD, 1 = P-enhanced."),
-        AlgorithmParameter::float("wheelbase_m", 0.1, 1.0, 0.01)
-            .unit("m")
-            .description("Distance between the front and rear axles."),
         AlgorithmParameter::float("kk_s", 0.0, 5.0, 0.05).description("Proportional gain on the heading error."),
         AlgorithmParameter::float("kd_s", 0.0, 1.0, 0.01)
             .unit("s")
@@ -271,6 +267,8 @@ impl Executor for FrenetOvertaking {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -351,6 +349,7 @@ impl Executor for FrenetOvertaking {
                         speed_mps,
                         hint,
                         limits: &limits,
+                        wheelbase_m: geometry_topic.read().wheelbase_m,
                     };
                     match control(&self.config, &input, &mut state, Instant::now()) {
                         Ok(control) => {
@@ -517,6 +516,8 @@ struct Input<'a> {
     speed_mps: f64,
     hint: Option<usize>,
     limits: &'a ActuatorLimits,
+    /// The vehicle's, between its axles, in meters.
+    wheelbase_m: f64,
 }
 
 /// What one tick decided.
@@ -592,7 +593,7 @@ fn control(
         }
     };
 
-    let back = input.pose.moved_back(config.wheelbase_m);
+    let back = input.pose.moved_back(input.wheelbase_m);
     let error = wrap_to_pi((target[1] - back.y_m).atan2(target[0] - back.x_m) - back.heading_rad);
     let steering = match config.controller {
         CONTROLLER_P_ENHANCED => {
@@ -854,6 +855,7 @@ mod tests {
             speed_mps: 2.0,
             hint: None,
             limits: &limits(),
+            wheelbase_m: 0.32,
         };
         let mut state = State::default();
         let start = Instant::now();
@@ -894,6 +896,7 @@ mod tests {
             speed_mps: 2.0,
             hint: None,
             limits: &limits(),
+            wheelbase_m: 0.32,
         };
         let mut state = State::default();
         let start = Instant::now();
@@ -924,6 +927,7 @@ mod tests {
             speed_mps: 1.0,
             hint: None,
             limits: &limits(),
+            wheelbase_m: 0.32,
         };
         let err = control(&config(), &input, &mut State::default(), Instant::now()).unwrap_err();
         assert!((err.distance_m - 2.0).abs() < 1e-9);

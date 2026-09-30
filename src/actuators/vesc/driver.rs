@@ -11,8 +11,8 @@ use crate::hardware::CarCalibration;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, HUMAN_VESC_COMMAND_TOPIC_NAME,
     IMU_TOPIC_NAME, ImuReading, VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME,
-    VESC_STATUS_TOPIC_NAME, VehicleTopics, VescCommand, VescParameters, VescParametersStatus,
-    VescStatus,
+    VESC_STATUS_TOPIC_NAME, VehicleGeometry, VehicleTopics, VescCommand, VescParameters,
+    VescParametersStatus, VescStatus,
 };
 use crate::{Captain, Executor, RwLockTopic, Ticker};
 use std::any::Any;
@@ -38,7 +38,8 @@ const BATTERY_SMOOTHING_S: f64 = 3.0;
 /// [`crate::hardware::SteeringTable`], and publishes what the VESC reads: its IMU and
 /// wheel speed on [`IMU_TOPIC_NAME`] (for dead reckoning), and its own state
 /// on [`VESC_STATUS_TOPIC_NAME`]. Publishes the limits on
-/// [`VehicleTopics::vehicle_limits`].
+/// [`VehicleTopics::vehicle_limits`], and the car's size on
+/// [`VehicleTopics::vehicle_geometry`].
 ///
 /// Its [`VescConfig`] can be tuned live - the car's calibration can't: it
 /// publishes the values in effect on
@@ -265,6 +266,12 @@ impl Executor for Vesc {
             &self.vehicle.vehicle_limits(),
             self.id,
             move || limits,
+        );
+        let geometry = self.car.vehicle_geometry();
+        captain.claim_writer::<VehicleGeometry>(
+            &self.vehicle.vehicle_geometry(),
+            self.id,
+            move || geometry,
         );
         let parameters = self.config.parameters_status();
         captain.claim_writer::<VescParametersStatus>(

@@ -9,9 +9,11 @@ rate_hz = 50.0
 desired_fov_deg = 180.0
 # Readings are clipped to this, in meters.
 max_range_m = 10.0
-# Vehicle width plus a safety margin: how far a disparity is extended, in
-# meters. ubm used 0.30, which scrapes the walls in simulation.
-car_width_m = 0.6
+# Room kept on each side of the vehicle, in meters: a disparity is extended
+# over half the vehicle's width (its vehicle_geometry) plus this. 0.175 m on
+# a 0.25 m wide car is 0.6 m in all; ubm used 0.30 in all, which scrapes the
+# walls in simulation.
+width_margin_m = 0.175
 # Two neighbouring readings further apart than this are a disparity, in meters.
 disparity_threshold_m = 0.5
 # Multiplies the number of readings a disparity is extended over, pure number.

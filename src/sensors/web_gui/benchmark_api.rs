@@ -26,14 +26,13 @@ use crate::benchmark::{
 use crate::environment::{CENTERLINE_FILE_NAME, map_folder, race_lines, read_info};
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, AutonomousAlgorithmSelection,
-    AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME,
-    LapTelemetry, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, OpponentRequest,
-    RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection, Racer, SelectedMap,
-    SelectedRaceLine, VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M,
-    VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME,
-    VehicleModelKind, VehicleModelSelection, VehicleModelStatus, VehicleStatus, VehicleTopics,
-    VescCommand, now_ms,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
+    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME,
+    LAP_TELEMETRY_TOPIC_NAME, LapTelemetry, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
+    OpponentRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection,
+    Racer, SelectedMap, SelectedRaceLine, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleGeometry, VehicleModelKind,
+    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand, now_ms,
 };
 use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, DebugRecorder, DebugState, Stamped, Ticker, actuators, autonomous_control};
@@ -1011,19 +1010,35 @@ fn vehicle_record(ctx: &Orchestrator) -> Result<VehicleRecord, Halt> {
         .read()
         .into_value();
     let parameters = values(&status.parameters);
-    let limits = values(&status.limits);
+    let mut limits = values(&status.limits);
     let saved_to_config =
         matches_saved(
             &parameters,
             actuators::saved_vehicle_model_values(status.kind, &status.parameters),
         ) && matches_saved(&limits, actuators::saved_vehicle_limits(&status.limits));
+    // The car's own - not in the config file, nor tuned.
+    let ego = VehicleTopics::ego();
+    if let Some(topic) = ctx
+        .captain
+        .try_topic::<ActuatorLimits>(&ego.vehicle_limits())
+    {
+        limits.insert(
+            "max_steering_angle_rad".to_string(),
+            topic.read().max_steering_angle_rad,
+        );
+    }
+    let geometry = ctx
+        .captain
+        .try_topic::<VehicleGeometry>(&ego.vehicle_geometry())
+        .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value());
     Ok(VehicleRecord {
         model: status.kind.api_str().to_string(),
-        body_length_m: VEHICLE_BODY_LENGTH_M,
-        body_width_m: VEHICLE_BODY_WIDTH_M,
+        body_length_m: geometry.body_length_m,
+        body_width_m: geometry.body_width_m,
         saved_to_config,
         parameters,
         limits,
+        geometry: Some(geometry),
     })
 }
 

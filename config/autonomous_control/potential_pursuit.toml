@@ -24,7 +24,8 @@ field_resolution_deg = 0.5
 obstacle_threshold_gain = 1.0
 hysteresis_m = 0.2
 attractive_power = 0.01
-car_width_m = 0.34
+# Room kept on each side of the vehicle, in meters - see potential_field.toml.
+width_margin_m = 0.045
 steering_gain = 0.7
 include_global_minima = 0
 use_minima_near_attractive = 0

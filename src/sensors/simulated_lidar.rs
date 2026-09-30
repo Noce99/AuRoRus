@@ -8,9 +8,10 @@
 
 use super::simulated_imu::gaussian;
 use crate::environment::MapInfo;
+use crate::hardware::CarCalibration;
 use crate::topics::{
     Color, Drawing, LidarScan, MAP_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponents, SelectedMap, Shape,
-    VEHICLE_BODY_LENGTH_M, VEHICLE_BODY_WIDTH_M, VehicleStatus, VehicleTopics,
+    VehicleGeometry, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use rand::rngs::StdRng;
@@ -20,8 +21,11 @@ use std::time::Duration;
 
 /// Every tunable parameter [`SimulatedLidar`] needs - loaded from
 /// `config/sensors/simulated_lidar.toml` (see [`Default`]) or from an
-/// arbitrary path via [`crate::config::load`].
+/// arbitrary path via [`crate::config::load`]. Where it's mounted is the
+/// simulated car's instead - see [`Self::for_car`], which a loaded config
+/// needs before it's used.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulatedLidarConfig {
     /// Rate at which [`SimulatedLidar`] publishes a new scan, in Hz.
     pub rate_hz: f64,
@@ -43,19 +47,35 @@ pub struct SimulatedLidarConfig {
     /// vehicle's and every opponent's (see [`crate::opponents`]) - as well as
     /// on the map.
     pub see_vehicles: bool,
-    /// Where the sensor sits on the vehicle, in meters, forward of the
-    /// vehicle's reference point - see [`LidarScan::mount_x_m`].
+    /// Where the sensor sits on the vehicle, in meters, forward of and to
+    /// the right of the vehicle's reference point - see
+    /// [`LidarScan::mount_x_m`]. The simulated car's - see [`Self::for_car`].
+    #[serde(skip)]
     pub mount_x_m: f32,
-    /// Where the sensor sits on the vehicle, in meters, left of the
-    /// vehicle's reference point - see [`LidarScan::mount_y_m`].
+    #[serde(skip)]
     pub mount_y_m: f32,
 }
 
 impl Default for SimulatedLidarConfig {
+    /// Mounted on the template car (see [`CarCalibration::template`]).
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/sensors/simulated_lidar.toml")).expect(
-            "config/sensors/simulated_lidar.toml must deserialize into SimulatedLidarConfig",
-        )
+        let config: Self = toml::from_str(include_str!(
+            "../../config/sensors/simulated_lidar.toml"
+        ))
+        .expect("config/sensors/simulated_lidar.toml must deserialize into SimulatedLidarConfig");
+        config.for_car(&CarCalibration::template("template"))
+    }
+}
+
+impl SimulatedLidarConfig {
+    /// This config mounted where `car`'s lidar is.
+    pub fn for_car(self, car: &CarCalibration) -> Self {
+        let (x_m, y_m) = car.lidar_mount_m();
+        Self {
+            mount_x_m: x_m as f32,
+            mount_y_m: y_m as f32,
+            ..self
+        }
     }
 }
 
@@ -171,8 +191,8 @@ impl Executor for SimulatedLidar {
                     };
                     let vehicle_m = others
                         .iter()
-                        .filter_map(|other| {
-                            ray_vehicle_distance_m(other, origin_x, origin_y, angle_rad)
+                        .filter_map(|(other, geometry)| {
+                            ray_vehicle_distance_m(other, geometry, origin_x, origin_y, angle_rad)
                         })
                         .fold(f64::INFINITY, f64::min);
                     let (distance_m, hit) = if vehicle_m < f64::from(distance_m) {
@@ -311,10 +331,10 @@ pub(crate) fn cast_ray(
     (max_distance_m, false)
 }
 
-/// Where every vehicle but the one publishing on `own` is - the ego vehicle
-/// and every opponent listed on [`OPPONENTS_TOPIC_NAME`] - skipping any that
-/// hasn't published its first status yet.
-fn other_vehicles(captain: &Captain, own: &VehicleTopics) -> Vec<VehicleStatus> {
+/// Where every vehicle but the one publishing on `own` is, and its size -
+/// the ego vehicle and every opponent listed on [`OPPONENTS_TOPIC_NAME`] -
+/// skipping any that hasn't published its first status yet.
+fn other_vehicles(captain: &Captain, own: &VehicleTopics) -> Vec<(VehicleStatus, VehicleGeometry)> {
     let opponents = captain
         .try_topic::<Opponents>(OPPONENTS_TOPIC_NAME)
         .map(|topic| topic.read().into_value().list)
@@ -326,20 +346,27 @@ fn other_vehicles(captain: &Captain, own: &VehicleTopics) -> Vec<VehicleStatus> 
                 .map(|opponent| VehicleTopics::opponent(opponent.id)),
         )
         .filter(|vehicle| vehicle.prefix() != own.prefix())
-        .filter_map(|vehicle| captain.try_topic::<VehicleStatus>(&vehicle.vehicle_status()))
-        .map(|topic| topic.read())
-        .filter(|status| status.age().is_some())
-        .map(|status| status.into_value())
+        .filter_map(|vehicle| {
+            let status = captain
+                .try_topic::<VehicleStatus>(&vehicle.vehicle_status())?
+                .read();
+            status.age()?;
+            let geometry = captain
+                .try_topic::<VehicleGeometry>(&vehicle.vehicle_geometry())
+                .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value());
+            Some((status.into_value(), geometry))
+        })
         .collect()
 }
 
 /// How far a ray from `(origin_x, origin_y)` (world meters) at `angle_rad`
-/// (world frame) travels before entering `vehicle`'s body - a
-/// [`VEHICLE_BODY_LENGTH_M`] x [`VEHICLE_BODY_WIDTH_M`] rectangle centered on
-/// it and aligned with its heading. `None` if it misses, or if it starts
-/// inside it - vehicles don't collide, so one can end up inside another.
+/// (world frame) travels before entering `vehicle`'s body - a rectangle the
+/// size of its `geometry`, centered on it and aligned with its heading.
+/// `None` if it misses, or if it starts inside it - vehicles don't collide,
+/// so one can end up inside another.
 fn ray_vehicle_distance_m(
     vehicle: &VehicleStatus,
+    geometry: &VehicleGeometry,
     origin_x: f64,
     origin_y: f64,
     angle_rad: f64,
@@ -349,7 +376,7 @@ fn ray_vehicle_distance_m(
     let (rel_x, rel_y) = (origin_x - vehicle.x_m, origin_y - vehicle.y_m);
     let origin = [rel_x * cos + rel_y * sin, -rel_x * sin + rel_y * cos];
     let (dir_y, dir_x) = (angle_rad - vehicle.heading_rad).sin_cos();
-    let half = [VEHICLE_BODY_LENGTH_M / 2.0, VEHICLE_BODY_WIDTH_M / 2.0];
+    let half = [geometry.body_length_m / 2.0, geometry.body_width_m / 2.0];
 
     if origin[0].abs() <= half[0] && origin[1].abs() <= half[1] {
         return None;
@@ -467,6 +494,15 @@ mod tests {
         assert_eq!(ray_offset_rad(&config, 2), 1.0);
     }
 
+    /// A 0.45 m x 0.25 m body.
+    const BODY: VehicleGeometry = VehicleGeometry {
+        wheelbase_m: 0.32,
+        rear_axle_to_cg_m: 0.16,
+        track_width_m: 0.2,
+        body_length_m: 0.45,
+        body_width_m: 0.25,
+    };
+
     fn vehicle_at(x_m: f64, y_m: f64, heading_rad: f64) -> VehicleStatus {
         VehicleStatus {
             x_m,
@@ -486,35 +522,38 @@ mod tests {
         // Ahead, facing along the ray: the rear bumper is half a length closer.
         let ahead = vehicle_at(3.0, 0.0, 0.0);
         assert_close(
-            ray_vehicle_distance_m(&ahead, 0.0, 0.0, 0.0),
-            3.0 - VEHICLE_BODY_LENGTH_M / 2.0,
+            ray_vehicle_distance_m(&ahead, &BODY, 0.0, 0.0, 0.0),
+            3.0 - BODY.body_length_m / 2.0,
         );
         // Turned sideways: its flank is half a width closer.
         let sideways = vehicle_at(3.0, 0.0, std::f64::consts::FRAC_PI_2);
         assert_close(
-            ray_vehicle_distance_m(&sideways, 0.0, 0.0, 0.0),
-            3.0 - VEHICLE_BODY_WIDTH_M / 2.0,
+            ray_vehicle_distance_m(&sideways, &BODY, 0.0, 0.0, 0.0),
+            3.0 - BODY.body_width_m / 2.0,
         );
         // Straight above, seen by a ray going up.
         let above = vehicle_at(0.0, 2.0, 0.0);
         assert_close(
-            ray_vehicle_distance_m(&above, 0.0, 0.0, std::f64::consts::FRAC_PI_2),
-            2.0 - VEHICLE_BODY_WIDTH_M / 2.0,
+            ray_vehicle_distance_m(&above, &BODY, 0.0, 0.0, std::f64::consts::FRAC_PI_2),
+            2.0 - BODY.body_width_m / 2.0,
         );
     }
 
     #[test]
     fn a_ray_passing_beside_or_away_from_a_vehicle_misses_it() {
-        let beside = vehicle_at(3.0, VEHICLE_BODY_WIDTH_M, 0.0);
-        assert_eq!(ray_vehicle_distance_m(&beside, 0.0, 0.0, 0.0), None);
+        let beside = vehicle_at(3.0, BODY.body_width_m, 0.0);
+        assert_eq!(ray_vehicle_distance_m(&beside, &BODY, 0.0, 0.0, 0.0), None);
         let behind = vehicle_at(-3.0, 0.0, 0.0);
-        assert_eq!(ray_vehicle_distance_m(&behind, 0.0, 0.0, 0.0), None);
+        assert_eq!(ray_vehicle_distance_m(&behind, &BODY, 0.0, 0.0, 0.0), None);
     }
 
     #[test]
     fn a_ray_starting_inside_a_vehicle_ignores_it() {
         let overlapping = vehicle_at(0.1, 0.0, 0.3);
-        assert_eq!(ray_vehicle_distance_m(&overlapping, 0.0, 0.0, 0.0), None);
+        assert_eq!(
+            ray_vehicle_distance_m(&overlapping, &BODY, 0.0, 0.0, 0.0),
+            None
+        );
     }
 
     #[test]

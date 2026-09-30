@@ -15,7 +15,7 @@ use crate::topics::{
     OPPONENT_REQUESTS_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponent, OpponentColor, OpponentOutcome,
     OpponentRequest, OpponentRequests, OpponentSpec, Opponents, RACE_LINE_TOPIC_NAME,
     RACE_START_TOPIC_NAME, RaceStart, Racer, SelectedMap, SelectedRaceLine,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelStatus, now_ms,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleGeometry, VehicleModelStatus, VehicleTopics, now_ms,
 };
 use crate::web::{bad_request, json_response, read_json};
 use std::path::PathBuf;
@@ -317,7 +317,13 @@ pub(super) fn line_up(
             && row < f64::from(map.height_px)
             && map.pixels[row as usize * map.width_px as usize + col as usize] == 255
     };
+    // Every vehicle is the ego's size: opponents copy its model.
+    let geometry = captain
+        .try_topic::<VehicleGeometry>(&VehicleTopics::ego().vehicle_geometry())
+        .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value());
     let spacing = GridSpacing {
+        body_length_m: geometry.body_length_m,
+        body_width_m: geometry.body_width_m,
         gap_m: config.grid_gap_m,
         margin_m: config.grid_margin_m,
     };

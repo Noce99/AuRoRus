@@ -16,8 +16,10 @@ obstacle_threshold_gain = 1.0
 hysteresis_m = 0.2
 # Weight of the pull toward the longest reading, pure number.
 attractive_power = 0.01
-# Vehicle width, which widens every obstacle's potential, in meters.
-car_width_m = 0.34
+# Room kept on each side of the vehicle, in meters: every obstacle's
+# potential is widened by the vehicle's width (its vehicle_geometry) plus
+# twice this - 0.34 m in all on a 0.25 m wide car.
+width_margin_m = 0.045
 # Multiplies the chosen direction to get the steering angle, pure number.
 steering_gain = 0.7
 # 1 = also consider the field's global minimum, not only local ones.

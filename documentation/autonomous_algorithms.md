@@ -24,8 +24,15 @@ flowchart LR
     H -- "autonomous_algorithm_status" --> W
     H -- "autonomous_vesc_command" --> V["SimulatedVehicle"]
     W -- "human_vesc_command (WASD)" --> V
-    V -- "vehicle_limits" --> algos
+    V -- "vehicle_limits\nvehicle_geometry" --> algos
 ```
+
+- **The vehicle's size is never an algorithm parameter.** Its wheelbase
+  `L`, rear-axle-to-CG distance `lr` and width `w` come from the
+  `vehicle_geometry` topic, which whatever drives the vehicle publishes -
+  the Vesc from the car's calibration (`config/hardware/<car>.toml`), the
+  simulator from the car it simulates (see `car_calibration.md`). An
+  algorithm only keeps its own margins, e.g. `width_margin_m`.
 
 - **Every algorithm is its own executor.** It runs on its own thread at its
   own rate and publishes the `VescCommand` it would like the vehicle to follow
@@ -292,7 +299,7 @@ line, or its centerline if it has none (see `planning.md`). Its parameters live 
 
 Each tick it does the following:
 
-1. **Pose.** It gets the pose, then moves it back by `lr_m` to the rear axle.
+1. **Pose.** It gets the pose, then moves it back by `lr` to the rear axle.
    The steering law assumes the car turns about the rear axle.
 2. **Nearest point.** It finds the nearest point on the line.
    - The first search covers the whole line.
@@ -305,7 +312,7 @@ Each tick it does the following:
    `v_ref` is the line's speed at the nearest point.
 4. **Target.** The target is the point `Ld` metres ahead along the line,
    wrapping around the lap.
-5. **Steering:** `δ = atan(2 · wheelbase_m · sin α / ld)`.
+5. **Steering:** `δ = atan(2 · L · sin α / ld)`.
    - `α` is the bearing of the target relative to the heading.
    - `ld` is the straight-line distance to the target.
    - The result is clamped to `max_steering_angle_rad`.
@@ -385,7 +392,7 @@ Each tick:
 1. Readings are clipped to `max_range_m`.
 2. **Disparities.** Two neighbouring readings in the FOV further apart than
    `disparity_threshold_m` are a disparity. Take the nearer one, at distance
-   `d`. It overwrites (where it's nearer) `round(atan(car_width_m/2 / d) / Δθ) · r_multiplier`
+   `d`. It overwrites (where it's nearer) `round(atan((w/2 + width_margin_m) / d) / Δθ) · r_multiplier`
    readings on the farther side, starting from the farther reading. Those
    are the readings the car would clip if it aimed there.
 3. **Target.**
@@ -411,7 +418,7 @@ Using an Obstacle-Dependent Gaussian Potential Field"
    below the threshold − `hysteresis_m` and left above it + `hysteresis_m`.
    Single readings are dropped as noise.
 2. **Repulsion.** Each obstacle adds a Gaussian centred on it:
-   - its spread is `σ = atan2(d·tan(φ/2) + car_width_m/2, d)`, where `φ` is
+   - its spread is `σ = atan2(d·tan(φ/2) + w/2 + width_margin_m, d)`, where `φ` is
      the obstacle's angular width and `d` its mean distance;
    - its height is `(farthest reading − d)·√e`.
    The sum is sampled every `field_resolution_deg` and normalized to a peak
@@ -479,7 +486,7 @@ Each tick it does the following:
    - **0, PD (default).** The lookahead point is
      `look_ahead_gain_s · v + min_look_ahead_m` metres ahead of the nearest
      point. The heading error is measured from the pose moved back by
-     `wheelbase_m`, as ubm does. Steering is
+     `L`, as ubm does. Steering is
      `kk_s · err + clamp(kd_s · d(err)/dt, ±0.2)`, with no derivative on the
      first tick.
    - **1, P-enhanced.** Steering starts as `kk_s · err`. Above `min_speed`,
@@ -493,7 +500,7 @@ Each tick it does the following:
      the line's direction there and `d` the signed distance from it
      (positive toward increasing heading).
 3. **Feedforward** (`feedforward`), added on top:
-   - **1, from the curvature:** `beta_ff_gain · atan(κ · wheelbase_m)`,
+   - **1, from the curvature:** `beta_ff_gain · atan(κ · L)`,
      with `κ` the line's curvature `delay_ff_action` metres ahead.
    - **2, learned:** a value per race-line point, updated with the steering
      `delay_ff_action` points behind. `averaging_ff_gain = 1` never updates
@@ -634,7 +641,7 @@ optional: without them, those terms are simply left out.
 - **Model.** ubm's kinematic bicycle, referenced at the middle of the
   wheelbase, stepped over a fixed arc length `step_m` rather than a fixed
   time. The slip angle is `β = atan(tan δ / 2)`, the vehicle travels along
-  `θ + β`, and the heading changes by `step · tan δ · cos β / wheelbase_m`.
+  `θ + β`, and the heading changes by `step · tan δ · cos β / L`.
   The path doesn't depend on the speed, which only enters the cost.
 - **Variables.** One steering and one speed per step: `horizon − 1` pairs.
   ubm also made the states variables and the dynamics equality constraints,

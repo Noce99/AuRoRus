@@ -17,7 +17,10 @@ pub const VEHICLE_LIMITS_TOPIC_NAME: &str = "vehicle_limits";
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActuatorLimits {
     /// Largest front-wheel steering angle the servo can hold, in either
-    /// direction, in radians.
+    /// direction, in radians. The car's own (see
+    /// [`crate::hardware::SteeringTable::max_angle_rad`]), so config files
+    /// leave it out - it's filled in from the car.
+    #[serde(default)]
     pub max_steering_angle_rad: f64,
     /// Fastest the steering angle can change, in radians/second.
     pub max_steering_rate_rad_s: f64,
@@ -53,6 +56,15 @@ impl ActuatorLimits {
                 .unit("m/s²")
                 .description("Largest deceleration (braking) the motor can produce."),
         ]
+    }
+
+    /// [`Self::tunable_parameters`] but the steering angle, which is the
+    /// car's - what the real car and the simulator tune live.
+    pub fn tunable_parameters_but_steering_angle() -> Vec<AlgorithmParameter> {
+        Self::tunable_parameters()
+            .into_iter()
+            .filter(|parameter| parameter.name != "max_steering_angle_rad")
+            .collect()
     }
 
     /// Basic sanity checks on the limit values.

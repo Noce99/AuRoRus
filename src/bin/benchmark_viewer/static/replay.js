@@ -105,8 +105,11 @@ function prepareRun(run, { trajectory, lines }) {
   const t = trajectory.t_s;
   const trail = [];
   for (let i = 0; i < t.length; i += TRAIL_FULL_STRIDE) trail.push([trajectory.x_m[i], trajectory.y_m[i]]);
-  const params = run.summary.vehicle.parameters;
-  const length = run.summary.vehicle.body_length_m;
+  // The car's geometry since it was recorded; before, the model's own
+  // axle distances were among its parameters.
+  const { parameters: params, geometry, body_length_m: length } = run.summary.vehicle;
+  const front = geometry ? geometry.wheelbase_m - geometry.rear_axle_to_cg_m : params.lf_m;
+  const rear = geometry ? geometry.rear_axle_to_cg_m : params.lr_m;
   return {
     ...run,
     trajectory,
@@ -114,7 +117,7 @@ function prepareRun(run, { trajectory, lines }) {
     starts: TrackMath.lapStarts(trajectory),
     end: t.length ? t[t.length - 1] : 0,
     trail,
-    axles: { front: params.lf_m ?? 0.4 * length, rear: params.lr_m ?? 0.4 * length },
+    axles: { front: front ?? 0.4 * length, rear: rear ?? 0.4 * length },
   };
 }
 

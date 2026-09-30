@@ -18,11 +18,10 @@ centerline_smoothing_window = 5
 
 # --- Minimum-curvature optimization -----------------------------------------
 
-# The vehicle's width, in meters. The race line keeps half of it, plus the
-# safety margin, from either wall.
-vehicle_width_m = 0.3
-# Extra distance kept from either wall, in meters.
-safety_margin_m = 0.1
+# Extra distance kept from either wall, in meters, on top of half the
+# vehicle's width (its vehicle_geometry) - 0.25 m in all on a 0.25 m wide
+# car.
+safety_margin_m = 0.125
 # Penalty on neighboring points' sideways offsets differing, in 1/m^4. 0 is
 # pure minimum curvature.
 smoothness_weight = 0.0

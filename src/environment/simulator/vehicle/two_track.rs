@@ -51,13 +51,16 @@ pub struct TwoTrackState {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TwoTrackParams {
     /// Vehicle mass, in kilograms.
+    #[serde(default)]
     pub mass_kg: f64,
     /// Yaw moment of inertia about the vertical axis through the CG, in
     /// kilogram-meters^2.
     pub yaw_inertia_kgm2: f64,
     /// Distance from the CG to the front axle, in meters.
+    #[serde(default)]
     pub lf_m: f64,
     /// Distance from the CG to the rear axle, in meters.
+    #[serde(default)]
     pub lr_m: f64,
     /// Height of the CG above the ground, in meters - drives both
     /// longitudinal and lateral load transfer (see [`wheel_normal_loads`]).
@@ -65,6 +68,7 @@ pub struct TwoTrackParams {
     /// Distance between the left and right wheels, assumed the same front
     /// and rear - drives per-wheel slip angles, Ackermann steering, and
     /// lateral load transfer.
+    #[serde(default)]
     pub track_width_m: f64,
     /// Front tire Magic Formula stiffness factor (`B`), shared by both
     /// front wheels.
@@ -102,16 +106,7 @@ impl TwoTrackParams {
     /// The live-tunable parameters, one per field - see
     /// [`crate::actuators::SimulatedVehicle`].
     pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
-        let mut parameters = vec![
-            tunable::mass_kg(),
-            tunable::yaw_inertia_kgm2(),
-            tunable::lf_m(),
-            tunable::lr_m(),
-            tunable::cg_height_m(),
-            AlgorithmParameter::float("track_width_m", 0.05, 0.6, 0.01)
-                .unit("m")
-                .description("Distance between the left and right wheels."),
-        ];
+        let mut parameters = vec![tunable::yaw_inertia_kgm2(), tunable::cg_height_m()];
         parameters.extend(tunable::magic_formula("front"));
         parameters.extend(tunable::magic_formula("rear"));
         parameters.extend(tunable::combined_slip());

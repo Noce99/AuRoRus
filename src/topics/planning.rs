@@ -126,7 +126,12 @@ mod tests {
         let status = PlanningStatus {
             state: PlanningState::Computing,
             stage: "Optimizing".to_string(),
-            parameters: vec![AlgorithmParameter::float("vehicle_width_m", 0.1, 1.0, 0.01)],
+            parameters: vec![AlgorithmParameter::float(
+                "safety_margin_m",
+                0.0,
+                1.0,
+                0.005,
+            )],
             last_outcome: Some(PlanningOutcome {
                 requested: 3,
                 map: Some("track".to_string()),

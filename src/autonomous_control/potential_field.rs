@@ -12,8 +12,8 @@ use crate::autonomous_control::shared::reactive::{
 };
 use crate::autonomous_control::{Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan, VehicleTopics,
-    VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan,
+    VehicleGeometry, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -46,8 +46,10 @@ pub struct PotentialFieldConfig {
     pub hysteresis_m: f32,
     /// Weight of the pull toward the longest reading, pure number.
     pub attractive_power: f32,
-    /// Vehicle width, which widens every obstacle's potential, in meters.
-    pub car_width_m: f32,
+    /// Room kept on each side of the vehicle (whose width is its
+    /// [`VehicleGeometry`]'s), which widens every obstacle's potential, in
+    /// meters.
+    pub width_margin_m: f32,
     /// Multiplies the chosen direction to get the steering angle, pure number.
     pub steering_gain: f32,
     /// 1 = also consider the field's global minimum, not only local ones.
@@ -92,9 +94,9 @@ pub(crate) fn field_parameters() -> Vec<AlgorithmParameter> {
             .description("Hysteresis around the obstacle threshold."),
         AlgorithmParameter::float("attractive_power", 0.0, 1.0, 0.005)
             .description("Weight of the pull toward the attractive direction."),
-        AlgorithmParameter::float("car_width_m", 0.05, 1.0, 0.01)
+        AlgorithmParameter::float("width_margin_m", 0.0, 0.5, 0.005)
             .unit("m")
-            .description("Vehicle width, which widens every obstacle's potential."),
+            .description("Room kept on each side of the vehicle, which with its width widens every obstacle's potential."),
         AlgorithmParameter::float("steering_gain", 0.0, 2.0, 0.05)
             .description("Multiplies the chosen direction to get the steering angle."),
         AlgorithmParameter::int("include_global_minima", 0, 1, 1)
@@ -137,14 +139,15 @@ fn parameters() -> Vec<AlgorithmParameter> {
 }
 
 impl PotentialFieldConfig {
-    pub(crate) fn field(&self) -> FieldConfig {
+    /// The field for a vehicle `body_width_m` wide.
+    pub(crate) fn field(&self, body_width_m: f64) -> FieldConfig {
         FieldConfig {
             fov_rad: self.desired_fov_deg.to_radians(),
             resolution_rad: self.field_resolution_deg.to_radians(),
             obstacle_threshold_gain: self.obstacle_threshold_gain,
             hysteresis_m: self.hysteresis_m,
             attractive_power: self.attractive_power,
-            car_width_m: self.car_width_m,
+            car_width_m: body_width_m as f32 + 2.0 * self.width_margin_m,
             include_global_minima: self.include_global_minima == 1,
             use_minima_near_attractive: self.use_minima_near_attractive == 1,
         }
@@ -227,6 +230,8 @@ impl Executor for PotentialField {
     fn run(&mut self, captain: &Captain) {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        let geometry_topic =
+            captain.topic::<VehicleGeometry>(&self.instance.vehicle.vehicle_geometry());
         let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
@@ -242,8 +247,11 @@ impl Executor for PotentialField {
             }
 
             let scan = scan_topic.read().into_value();
+            let body_width_m = geometry_topic.read().body_width_m;
             let Some(field) =
-                potential_field(&scan, &self.config.field(), |longest_rad| longest_rad)
+                potential_field(&scan, &self.config.field(body_width_m), |longest_rad| {
+                    longest_rad
+                })
             else {
                 ticker.wait();
                 continue;
@@ -307,7 +315,7 @@ mod tests {
     fn an_open_scan_drives_straight_at_full_speed() {
         let config = PotentialFieldConfig::default();
         let scan = scan(361, 4.2, 6.0);
-        let field = potential_field(&scan, &config.field(), |longest| longest).unwrap();
+        let field = potential_field(&scan, &config.field(0.25), |longest| longest).unwrap();
         // Nothing repels; with no steering gain, the vehicle drives straight.
         let (steering, speed) = command(
             &PotentialFieldConfig {
@@ -334,7 +342,7 @@ mod tests {
         }
         // Longest reading straight ahead.
         scan.points[90] = 5.5;
-        let field = potential_field(&scan, &config.field(), |longest| longest).unwrap();
+        let field = potential_field(&scan, &config.field(0.25), |longest| longest).unwrap();
         let (steering, speed) = command(&config, &scan, &field, &limits());
         assert!(steering < 0.0, "{steering}");
         assert!(speed < config.max_speed);
@@ -347,7 +355,7 @@ mod tests {
             ..Default::default()
         };
         let scan = scan(181, PI, 5.0);
-        let mut field = potential_field(&scan, &config.field(), |_| 1.2).unwrap();
+        let mut field = potential_field(&scan, &config.field(0.25), |_| 1.2).unwrap();
         field.chosen_cell = field.attractive_cell;
         assert_eq!(command(&config, &scan, &field, &limits()).0, 0.4);
     }

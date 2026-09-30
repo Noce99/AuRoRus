@@ -25,10 +25,8 @@ pub struct PlanningConfig {
     /// Moving-average window, in points, smoothing a centerline computed
     /// from the walls - `1` for none. Unused when the map has a centerline.
     pub centerline_smoothing_window: usize,
-    /// The vehicle's width, in meters.
-    pub vehicle_width_m: f64,
     /// Extra distance kept from either wall on top of half the vehicle's
-    /// width, in meters.
+    /// width (its [`crate::topics::VehicleGeometry`]'s), in meters.
     pub safety_margin_m: f64,
     /// Weight of the penalty on neighboring points' sideways offsets
     /// differing, in 1/m^4 - `0` for pure minimum curvature.
@@ -80,10 +78,17 @@ impl Default for PlanningConfig {
 }
 
 impl PlanningConfig {
-    /// The optimizer's share of this config.
-    pub fn min_curvature(&self) -> MinCurvatureConfig {
+    /// How far the race line keeps from either wall for a vehicle
+    /// `body_width_m` wide: half of it, plus `safety_margin_m`.
+    pub fn wall_margin_m(&self, body_width_m: f64) -> f64 {
+        body_width_m / 2.0 + self.safety_margin_m
+    }
+
+    /// The optimizer's share of this config, for a vehicle `body_width_m`
+    /// wide.
+    pub fn min_curvature(&self, body_width_m: f64) -> MinCurvatureConfig {
         MinCurvatureConfig {
-            margin_m: self.vehicle_width_m / 2.0 + self.safety_margin_m,
+            margin_m: self.wall_margin_m(body_width_m),
             spacing_m: self.spacing_m,
             smoothness_weight: self.smoothness_weight,
             max_step_m: self.max_step_m,
@@ -94,10 +99,11 @@ impl PlanningConfig {
         }
     }
 
-    /// The minimum-time optimizer's share of this config.
-    pub fn min_time(&self) -> MinTimeConfig {
+    /// The minimum-time optimizer's share of this config, for a vehicle
+    /// `body_width_m` wide.
+    pub fn min_time(&self, body_width_m: f64) -> MinTimeConfig {
         MinTimeConfig {
-            margin_m: self.vehicle_width_m / 2.0 + self.safety_margin_m,
+            margin_m: self.wall_margin_m(body_width_m),
             spacing_m: self.min_time_spacing_m,
             control_spacing_m: self.min_time_control_spacing_m,
             min_speed_mps: self.min_speed_mps,
@@ -131,12 +137,9 @@ pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
         AlgorithmParameter::int("centerline_smoothing_window", 1, 51, 2).description(
             "Points averaged to smooth a centerline computed from the walls (maps without one).",
         ),
-        AlgorithmParameter::float("vehicle_width_m", 0.1, 1.0, 0.01)
+        AlgorithmParameter::float("safety_margin_m", 0.0, 1.0, 0.005)
             .unit("m")
-            .description("The vehicle's width: the line keeps half of it from either wall."),
-        AlgorithmParameter::float("safety_margin_m", 0.0, 1.0, 0.01)
-            .unit("m")
-            .description("Extra distance kept from either wall."),
+            .description("Extra distance kept from either wall, on top of half the vehicle's width."),
         AlgorithmParameter::float("smoothness_weight", 0.0, 10.0, 0.01).description(
             "Penalty on neighboring points' offsets differing - 0 for pure minimum curvature.",
         ),

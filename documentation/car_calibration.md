@@ -1,6 +1,6 @@
 # Car calibration (design notes)
 
-Status: **being built** (discussed 2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/tom.toml`, `config/car_template.toml`), `CAR_NAME`, the Vesc (steering lookup table) and lidar reading it, `web_gui --sim`/`--car`. Next: geometry for the algorithms and the simulation, then the `car_calibration` binary.
+Status: **being built** (discussed 2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/tom.toml`, `config/car_template.toml`), `CAR_NAME`, the Vesc (steering lookup table) and lidar reading it, `web_gui --sim`/`--car`; the `vehicle_geometry` topic every algorithm, dead reckoning, SLAM, the planner and the simulation read (the simulation simulates the named car, else the template). Next: the `car_calibration` binary.
 
 The goal is a guided `car_calibration` binary that measures every hardware
 parameter of a car, so the stack can be installed on a new car (different

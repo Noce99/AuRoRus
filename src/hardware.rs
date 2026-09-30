@@ -365,6 +365,18 @@ impl CarCalibration {
         )
     }
 
+    /// Its size, as published for the algorithms.
+    pub fn vehicle_geometry(&self) -> crate::topics::VehicleGeometry {
+        let g = &self.geometry;
+        crate::topics::VehicleGeometry {
+            wheelbase_m: g.wheelbase_m,
+            rear_axle_to_cg_m: g.rear_axle_to_cg_m,
+            track_width_m: g.track_width_m,
+            body_length_m: g.body_length_m,
+            body_width_m: g.body_width_m,
+        }
+    }
+
     /// The starting point of a new car's first calibration:
     /// `config/car_template.toml` (a roughly 1/10-scale car), named `name`
     /// and dated now.
