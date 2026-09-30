@@ -130,6 +130,8 @@ pub struct WebGui {
     /// shows the last results.
     benchmark: benchmark_api::Benchmark,
     config: WebGuiConfig,
+    /// The real car's name when running on it - see [`WebGui::on_car`].
+    car_name: Option<String>,
 }
 
 impl WebGui {
@@ -153,7 +155,14 @@ impl WebGui {
             benchmark_setup,
             benchmark: benchmark_api::Benchmark::default(),
             config,
+            car_name: None,
         }
+    }
+
+    /// Marks this as running on the real car `name`, which the UI shows.
+    pub fn on_car(mut self, name: impl Into<String>) -> Self {
+        self.car_name = Some(name.into());
+        self
     }
 }
 
@@ -259,6 +268,7 @@ impl Executor for WebGui {
             benchmark: &self.benchmark,
         };
         let config = &self.config;
+        let car_name = self.car_name.as_deref();
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         let orchestrator = benchmark_api::Orchestrator {
             captain,
@@ -280,6 +290,7 @@ impl Executor for WebGui {
                         match server.recv_timeout(poll_interval) {
                             Ok(Some(request)) => handlers::handle(
                                 request, maps_root, debug, benchmarks, captain, id, config,
+                                car_name,
                             ),
                             Ok(None) => continue,
                             Err(err) => eprintln!("web_gui: connection error: {err}"),
@@ -308,6 +319,7 @@ impl Executor for WebGui {
             self.config.clone(),
         );
         fresh.benchmark = self.benchmark.clone();
+        fresh.car_name = self.car_name.clone();
         Box::new(fresh)
     }
 }

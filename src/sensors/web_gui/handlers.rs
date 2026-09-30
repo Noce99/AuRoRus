@@ -34,7 +34,9 @@ pub struct Benchmarks<'a> {
 
 /// Handles one request end to end: routes it, then sends the response.
 /// `writer_id` is this `WebGui`'s own executor id, used to authorize its
-/// writes to `human_vesc_command`/`map_selection`.
+/// writes to `human_vesc_command`/`map_selection`. `car_name` is the real
+/// car's, when running on one.
+#[allow(clippy::too_many_arguments)]
 pub fn handle(
     mut request: Request,
     maps_root: &Path,
@@ -43,6 +45,7 @@ pub fn handle(
     captain: &Captain,
     writer_id: u16,
     config: &WebGuiConfig,
+    car_name: Option<&str>,
 ) {
     let method = request.method().clone();
     let url = request.url().to_string();
@@ -68,7 +71,7 @@ pub fn handle(
         (Method::Get, "/style.css") => assets::respond("style.css"),
         (Method::Get, "/app.js") => assets::respond("app.js"),
         (Method::Get, "/benchmark.js") => assets::respond("benchmark.js"),
-        (Method::Get, "/api/config") => live_api::config(config, captain),
+        (Method::Get, "/api/config") => live_api::config(config, captain, car_name),
         (Method::Get, "/api/vesc") => live_api::vesc(captain),
         (Method::Get, "/api/vesc_parameters") => live_api::vesc_parameters(captain),
         (Method::Post, "/api/vesc_parameter") => {

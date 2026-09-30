@@ -3214,6 +3214,7 @@ fetchJSON("/api/config")
   .then((config) => {
     humanMaxSpeedMps = config.human_max_speed_mps;
     humanMaxSteeringRad = config.human_max_steering_rad;
+    if (config.hardware) showCarName(config.car_name);
     return config.hardware;
   })
   .catch((err) => {
@@ -3260,6 +3261,16 @@ function startSimulatorPanels() {
 
 /** The real car's panels instead: the simulator-only ones are hidden, and
  *  the VESC's shown. */
+/** Marks the map as the real car's: a red background, and its name in
+ *  the bottom right corner. */
+function showCarName(name) {
+  document.getElementById("canvas-area").classList.add("hardware");
+  const badge = document.getElementById("car-name");
+  badge.textContent = name ?? "Real car";
+  badge.hidden = false;
+  MapView.requestRedraw();
+}
+
 function startHardwarePanels() {
   for (const btn of document.querySelectorAll(".panel-nav-btn[data-simulator-only]")) {
     btn.hidden = true;

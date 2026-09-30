@@ -1211,3 +1211,25 @@ body.benchmark-active #place-pose-btn {
   pointer-events: none;
   opacity: 0.5;
 }
+
+/* ---------- real car ---------- */
+
+/* On the real car (see `startHardwarePanels`), so it's never mistaken
+ * for the simulator. */
+#canvas-area.hardware {
+  --map-background: #800000;
+}
+
+#car-name {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(20, 24, 28, 0.75);
+  border: 1px solid #303640;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8e8;
+  pointer-events: none;
+}

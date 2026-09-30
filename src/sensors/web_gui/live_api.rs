@@ -44,12 +44,14 @@ struct FrontendConfig {
     /// Whether this is the real car (`web_gui` on a car): its VESC drives the ego
     /// vehicle, and nothing simulates one.
     hardware: bool,
+    /// The real car's name, shown on the map - `None` in simulation.
+    car_name: Option<String>,
 }
 
 /// `GET /api/config` - frontend-facing config values (the WASD human
 /// control limits, and whether this is the real car), so the UI and server
 /// never drift apart.
-pub fn config(config: &WebGuiConfig, captain: &Captain) -> ResponseBox {
+pub fn config(config: &WebGuiConfig, captain: &Captain, car_name: Option<&str>) -> ResponseBox {
     json_response(
         &FrontendConfig {
             human_max_speed_mps: config.human_max_speed_mps,
@@ -57,6 +59,7 @@ pub fn config(config: &WebGuiConfig, captain: &Captain) -> ResponseBox {
             hardware: captain
                 .try_topic::<VescStatus>(VESC_STATUS_TOPIC_NAME)
                 .is_some(),
+            car_name: car_name.map(str::to_string),
         },
         200,
     )

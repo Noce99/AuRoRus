@@ -308,7 +308,9 @@ window.MapView = (() => {
 
   function draw(nowMs) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#008080";
+    // The page's own `--map-background` (see base.css), so a host can
+    // recolor it from CSS alone.
+    ctx.fillStyle = getComputedStyle(canvas).getPropertyValue("--map-background").trim() || "#008080";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawLayers(nowMs);
     if (pointerTool && pointerTool.drawOverlay) {

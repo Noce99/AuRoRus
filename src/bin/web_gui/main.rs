@@ -98,20 +98,21 @@ fn main() {
     runner.activate_verbose();
 
     let recorder = DebugRecorder::new();
-    runner.add_executor(
-        WebGui::new(
-            "WebGui",
-            config.maps_root.clone(),
-            config.debugs_root.clone(),
-            recorder.clone(),
-            BenchmarkSetup {
-                root: config.benchmarks_root.clone(),
-                pose_source: lap_telemetry_config.pose_source,
-            },
-            web_gui_config,
-        )
-        .boxed(),
+    let mut web_gui = WebGui::new(
+        "WebGui",
+        config.maps_root.clone(),
+        config.debugs_root.clone(),
+        recorder.clone(),
+        BenchmarkSetup {
+            root: config.benchmarks_root.clone(),
+            pose_source: lap_telemetry_config.pose_source,
+        },
+        web_gui_config,
     );
+    if let Some(car) = hardware {
+        web_gui = web_gui.on_car(&car.name);
+    }
+    runner.add_executor(web_gui.boxed());
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
     // A gamepad drives the car and the simulator alike - and is waited for
     // if not plugged in.
