@@ -28,6 +28,9 @@ pub struct PlanningConfig {
     /// Extra distance kept from either wall on top of half the vehicle's
     /// width (its [`crate::topics::VehicleGeometry`]'s), in meters.
     pub safety_margin_m: f64,
+    /// Share of the vehicle's steering lock the race line may use - see
+    /// [`Self::curvature_limit_per_m`].
+    pub max_steering_fraction: f64,
     /// Weight of the penalty on neighboring points' sideways offsets
     /// differing, in 1/m^4 - `0` for pure minimum curvature.
     pub smoothness_weight: f64,
@@ -70,6 +73,31 @@ pub struct PlanningConfig {
     pub min_time_tolerance: f64,
 }
 
+/// What planning needs to know about the vehicle the line is for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlanningVehicle {
+    /// Its body's width, in meters - see [`PlanningConfig::wall_margin_m`].
+    pub body_width_m: f64,
+    /// Between its axles, in meters.
+    pub wheelbase_m: f64,
+    /// Its steering lock, in radians: the largest front-wheel angle, either
+    /// way (the smaller of its two sides).
+    pub max_steering_angle_rad: f64,
+}
+
+impl Default for PlanningVehicle {
+    /// The template car's (`config/car_template.toml`).
+    fn default() -> Self {
+        let car = crate::hardware::CarCalibration::template("template");
+        let geometry = car.vehicle_geometry();
+        Self {
+            body_width_m: geometry.body_width_m,
+            wheelbase_m: geometry.wheelbase_m,
+            max_steering_angle_rad: car.steering.max_angle_rad(),
+        }
+    }
+}
+
 impl Default for PlanningConfig {
     fn default() -> Self {
         toml::from_str(include_str!("../../config/planning/race_line.toml"))
@@ -84,11 +112,19 @@ impl PlanningConfig {
         body_width_m / 2.0 + self.safety_margin_m
     }
 
-    /// The optimizer's share of this config, for a vehicle `body_width_m`
-    /// wide.
-    pub fn min_curvature(&self, body_width_m: f64) -> MinCurvatureConfig {
+    /// Tightest the race line may turn for `vehicle`, in 1/m: a kinematic
+    /// bicycle's curvature, `tan(steering) / wheelbase`, at
+    /// `max_steering_fraction` of its steering lock.
+    pub fn curvature_limit_per_m(&self, vehicle: &PlanningVehicle) -> f64 {
+        let steering_rad = self.max_steering_fraction * vehicle.max_steering_angle_rad;
+        steering_rad.tan() / vehicle.wheelbase_m.max(1e-3)
+    }
+
+    /// The optimizer's share of this config, for `vehicle`.
+    pub fn min_curvature(&self, vehicle: &PlanningVehicle) -> MinCurvatureConfig {
         MinCurvatureConfig {
-            margin_m: self.wall_margin_m(body_width_m),
+            margin_m: self.wall_margin_m(vehicle.body_width_m),
+            max_curvature_per_m: self.curvature_limit_per_m(vehicle),
             spacing_m: self.spacing_m,
             smoothness_weight: self.smoothness_weight,
             max_step_m: self.max_step_m,
@@ -99,11 +135,11 @@ impl PlanningConfig {
         }
     }
 
-    /// The minimum-time optimizer's share of this config, for a vehicle
-    /// `body_width_m` wide.
-    pub fn min_time(&self, body_width_m: f64) -> MinTimeConfig {
+    /// The minimum-time optimizer's share of this config, for `vehicle`.
+    pub fn min_time(&self, vehicle: &PlanningVehicle) -> MinTimeConfig {
         MinTimeConfig {
-            margin_m: self.wall_margin_m(body_width_m),
+            margin_m: self.wall_margin_m(vehicle.body_width_m),
+            max_curvature_per_m: self.curvature_limit_per_m(vehicle),
             spacing_m: self.min_time_spacing_m,
             control_spacing_m: self.min_time_control_spacing_m,
             min_speed_mps: self.min_speed_mps,
@@ -140,6 +176,9 @@ pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
         AlgorithmParameter::float("safety_margin_m", 0.0, 1.0, 0.005)
             .unit("m")
             .description("Extra distance kept from either wall, on top of half the vehicle's width."),
+        AlgorithmParameter::float("max_steering_fraction", 0.1, 1.0, 0.01).description(
+            "Share of the vehicle's steering lock the race line may use - it never turns tighter.",
+        ),
         AlgorithmParameter::float("smoothness_weight", 0.0, 10.0, 0.01).description(
             "Penalty on neighboring points' offsets differing - 0 for pure minimum curvature.",
         ),

@@ -3,7 +3,7 @@
 //! walls), the minimum-curvature line around it, a speed profile, and - for
 //! [`PlanningObjective::MinTime`] - the minimum-time line from there.
 
-use super::config::PlanningConfig;
+use super::config::{PlanningConfig, PlanningVehicle};
 use super::geometry::{
     Point2, loop_length, max_abs_curvature, orient_from, resample_even_spacing, smooth,
 };
@@ -63,13 +63,12 @@ pub struct PlannedLines {
     pub min_time: Option<Result<MinTimeLine, PlanError>>,
 }
 
-/// Plans `map`'s race line for `objective` with `config`, for a vehicle
-/// `body_width_m` wide. `progress` is told what's going on, and cancels the
+/// Plans `map`'s race line for `objective` with `config`, for `vehicle`. `progress` is told what's going on, and cancels the
 /// planning - with [`PlanError::Cancelled`] - by returning `false`.
 pub fn plan(
     map: &Map,
     config: &PlanningConfig,
-    body_width_m: f64,
+    vehicle: &PlanningVehicle,
     objective: PlanningObjective,
     progress: &mut dyn FnMut(Progress) -> bool,
 ) -> Result<PlannedLines, PlanError> {
@@ -106,7 +105,7 @@ pub fn plan(
     let reference = resample_even_spacing(&reference, config.spacing_m);
 
     stage("Optimizing", progress)?;
-    let optimizer_config = config.min_curvature(body_width_m);
+    let optimizer_config = config.min_curvature(vehicle);
     let total = optimizer_config.iterations.max(1);
     let line = min_curvature::optimize(&reference, &grid, &optimizer_config, &mut |iteration| {
         progress(Progress::Iteration { total, iteration })
@@ -122,7 +121,7 @@ pub fn plan(
         PlanningObjective::MinCurvature => None,
         PlanningObjective::MinTime => {
             stage("Optimizing the lap time", progress)?;
-            let min_time_config = config.min_time(body_width_m);
+            let min_time_config = config.min_time(vehicle);
             let total = min_time_config.max_outer_iterations.max(1);
             let optimized = min_time::optimize(&line, &grid, &min_time_config, &mut |iteration| {
                 progress(Progress::MinTimeIteration { total, iteration })
@@ -174,6 +173,14 @@ mod tests {
     use super::*;
 
     const BODY_WIDTH_M: f64 = 0.25;
+
+    /// The template car, `BODY_WIDTH_M` wide.
+    fn vehicle() -> PlanningVehicle {
+        PlanningVehicle {
+            body_width_m: BODY_WIDTH_M,
+            ..PlanningVehicle::default()
+        }
+    }
     use crate::environment::{GenerationConfig, generate};
     use crate::planning::track::tests::ring_map;
 
@@ -187,7 +194,7 @@ mod tests {
         let planned = plan(
             &map,
             &config,
-            BODY_WIDTH_M,
+            &vehicle(),
             PlanningObjective::MinCurvature,
             &mut |_| true,
         )
@@ -237,7 +244,7 @@ mod tests {
         let planned = plan(
             &map,
             &config,
-            BODY_WIDTH_M,
+            &vehicle(),
             PlanningObjective::MinCurvature,
             &mut |_| true,
         )
@@ -265,6 +272,42 @@ mod tests {
         assert!(planned.max_curvature_per_m <= planned.reference_max_curvature_per_m);
     }
 
+    /// On a generated track, a curvature limit below the tightest turn of
+    /// the line planned without one flattens that turn down to the limit.
+    #[test]
+    fn a_curvature_limit_flattens_the_tightest_turn() {
+        let root = std::env::temp_dir().join(format!("aurorus_limit_{}", std::process::id()));
+        let map = small_generated_map(&root);
+        let config = PlanningConfig {
+            max_steering_fraction: 1.0,
+            ..PlanningConfig::default()
+        };
+        let plan_with = |max_steering_angle_rad| {
+            let vehicle = PlanningVehicle {
+                max_steering_angle_rad,
+                ..vehicle()
+            };
+            let planned = plan(
+                &map,
+                &config,
+                &vehicle,
+                PlanningObjective::MinCurvature,
+                &mut |_| true,
+            );
+            (planned, config.curvature_limit_per_m(&vehicle))
+        };
+
+        // Close to 90 degrees: no limit at all.
+        let (free, _) = plan_with(1.55);
+        let free = free.unwrap().max_curvature_per_m;
+        let wheelbase_m = vehicle().wheelbase_m;
+        let (limited, limit) = plan_with((0.95 * free * wheelbase_m).atan());
+        std::fs::remove_dir_all(&root).ok();
+
+        let limited = limited.unwrap().max_curvature_per_m;
+        assert!(limited <= 1.02 * limit, "{limited} 1/m, limit {limit} 1/m");
+    }
+
     /// On a generated track, the minimum-time line beats the
     /// minimum-curvature one (both timed with the same speed profile) and
     /// stays `margin` inside the walls.
@@ -283,7 +326,7 @@ mod tests {
         let planned = plan(
             &map,
             &config,
-            BODY_WIDTH_M,
+            &vehicle(),
             PlanningObjective::MinTime,
             &mut |_| true,
         )

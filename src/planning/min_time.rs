@@ -27,8 +27,9 @@
 //!   within `[v_min^2, v_max^2]`.
 //! - **`F1(u) in C`** (the ALM part), with `a_lon,i = (V_{i+1} - V_i) /
 //!   (2 d_i)` and `a_lat,i = V_i kappa_i`: `(a_lon,i / max_decel, a_lat,i /
-//!   max_lateral)` in the unit disk (the friction ellipse), and `a_lon,i /
-//!   max_accel <= 1` (the motor).
+//!   max_lateral)` in the unit disk (the friction ellipse), `a_lon,i /
+//!   max_accel <= 1` (the motor), and `kappa_i / kappa_max` in `[-1, 1]`
+//!   (the vehicle's steering).
 //!
 //! Cost, gradient, `F1` and `JF1' y` only couple neighboring points, so
 //! each costs O(n). The ALM's outer iterations run one at a time here, the
@@ -67,6 +68,8 @@ const SUFFICIENT_DECREASE: f64 = 0.25;
 pub struct MinTimeConfig {
     /// Distance to keep from either wall, in meters.
     pub margin_m: f64,
+    /// Tightest the line may turn, in 1/m - `f64::INFINITY` for no limit.
+    pub max_curvature_per_m: f64,
     /// Spacing of the optimized points, in meters.
     pub spacing_m: f64,
     /// Spacing of the B-spline control values the offsets follow, in
@@ -134,6 +137,7 @@ pub fn optimize(
         reference: &reference,
         normals: &offsets.normals,
         limits: *limits,
+        max_curvature_per_m: config.max_curvature_per_m,
         per_interval,
     };
     let (mut lower, mut upper) = model.control_bounds(&point_lower, &point_upper);
@@ -150,7 +154,7 @@ pub fn optimize(
     );
 
     let set_c = MinTimeSet { points: n };
-    let n1 = 3 * n;
+    let n1 = ROWS_PER_POINT * n;
     let mut multipliers = vec![0.0; n1];
     let mut penalty = INITIAL_PENALTY;
     let mut inner_tolerance = 1e-2_f64;
@@ -265,9 +269,13 @@ pub fn optimize(
     })
 }
 
+/// Rows of `F1` per point: the ellipse pair, the motor term, the curvature.
+const ROWS_PER_POINT: usize = 4;
+
 /// The ALM's constraint set `C`: `points` unit disks (the scaled friction
-/// ellipses, one `(a_lon / max_decel, a_lat / max_lateral)` pair per point)
-/// followed by `points` half-lines `x <= 1` (the scaled motor limits).
+/// ellipses, one `(a_lon / max_decel, a_lat / max_lateral)` pair per point),
+/// then `points` half-lines `x <= 1` (the scaled motor limits), then
+/// `points` intervals `[-1, 1]` (the scaled curvatures).
 #[derive(Debug, Clone, Copy)]
 struct MinTimeSet {
     points: usize,
@@ -275,7 +283,8 @@ struct MinTimeSet {
 
 impl Constraint for MinTimeSet {
     fn project(&self, x: &mut [f64]) -> FunctionCallResult {
-        let (disks, motor) = x.split_at_mut(2 * self.points);
+        let (disks, rest) = x.split_at_mut(2 * self.points);
+        let (motor, curvature) = rest.split_at_mut(self.points);
         for pair in disks.as_chunks_mut::<2>().0 {
             let norm = (pair[0] * pair[0] + pair[1] * pair[1]).sqrt();
             if norm > 1.0 {
@@ -285,6 +294,9 @@ impl Constraint for MinTimeSet {
         }
         for value in motor {
             *value = value.min(1.0);
+        }
+        for value in curvature {
+            *value = value.clamp(-1.0, 1.0);
         }
         Ok(())
     }
@@ -300,6 +312,8 @@ struct Model<'a> {
     reference: &'a [Point2],
     normals: &'a [Point2],
     limits: SpeedLimits,
+    /// `kappa_max`, in 1/m.
+    max_curvature_per_m: f64,
     /// Points per control interval: `N = per_interval * M`.
     per_interval: usize,
 }
@@ -454,7 +468,8 @@ impl Model<'_> {
         self.add_transposed(&by_offset, &mut grad[..m]);
     }
 
-    /// `F1(u)`: the scaled ellipse pairs, then the scaled motor terms.
+    /// `F1(u)`: the scaled ellipse pairs, then the scaled motor terms, then
+    /// the scaled curvatures.
     fn constraints(&self, u: &[f64], out: &mut [f64]) {
         let n = self.len();
         let points = self.positions(u);
@@ -467,6 +482,7 @@ impl Model<'_> {
             out[2 * i] = a_lon / self.limits.max_decel_mps2;
             out[2 * i + 1] = a_lat / self.limits.max_lateral_accel_mps2;
             out[2 * n + i] = a_lon / self.limits.max_accel_mps2;
+            out[3 * n + i] = rows[i].kappa / self.max_curvature_per_m;
         }
     }
 
@@ -485,6 +501,7 @@ impl Model<'_> {
             let on_lon =
                 y[2 * i] / self.limits.max_decel_mps2 + y[2 * n + i] / self.limits.max_accel_mps2;
             let on_lat = y[2 * i + 1] / self.limits.max_lateral_accel_mps2;
+            let on_curvature = y[3 * n + i] / self.max_curvature_per_m;
 
             // a_lon,i = (V_{i+1} - V_i) / (2 d_i).
             let d = segments.length[i];
@@ -501,23 +518,30 @@ impl Model<'_> {
             by_offset[p] += on_lat * v[i] * row.prev;
             by_offset[i] += on_lat * v[i] * row.this;
             by_offset[q] += on_lat * v[i] * row.next;
+
+            // kappa_i / kappa_max.
+            by_offset[p] += on_curvature * row.prev;
+            by_offset[i] += on_curvature * row.this;
+            by_offset[q] += on_curvature * row.next;
         }
         self.add_transposed(&by_offset, &mut out[..m]);
     }
 
     /// Largest violation of `C`, relative to the limits: how far any
-    /// ellipse pair sits outside the unit disk, or any motor term above 1.
+    /// ellipse pair sits outside the unit disk, or any motor term or
+    /// curvature magnitude above 1.
     fn violation(&self, u: &[f64]) -> f64 {
         let n = self.len();
-        let mut f1 = vec![0.0; 3 * n];
+        let mut f1 = vec![0.0; ROWS_PER_POINT * n];
         self.constraints(u, &mut f1);
         let disks = f1[..2 * n]
             .as_chunks::<2>()
             .0
             .iter()
             .map(|pair| (pair[0] * pair[0] + pair[1] * pair[1]).sqrt() - 1.0);
-        let motor = f1[2 * n..].iter().map(|m| m - 1.0);
-        disks.chain(motor).fold(0.0, f64::max)
+        let motor = f1[2 * n..3 * n].iter().map(|m| m - 1.0);
+        let curvature = f1[3 * n..].iter().map(|k| k.abs() - 1.0);
+        disks.chain(motor).chain(curvature).fold(0.0, f64::max)
     }
 }
 
@@ -525,7 +549,7 @@ impl Model<'_> {
 mod tests {
     use super::*;
     use crate::planning::geometry::tests::circle;
-    use crate::planning::geometry::{left_normal, tangents};
+    use crate::planning::geometry::{curvatures, left_normal, tangents};
     use crate::planning::track::tests::ring_map;
 
     fn limits() -> SpeedLimits {
@@ -570,6 +594,7 @@ mod tests {
             reference: &reference,
             normals: &normals,
             limits: limits(),
+            max_curvature_per_m: 0.4,
             per_interval: 4,
         };
         let mut grad = vec![0.0; u.len()];
@@ -591,9 +616,10 @@ mod tests {
             reference: &reference,
             normals: &normals,
             limits: limits(),
+            max_curvature_per_m: 0.4,
             per_interval: 4,
         };
-        let n1 = 3 * reference.len();
+        let n1 = ROWS_PER_POINT * reference.len();
         let y: Vec<f64> = (0..n1).map(|i| (i as f64 * 0.37).sin()).collect();
         let mut analytic = vec![0.0; u.len()];
         model.constraints_jacobian_transpose(&u, &y, &mut analytic);
@@ -616,15 +642,16 @@ mod tests {
     #[test]
     fn the_constraint_set_projects_onto_disks_and_half_lines() {
         let set = MinTimeSet { points: 2 };
-        let mut x = [3.0, 4.0, 0.3, 0.4, 2.0, 0.5];
+        let mut x = [3.0, 4.0, 0.3, 0.4, 2.0, 0.5, -1.5, 0.7];
         set.project(&mut x).unwrap();
         assert!((x[0] - 0.6).abs() < 1e-12 && (x[1] - 0.8).abs() < 1e-12);
-        assert_eq!(&x[2..], &[0.3, 0.4, 1.0, 0.5]);
+        assert_eq!(&x[2..], &[0.3, 0.4, 1.0, 0.5, -1.0, 0.7]);
     }
 
     fn config() -> MinTimeConfig {
         MinTimeConfig {
             margin_m: 0.2,
+            max_curvature_per_m: f64::INFINITY,
             spacing_m: 0.1,
             control_spacing_m: 0.5,
             min_speed_mps: 0.5,
@@ -659,12 +686,36 @@ mod tests {
     }
 
     #[test]
+    fn a_ring_s_fastest_line_turns_no_tighter_than_the_limit() {
+        // Without the limit, the innermost circle (radius 1.2 m) - with it,
+        // a circle as small as the vehicle may turn on (anywhere in the
+        // ring: all are as fast).
+        let map = ring_map(1.0, 2.0, 0.02);
+        let grid = TrackGrid::build(&map).unwrap();
+        let reference = resample_even_spacing(&circle(1.8, 600), 0.1);
+        let config = MinTimeConfig {
+            max_curvature_per_m: 1.0 / 1.5,
+            ..config()
+        };
+        let line = optimize(&reference, &grid, &config, &mut |_| true).unwrap();
+        for curvature in curvatures(&line) {
+            assert!(curvature.abs() < 1.02 / 1.5, "curvature {curvature} 1/m");
+        }
+        let length = loop_length(&line);
+        assert!(
+            (length - std::f64::consts::TAU * 1.5).abs() < 0.1,
+            "length {length} m"
+        );
+    }
+
+    #[test]
     fn control_bounds_hold_every_point_they_move() {
         let (reference, normals, _) = setup();
         let model = Model {
             reference: &reference,
             normals: &normals,
             limits: limits(),
+            max_curvature_per_m: 0.4,
             per_interval: 4,
         };
         let lower: Vec<f64> = (0..40).map(|i| -0.3 - 0.1 * (i as f64).sin()).collect();

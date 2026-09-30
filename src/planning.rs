@@ -28,7 +28,9 @@ mod planner;
 mod speed_profile;
 pub(crate) mod track;
 
-pub use config::{PlanningConfig, config_path, save_parameters, saved_values, tunable_parameters};
+pub use config::{
+    PlanningConfig, PlanningVehicle, config_path, save_parameters, saved_values, tunable_parameters,
+};
 pub use pipeline::{PlannedLines, Progress, plan};
 pub use planner::Planner;
 
@@ -50,6 +52,14 @@ pub enum PlanError {
         y_m: f64,
         width_m: f64,
         needed_m: f64,
+    },
+    /// The line turns tighter than the vehicle may at (`x_m`, `y_m`), even
+    /// after optimizing - the track is too tight for it.
+    TooCurvy {
+        x_m: f64,
+        y_m: f64,
+        curvature_per_m: f64,
+        limit_per_m: f64,
     },
     /// The optimizer failed.
     Solver(String),
@@ -86,6 +96,19 @@ impl std::fmt::Display for PlanError {
                 f,
                 "the track is {width_m:.2} m wide at ({x_m:.2}, {y_m:.2}) m, but the vehicle needs \
                  {needed_m:.2} m - lower the vehicle width or the safety margin"
+            ),
+            Self::TooCurvy {
+                x_m,
+                y_m,
+                curvature_per_m,
+                limit_per_m,
+            } => write!(
+                f,
+                "the race line turns with a {:.2} m radius at ({x_m:.2}, {y_m:.2}) m, but the \
+                 vehicle may turn no tighter than {:.2} m - raise max_steering_fraction, or lower \
+                 the safety margin",
+                1.0 / curvature_per_m,
+                1.0 / limit_per_m
             ),
             Self::Solver(err) => write!(f, "the optimizer failed: {err}"),
             Self::NotConverged { iterations } => write!(

@@ -13,14 +13,17 @@
 //!
 //! is linearized in the offsets around the reference (a Gauss-Newton
 //! step), so the cost `sum kappa_i^2 + lambda * sum (alpha_{i+1} -
-//! alpha_i)^2` becomes a quadratic, and each point's free space across the
-//! track makes the constraints a box: `-w_right + margin <= alpha_i <=
-//! w_left - margin`, further limited to `max_step` either way so the
+//! alpha_i)^2` becomes a quadratic, plus a penalty `w * sum max(|kappa_i| -
+//! kappa_max, 0)^2` on turning tighter than the vehicle may (convex, and
+//! zero wherever the line is within the limit); each point's free space
+//! across the track makes the constraints a box: `-w_right + margin <=
+//! alpha_i <= w_left - margin`, further limited to `max_step` either way so the
 //! linearization stays accurate. Cost and gradient only couple neighbors,
 //! so both cost O(n) to evaluate. The problem is then solved again around
 //! each solution - the iterative scheme of Heilmeier et al., the method
 //! behind TUM's global race trajectory optimization - until the line stops
-//! moving.
+//! moving. A line still tighter than `kappa_max` anywhere then is refused:
+//! the track is too tight for the vehicle.
 //!
 //! Linearizing only the second difference, with the spacing held fixed,
 //! would be simpler but wrong: moving points toward a corner's inside
@@ -29,7 +32,10 @@
 //! curvature one.
 
 use super::PlanError;
-use super::geometry::{Point2, curvature_jacobian, left_normal, resample_even_spacing, tangents};
+use super::geometry::{
+    Point2, curvature_jacobian, curvatures, left_normal, max_abs_curvature, resample_even_spacing,
+    tangents,
+};
 use super::track::TrackGrid;
 use optimization_engine::constraints::Rectangle;
 use optimization_engine::core::ExitStatus;
@@ -41,6 +47,23 @@ use optimization_engine::{Problem, SolverError};
 const MAX_FREE_DISTANCE_M: f64 = 50.0;
 /// Memory of PANOC's L-BFGS directions.
 const LBFGS_MEMORY: usize = 10;
+/// Weight `w` of the penalty on curvature beyond the limit, relative to the
+/// curvature cost's, in the first iteration. Each iteration whose line is
+/// still beyond the limit multiplies it by [`CURVATURE_LIMIT_WEIGHT_GROWTH`],
+/// up to [`CURVATURE_LIMIT_WEIGHT_MAX`]: a large weight from the start
+/// makes the problem too stiff for PANOC while the line is still rough
+/// (e.g. a centerline computed from the walls), though it's rarely needed
+/// once smooth.
+const CURVATURE_LIMIT_WEIGHT: f64 = 1.0;
+const CURVATURE_LIMIT_WEIGHT_GROWTH: f64 = 10.0;
+/// Large enough that the line exceeds the limit by about a percent at most.
+const CURVATURE_LIMIT_WEIGHT_MAX: f64 = 1000.0;
+/// Slack on the limit, as a fraction of it: the penalty aims this much
+/// below the limit, and the final line may exceed it by this much - the
+/// penalty is not a hard constraint, and resampling moves the points a
+/// little. Aiming below leaves the minimum-time optimization, which starts
+/// from this line, a feasible start.
+const CURVATURE_LIMIT_SLACK: f64 = 0.02;
 
 /// Every tunable of [`optimize`].
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +71,8 @@ pub struct MinCurvatureConfig {
     /// Distance to keep from either wall, in meters - half the vehicle's
     /// width plus a safety margin.
     pub margin_m: f64,
+    /// Tightest the line may turn, in 1/m - `f64::INFINITY` for no limit.
+    pub max_curvature_per_m: f64,
     /// Spacing of the line's points, in meters.
     pub spacing_m: f64,
     /// Weight of the penalty on neighboring offsets differing (`lambda`),
@@ -85,7 +110,8 @@ pub struct Iteration<'a> {
 /// with [`PlanError::Cancelled`] - by returning `false`.
 ///
 /// Fails if the track is narrower than `2 * margin_m` somewhere along the
-/// reference.
+/// reference, or if the line still turns tighter than `max_curvature_per_m`
+/// somewhere (beyond [`CURVATURE_LIMIT_SLACK`]).
 pub fn optimize(
     reference: &[Point2],
     grid: &TrackGrid,
@@ -93,6 +119,7 @@ pub fn optimize(
     progress: &mut dyn FnMut(Iteration) -> bool,
 ) -> Result<Vec<Point2>, PlanError> {
     let mut line = reference.to_vec();
+    let mut limit_weight = CURVATURE_LIMIT_WEIGHT;
     for number in 1..=config.iterations.max(1) {
         let offsets = Offsets::along(&line, grid);
         let (mut lower, mut upper) = offsets.bounds(config.margin_m, number == 1)?;
@@ -102,7 +129,14 @@ pub fn optimize(
             *lo = lo.max(-config.max_step_m).min(*hi);
             *hi = hi.min(config.max_step_m).max(*lo);
         }
-        let alpha = solve(&line, &offsets.normals, &lower, &upper, config)?;
+        let alpha = solve(
+            &line,
+            &offsets.normals,
+            &lower,
+            &upper,
+            limit_weight,
+            config,
+        )?;
 
         let moved: Vec<Point2> = line
             .iter()
@@ -125,11 +159,44 @@ pub fn optimize(
         if !keep_going {
             return Err(PlanError::Cancelled);
         }
-        if max_move_m < config.tolerance_m {
+        let within_limit = max_abs_curvature(&line) <= config.max_curvature_per_m;
+        if !within_limit {
+            limit_weight =
+                (limit_weight * CURVATURE_LIMIT_WEIGHT_GROWTH).min(CURVATURE_LIMIT_WEIGHT_MAX);
+        }
+        // Still moving, or still beyond the limit with more weight to put
+        // on it.
+        if max_move_m < config.tolerance_m
+            && (within_limit || limit_weight >= CURVATURE_LIMIT_WEIGHT_MAX)
+        {
             break;
         }
     }
+    check_curvature(&line, config.max_curvature_per_m)?;
     Ok(line)
+}
+
+/// Fails with [`PlanError::TooCurvy`] where `line` turns tighter than
+/// `limit_per_m`, beyond [`CURVATURE_LIMIT_SLACK`].
+fn check_curvature(line: &[Point2], limit_per_m: f64) -> Result<(), PlanError> {
+    let tightest = curvatures(line)
+        .into_iter()
+        .map(f64::abs)
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(&b.1));
+    match tightest {
+        Some((i, curvature_per_m))
+            if curvature_per_m > limit_per_m * (1.0 + CURVATURE_LIMIT_SLACK) =>
+        {
+            Err(PlanError::TooCurvy {
+                x_m: line[i].x,
+                y_m: line[i].y,
+                curvature_per_m,
+                limit_per_m,
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Each point's normal and free space either side of it.
@@ -207,23 +274,41 @@ impl Offsets {
 /// The linear map from offsets to curvatures around `line`: `kappa_i =
 /// base_i + prev_i * alpha_{i-1} + this_i * alpha_i + next_i * alpha_{i+1}`,
 /// the first-order expansion of the discrete curvature (see the module
-/// docs).
+/// docs) - and the limit on its magnitude.
 struct CurvatureModel {
     base: Vec<f64>,
     prev: Vec<f64>,
     this: Vec<f64>,
     next: Vec<f64>,
+    /// Where the penalty starts: just below `kappa_max`, in 1/m.
+    limit: f64,
+    /// `w`, the weight of the penalty beyond it.
+    limit_weight: f64,
 }
 
 impl CurvatureModel {
-    fn around(line: &[Point2], normals: &[Point2]) -> CurvatureModel {
+    /// The model around `line`, penalizing curvature beyond `limit` (less
+    /// [`CURVATURE_LIMIT_SLACK`]) with `limit_weight`.
+    fn around(
+        line: &[Point2],
+        normals: &[Point2],
+        limit: f64,
+        limit_weight: f64,
+    ) -> CurvatureModel {
         let rows = curvature_jacobian(line, normals);
         CurvatureModel {
             base: rows.iter().map(|row| row.kappa).collect(),
             prev: rows.iter().map(|row| row.prev).collect(),
             this: rows.iter().map(|row| row.this).collect(),
             next: rows.iter().map(|row| row.next).collect(),
+            limit: limit * (1.0 - CURVATURE_LIMIT_SLACK),
+            limit_weight,
         }
+    }
+
+    /// How far `kappa` is beyond the limit, signed like it - `0` within.
+    fn excess(&self, kappa: f64) -> f64 {
+        kappa.signum() * (kappa.abs() - self.limit).max(0.0)
     }
 
     /// Every point's curvature for offsets `alpha`.
@@ -239,10 +324,15 @@ impl CurvatureModel {
             .collect()
     }
 
-    /// The cost `sum kappa_i^2 + weight * sum (alpha_{i+1} - alpha_i)^2`.
+    /// The cost `sum kappa_i^2 + w * sum max(|kappa_i| - kappa_max, 0)^2 +
+    /// weight * sum (alpha_{i+1} - alpha_i)^2`.
     fn cost(&self, alpha: &[f64], weight: f64) -> f64 {
         let n = alpha.len();
-        let curvature: f64 = self.curvatures(alpha).iter().map(|k| k * k).sum();
+        let curvature: f64 = self
+            .curvatures(alpha)
+            .iter()
+            .map(|&k| k * k + self.limit_weight * self.excess(k).powi(2))
+            .sum();
         let smoothness: f64 = (0..n)
             .map(|i| (alpha[(i + 1) % n] - alpha[i]).powi(2))
             .sum();
@@ -252,7 +342,13 @@ impl CurvatureModel {
     /// [`cost`](Self::cost)'s gradient, written into `grad`.
     fn gradient(&self, alpha: &[f64], weight: f64, grad: &mut [f64]) {
         let n = alpha.len();
-        let kappa = self.curvatures(alpha);
+        // Half of each point's cost's derivative with respect to its
+        // curvature.
+        let kappa: Vec<f64> = self
+            .curvatures(alpha)
+            .into_iter()
+            .map(|k| k + self.limit_weight * self.excess(k))
+            .collect();
         for j in 0..n {
             let (p, q) = ((j + n - 1) % n, (j + 1) % n);
             // alpha_j appears in kappa_{j-1} (as its "next"), kappa_j, and
@@ -266,15 +362,16 @@ impl CurvatureModel {
 }
 
 /// The offsets minimizing the curvature cost around `line`, within
-/// `lower..=upper`.
+/// `lower..=upper`, with `limit_weight` on curvature beyond the limit.
 fn solve(
     line: &[Point2],
     normals: &[Point2],
     lower: &[f64],
     upper: &[f64],
+    limit_weight: f64,
     config: &MinCurvatureConfig,
 ) -> Result<Vec<f64>, PlanError> {
-    let model = CurvatureModel::around(line, normals);
+    let model = CurvatureModel::around(line, normals, config.max_curvature_per_m, limit_weight);
     let weight = config.smoothness_weight;
     let bounds = Rectangle::new(Some(lower), Some(upper));
     let gradient = |alpha: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
@@ -319,6 +416,7 @@ mod tests {
     fn config() -> MinCurvatureConfig {
         MinCurvatureConfig {
             margin_m: 0.2,
+            max_curvature_per_m: f64::INFINITY,
             spacing_m: 0.05,
             smoothness_weight: 0.0,
             max_step_m: 0.3,
@@ -342,7 +440,8 @@ mod tests {
             })
             .collect();
         let normals: Vec<Point2> = tangents(&line).into_iter().map(left_normal).collect();
-        let model = CurvatureModel::around(&line, &normals);
+        // Below most points' curvature, so the penalty is on at some.
+        let model = CurvatureModel::around(&line, &normals, 1.0, 1000.0);
         let alpha: Vec<f64> = (0..40).map(|i| 0.05 * (i as f64 * 0.7).sin()).collect();
         let weight = 0.3;
 
@@ -367,7 +466,7 @@ mod tests {
     fn a_zero_offset_reproduces_the_circle_s_curvature() {
         let line = circle(2.0, 400);
         let normals: Vec<Point2> = tangents(&line).into_iter().map(left_normal).collect();
-        let model = CurvatureModel::around(&line, &normals);
+        let model = CurvatureModel::around(&line, &normals, f64::INFINITY, 1.0);
         for kappa in model.curvatures(&vec![0.0; 400]) {
             assert!((kappa - 0.5).abs() < 1e-3, "{kappa}");
         }
@@ -386,6 +485,24 @@ mod tests {
             let radius = (point.x * point.x + point.y * point.y).sqrt();
             assert!((radius - 1.8).abs() < 0.03, "radius {radius}");
         }
+    }
+
+    #[test]
+    fn a_ring_tighter_than_the_limit_is_refused() {
+        // Its flattest line, along the outer wall, turns with a 1.8 m radius.
+        let map = ring_map(1.0, 2.0, 0.02);
+        let grid = TrackGrid::build(&map).unwrap();
+        let reference = resample_even_spacing(&circle(1.5, 600), 0.05);
+        let config = MinCurvatureConfig {
+            max_curvature_per_m: 1.0 / 2.5,
+            ..config()
+        };
+        let result = optimize(&reference, &grid, &config, &mut |_| true);
+        assert!(
+            matches!(result, Err(PlanError::TooCurvy { curvature_per_m, .. })
+                if (curvature_per_m - 1.0 / 1.8).abs() < 0.05),
+            "{result:?}"
+        );
     }
 
     #[test]

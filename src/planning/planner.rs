@@ -2,15 +2,15 @@
 //! map whenever [`PLANNING_REQUEST_TOPIC_NAME`] asks it to, with its
 //! parameters tuned live through [`PLANNING_PARAMETERS_TOPIC_NAME`].
 
-use super::config::{PlanningConfig, tunable_parameters};
+use super::config::{PlanningConfig, PlanningVehicle, tunable_parameters};
 use super::geometry::Point2;
 use super::pipeline::{PlannedLines, Progress, plan};
 use crate::environment::{CENTERLINE_FILE_NAME, Map, RaceLineMethod, race_lines, write_line};
 use crate::topics::{
-    Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME,
-    PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome, PlanningParameters,
-    PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
-    VEHICLE_GEOMETRY_TOPIC_NAME, VehicleGeometry,
+    ActuatorLimits, Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME,
+    PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome,
+    PlanningParameters, PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
+    VEHICLE_GEOMETRY_TOPIC_NAME, VEHICLE_LIMITS_TOPIC_NAME, VehicleGeometry,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -107,16 +107,11 @@ impl Planner {
                 // The latest minimum-curvature line, drawn under the
                 // minimum-time one it starts.
                 let mut min_curvature_line: Vec<Point2> = Vec::new();
-                // For the ego vehicle - the template car's size if nothing
-                // publishes one.
-                let body_width_m = captain
-                    .try_topic::<VehicleGeometry>(VEHICLE_GEOMETRY_TOPIC_NAME)
-                    .map_or_else(VehicleGeometry::default, |topic| topic.read().into_value())
-                    .body_width_m;
+                let vehicle = ego_vehicle(captain);
                 let planned = plan(
                     &map,
                     &self.config,
-                    body_width_m,
+                    &vehicle,
                     request.objective,
                     &mut |progress| {
                         let drawing = match progress {
@@ -190,6 +185,25 @@ impl Planner {
         }
         outcome.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
         outcome
+    }
+}
+
+/// The ego vehicle, as its geometry and actuator limits topics have it -
+/// the template car's for whichever nothing publishes.
+fn ego_vehicle(captain: &Captain) -> PlanningVehicle {
+    let template = PlanningVehicle::default();
+    let geometry = captain
+        .try_topic::<VehicleGeometry>(VEHICLE_GEOMETRY_TOPIC_NAME)
+        .map(|topic| topic.read().into_value());
+    let max_steering_angle_rad = captain
+        .try_topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME)
+        .map(|topic| topic.read().max_steering_angle_rad)
+        .filter(|angle| *angle > 0.0)
+        .unwrap_or(template.max_steering_angle_rad);
+    PlanningVehicle {
+        body_width_m: geometry.map_or(template.body_width_m, |g| g.body_width_m),
+        wheelbase_m: geometry.map_or(template.wheelbase_m, |g| g.wheelbase_m),
+        max_steering_angle_rad,
     }
 }
 

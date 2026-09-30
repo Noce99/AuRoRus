@@ -92,6 +92,24 @@ flowchart LR
      second differences) is linearized in the offsets (a Gauss-Newton
      step). The cost `Σκ_i² + λ·Σ(α_{i+1}−α_i)²` becomes a quadratic whose
      gradient only couples neighbors, so each evaluation costs O(n).
+   - **Curvature limit.** The vehicle can't turn tighter than its steering
+     allows: a kinematic bicycle turns with curvature `tan(δ)/L`, `L` its
+     wheelbase. The line may use `max_steering_fraction` of the steering
+     lock `δ_max` (the smaller of its two sides, from the car's calibration,
+     read from `vehicle_limits`), so it never turns tighter than
+     `κ_max = tan(max_steering_fraction·δ_max)/L`. The rest of the lock is
+     left for the controller to correct with. Minimizing `Σκ²` alone doesn't
+     bound the largest curvature: it happily concentrates the turning in one
+     tight spot. So the cost gets a penalty `w·Σ max(|κ_i| − κ_max, 0)²`,
+     which is convex and zero wherever the line is within the limit. `w`
+     starts at 1 and grows tenfold, up to 1000, after every iteration whose
+     line is still over the limit. A large `w` from the start makes the
+     problem too stiff for PANOC while the line is still rough, e.g. a
+     computed centerline's kinks. The penalty aims 2% below `κ_max`, and the
+     final line may exceed it by up to 2%. A line tighter than that is
+     refused: planning fails with where it turns too tight. Then the track
+     is too tight for the vehicle: raise `max_steering_fraction`, or lower
+     the safety margin.
    - Each iteration also caps every move at `max_step_m`, so the
      linearization stays accurate. The problem is then solved again around
      the new line: the iterative scheme of Heilmeier et al., which TUM's
@@ -172,10 +190,12 @@ cornering limit a lap of a circle takes `2π·√(R/a_lat)`.
   `[min_speed_mps, max_speed_mps]`) is projected exactly. The friction
   ellipse and the motor limit, per point, go through the augmented
   Lagrangian as `F1(u) ∈ C`, where `C` is one unit disk per point (the
-  scaled ellipse) and one half-line `≤ 1` per point (the scaled motor
-  limit).
+  scaled ellipse), one half-line `≤ 1` per point (the scaled motor
+  limit), and one interval `[−1, 1]` per point (the curvature over
+  `κ_max`, the steering limit - see [the pipeline](#the-pipeline)).
 - **Warm start:** the minimum-curvature line at its own speed profile, which
-  is feasible.
+  is feasible (its curvature too, since minimum curvature aims just below
+  the limit).
 - **Outer loop:** run one iteration at a time, carrying the Lagrange
   multipliers and penalty over, so the panel shows each one ("lap 20.9 s,
   limits exceeded by up to 0.2%") and planning can be cancelled. It has
@@ -223,6 +243,7 @@ use that. If you see it, raise `solver_max_iterations`, or `spacing_m`.
 | `spacing_m` | Distance between the race line's points. |
 | `centerline_smoothing_window` | Points averaged to smooth a centerline computed from the walls. |
 | `safety_margin_m` | The line keeps half the vehicle's width (its `vehicle_geometry`) plus `safety_margin_m` from either wall. |
+| `max_steering_fraction` | Share of the vehicle's steering lock the line may use: it never turns tighter than `tan(max_steering_fraction·δ_max)/wheelbase`. |
 | `smoothness_weight` | `λ`: penalty on neighboring offsets differing. `0` is pure minimum curvature. |
 | `max_step_m` | Farthest any point may move in one iteration. |
 | `iterations`, `tolerance_m` | Most outer iterations, and the move below which the line has converged. |
@@ -239,8 +260,7 @@ use that. If you see it, raise `solver_max_iterations`, or `spacing_m`.
 
 ## Not done yet
 
-- **A curvature limit.** Nothing stops a line from turning tighter than
-  the vehicle's steering allows, apart from the track's shape. For minimum
-  time it would be one more `F1` row per point.
+- **Separate left and right steering limits.** The curvature limit uses
+  the smaller side of the steering lock both ways.
 - **A richer vehicle model.** Minimum time uses a point mass: no load
   transfer, no yaw dynamics, and grip that doesn't depend on speed.

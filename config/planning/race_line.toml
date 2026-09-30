@@ -22,6 +22,12 @@ centerline_smoothing_window = 5
 # vehicle's width (its vehicle_geometry) - 0.25 m in all on a 0.25 m wide
 # car.
 safety_margin_m = 0.125
+# Share of the vehicle's steering lock (the smaller of its two sides, from
+# its calibration) the race line may use: nowhere does it turn tighter than
+# tan(max_steering_fraction * lock) / wheelbase, so the controller following
+# it keeps the rest to correct with. Planning fails if the track can't be
+# driven within that.
+max_steering_fraction = 0.8
 # Penalty on neighboring points' sideways offsets differing, in 1/m^4. 0 is
 # pure minimum curvature.
 smoothness_weight = 0.0
