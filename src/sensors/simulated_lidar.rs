@@ -43,6 +43,12 @@ pub struct SimulatedLidarConfig {
     /// vehicle's and every opponent's (see [`crate::opponents`]) - as well as
     /// on the map.
     pub see_vehicles: bool,
+    /// Where the sensor sits on the vehicle, in meters, forward of the
+    /// vehicle's reference point - see [`LidarScan::mount_x_m`].
+    pub mount_x_m: f32,
+    /// Where the sensor sits on the vehicle, in meters, left of the
+    /// vehicle's reference point - see [`LidarScan::mount_y_m`].
+    pub mount_y_m: f32,
 }
 
 impl Default for SimulatedLidarConfig {
@@ -58,8 +64,9 @@ impl Default for SimulatedLidarConfig {
 /// [`LidarScan`] built by raycasting [`SimulatedLidarConfig::num_points`]
 /// rays - equally spaced across [`SimulatedLidarConfig::fov_rad`], centered
 /// on the vehicle's forward direction - against the map published on
-/// [`MAP_TOPIC_NAME`], from the position published on
-/// its vehicle's [`VehicleTopics::vehicle_status`], at
+/// [`MAP_TOPIC_NAME`], from its mount (see
+/// [`SimulatedLidarConfig::mount_x_m`]) on the pose published on its
+/// vehicle's [`VehicleTopics::vehicle_status`], at
 /// [`SimulatedLidarConfig::rate_hz`].
 pub struct SimulatedLidar {
     id: u16,
@@ -109,6 +116,7 @@ impl Executor for SimulatedLidar {
                 config.max_distance_m,
                 config.fov_rad,
             )
+            .mounted_at(config.mount_x_m, config.mount_y_m)
         });
         captain.claim_drawing(self.id);
     }
@@ -138,6 +146,14 @@ impl Executor for SimulatedLidar {
                 Vec::new()
             };
 
+            // Every ray starts at the sensor, not the vehicle's reference point.
+            let (origin_x, origin_y) = LidarScan::sensor_origin_m(
+                self.config.mount_x_m,
+                self.config.mount_y_m,
+                status.x_m,
+                status.y_m,
+                status.heading_rad,
+            );
             let mut hits = Vec::new();
             let (points, intensities) = (0..self.config.num_points)
                 .map(|i| {
@@ -146,8 +162,8 @@ impl Executor for SimulatedLidar {
                         Some(info) => cast_ray(
                             &map,
                             info,
-                            status.x_m,
-                            status.y_m,
+                            origin_x,
+                            origin_y,
                             angle_rad,
                             self.config.max_distance_m,
                         ),
@@ -156,7 +172,7 @@ impl Executor for SimulatedLidar {
                     let vehicle_m = others
                         .iter()
                         .filter_map(|other| {
-                            ray_vehicle_distance_m(other, status.x_m, status.y_m, angle_rad)
+                            ray_vehicle_distance_m(other, origin_x, origin_y, angle_rad)
                         })
                         .fold(f64::INFINITY, f64::min);
                     let (distance_m, hit) = if vehicle_m < f64::from(distance_m) {
@@ -168,8 +184,8 @@ impl Executor for SimulatedLidar {
                     if hit {
                         let d = f64::from(distance_m);
                         hits.push([
-                            (status.x_m + d * angle_rad.cos()) as f32,
-                            (status.y_m + d * angle_rad.sin()) as f32,
+                            (origin_x + d * angle_rad.cos()) as f32,
+                            (origin_y + d * angle_rad.sin()) as f32,
                         ]);
                     }
                     (distance_m, if hit { 1.0 } else { 0.0 })
@@ -185,7 +201,8 @@ impl Executor for SimulatedLidar {
                         self.config.min_distance_m,
                         self.config.max_distance_m,
                         self.config.fov_rad,
-                    ),
+                    )
+                    .mounted_at(self.config.mount_x_m, self.config.mount_y_m),
                 )
                 .expect("lost writer authorization for the lidar_scan topic");
             drawing_topic
@@ -441,6 +458,8 @@ mod tests {
             seed: 1,
             range_std_m: 0.0,
             see_vehicles: false,
+            mount_x_m: 0.0,
+            mount_y_m: 0.0,
         };
 
         assert_eq!(ray_offset_rad(&config, 0), -1.0);

@@ -94,7 +94,8 @@ impl Executor for GapFollower {
         let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
         // let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
         let scan_topic = captain.topic::<LidarScan>(&self.instance.vehicle.lidar_scan());
-        let vehicle_topic = captain.topic::<VehicleStatus>(&self.instance.vehicle.vehicle_status());
+        // Only for drawing, and absent on the real car.
+        let vehicle_topic = captain.try_topic::<VehicleStatus>(&self.instance.vehicle.vehicle_status());
         let drawing_topic = captain.drawing(self.id);
         let mut tuner = ParameterTuner::new(self.id, &self.instance);
 
@@ -116,7 +117,9 @@ impl Executor for GapFollower {
             // let limits = limits_topic.read();
 
 
-            let vehicle_status = vehicle_topic.read();
+            let vehicle_status = vehicle_topic
+                .as_ref()
+                .map_or_else(VehicleStatus::default, |topic| topic.read().into_value());
 
             let scan = scan_topic.read();
 

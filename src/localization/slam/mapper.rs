@@ -147,6 +147,16 @@ impl Mapper {
         self.scans.last().map(LocalizedScan::corrected_pose)
     }
 
+    /// Where the `odom` frame sits in the map's, going by the latest kept
+    /// scan: the correction that takes its odometric pose to its corrected
+    /// one, so odometry's latest pose composed onto it is the vehicle's pose
+    /// on the map, between two scans too.
+    pub fn map_to_odom(&self) -> Option<Pose2> {
+        self.scans
+            .last()
+            .map(|scan| scan.corrected_pose().compose(&scan.odometric_pose.inverse()))
+    }
+
     /// Both ends of every edge that closed a loop, at their current poses.
     pub fn loop_edges(&self) -> Vec<(Pose2, Pose2)> {
         self.graph
@@ -651,6 +661,10 @@ mod tests {
                 corrected.squared_distance(&truth).sqrt() < 0.03,
                 "step {step}: corrected {corrected:?}, truth {truth:?}"
             );
+            // The correction takes odometry's pose to the corrected one.
+            let on_map = mapper.map_to_odom().expect("a scan was kept").compose(&odometric);
+            assert!(on_map.squared_distance(&corrected).sqrt() < 1e-9, "step {step}");
+            assert!((on_map.heading_rad - corrected.heading_rad).abs() < 1e-9, "step {step}");
             odometric = odometric.compose(&Pose2::new(0.275, 0.0, 0.02));
         }
         assert!(worst_odometry_error > 0.1, "odometry must actually drift");

@@ -209,7 +209,7 @@ impl Executor for PotentialPursuit {
                             command(&self.config.potential_field(), &scan, &control.field, &limits_topic.read());
                         (
                             VescCommand::new(steering_rad as f64, speed_mps as f64),
-                            control.drawing(captain, &self.instance.vehicle),
+                            control.drawing(captain, &self.instance.vehicle, &scan),
                             None,
                         )
                     }
@@ -292,8 +292,8 @@ fn control(
 
 impl Control {
     /// The field's drawing, plus the nearest and pursuit points, for the
-    /// vehicle whose topics are `vehicle`.
-    fn drawing(&self, captain: &Captain, vehicle: &VehicleTopics) -> Drawing {
+    /// vehicle whose topics are `vehicle`, seen from where `scan` was taken.
+    fn drawing(&self, captain: &Captain, vehicle: &VehicleTopics, scan: &LidarScan) -> Drawing {
         let nearest = Shape::Circle {
             x_m: self.nearest.x_m,
             y_m: self.nearest.y_m,
@@ -308,7 +308,7 @@ impl Control {
             filled: true,
             color: Color::GREEN,
         };
-        field_drawing(captain, vehicle, &self.field)
+        field_drawing(captain, vehicle, scan, &self.field)
             .element("Nearest point", [nearest], false)
             .element("Pursuit point", [target], false)
     }

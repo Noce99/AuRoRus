@@ -776,7 +776,11 @@ fn drive(
     });
 
     let ego = VehicleTopics::ego();
-    let status_topic = captain.topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME);
+    // Laps are scored against the simulator's ground truth, which a real car
+    // (`--hardware`) doesn't have.
+    let status_topic = captain
+        .try_topic::<VehicleStatus>(VEHICLE_STATUS_TOPIC_NAME)
+        .ok_or_else(|| Halt::Failed("benchmarks need the simulated vehicle".into()))?;
     let command_topic = captain.try_topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
     let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
     // Laps already on this line before the run - a placement keeps them.

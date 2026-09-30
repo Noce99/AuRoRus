@@ -1,12 +1,14 @@
-use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
+use aurorus::actuators::{
+    SimulatedVehicle, SimulatedVehicleConfig, Vesc, VescConfig, default_model,
+};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
 use aurorus::opponents::OpponentsManager;
 use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
-    BenchmarkSetup, MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
-    SimulatedLidarConfig, WebGui, WebGuiConfig,
+    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, MapServer, MapServerConfig, SimulatedImu,
+    SimulatedImuConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
 use aurorus::topics::VehicleModelKind;
@@ -25,6 +27,9 @@ fn main() {
     let simulated_lidar_config =
         aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
             .unwrap_or_else(|_| SimulatedLidarConfig::default());
+    let hokuyo_lidar_config =
+        aurorus::config::load(&config.config_dir.join("sensors/hokuyo_lidar.toml"))
+            .unwrap_or_else(|_| HokuyoLidarConfig::default());
     let simulated_imu_config =
         aurorus::config::load(&config.config_dir.join("sensors/simulated_imu.toml"))
             .unwrap_or_else(|_| SimulatedImuConfig::default());
@@ -33,6 +38,8 @@ fn main() {
             .unwrap_or_else(|_| DeadReckoningConfig::default());
     let slam_config = aurorus::config::load(&config.config_dir.join("localization/slam.toml"))
         .unwrap_or_else(|_| SlamConfig::default());
+    let vesc_config = aurorus::config::load(&config.config_dir.join("actuators/vesc.toml"))
+        .unwrap_or_else(|_| VescConfig::default());
     let vehicle_config =
         aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
             .unwrap_or_else(|_| SimulatedVehicleConfig::default());
@@ -65,29 +72,41 @@ fn main() {
         .boxed(),
     );
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
-    runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
-    runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
+    // `--hardware`: the real car's sensors and actuators, and no simulated
+    // ones. The VESC also stands in for the IMU dead reckoning integrates.
+    if config.hardware {
+        runner.add_executor(HokuyoLidar::new("HokuyoLidar", hokuyo_lidar_config).boxed());
+        runner.add_executor(Vesc::new("Vesc", vesc_config).boxed());
+    } else {
+        runner.add_executor(SimulatedLidar::new("SimulatedLidar", simulated_lidar_config).boxed());
+        runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
+    }
     runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
     runner.add_executor(Slam::new("Slam", config.maps_root, slam_config).boxed());
     runner.add_executor(Planner::new("Planner", planning_config).boxed());
     runner.add_executor(UbmDetector::new("UbmDetector", detector_config).boxed());
     // Opponents copy the ego vehicle's configs - see `OpponentsManager`.
-    runner.add_executor(
-        OpponentsManager::new(
-            "OpponentsManager",
-            vehicle_config.clone(),
-            simulated_lidar_config,
-        )
-        .boxed(),
-    );
-    runner.add_executor(
-        SimulatedVehicle::new(
-            "SimulatedVehicle",
-            default_model(VehicleModelKind::Bicycle, &vehicle_config),
-            vehicle_config,
-        )
-        .boxed(),
-    );
+    // There are none on the real track.
+    if !config.hardware {
+        runner.add_executor(
+            OpponentsManager::new(
+                "OpponentsManager",
+                vehicle_config.clone(),
+                simulated_lidar_config,
+            )
+            .boxed(),
+        );
+    }
+    if !config.hardware {
+        runner.add_executor(
+            SimulatedVehicle::new(
+                "SimulatedVehicle",
+                default_model(VehicleModelKind::Bicycle, &vehicle_config),
+                vehicle_config,
+            )
+            .boxed(),
+        );
+    }
     runner.add_executor(
         LapTelemetryRecorder::new("LapTelemetryRecorder", lap_telemetry_config).boxed(),
     );

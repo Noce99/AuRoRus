@@ -433,6 +433,8 @@ fn find_obstacles(
     pose: Pose,
     grid: &FreeGrid,
 ) -> Vec<[f64; 2]> {
+    let (x_m, y_m) = scan.origin_m(pose.x_m, pose.y_m, pose.heading_rad);
+    let pose = Pose { x_m, y_m, ..pose };
     let window = fov_window(scan, config.desired_fov_deg.to_radians() as f32);
     window
         .step_by(config.lidar_downsample.max(1))

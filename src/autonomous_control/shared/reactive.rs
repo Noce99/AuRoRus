@@ -286,17 +286,21 @@ pub(crate) fn potential_field(
     Some(field)
 }
 
-/// Where the scan of the vehicle whose topics are `vehicle` was taken from,
-/// for drawing: the simulator's ground truth (which the simulated LIDAR casts
-/// from), if there is one.
-pub(crate) fn scan_origin(captain: &Captain, vehicle: &VehicleTopics) -> Option<Pose> {
+/// Where `scan`, of the vehicle whose topics are `vehicle`, was taken from,
+/// for drawing: its sensor's mount on the vehicle's pose, if there is one.
+pub(crate) fn scan_origin(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+    scan: &LidarScan,
+) -> Option<Pose> {
     let status = captain
         .try_topic::<VehicleStatus>(&vehicle.vehicle_status())?
         .read();
     status.meta.written_at?;
+    let (x_m, y_m) = scan.origin_m(status.x_m, status.y_m, status.heading_rad);
     Some(Pose {
-        x_m: status.x_m,
-        y_m: status.y_m,
+        x_m,
+        y_m,
         heading_rad: status.heading_rad,
     })
 }

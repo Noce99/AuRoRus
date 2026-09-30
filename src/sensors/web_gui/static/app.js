@@ -2379,15 +2379,77 @@ debugStopBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------
+// VESC panel - the real car's motor controller (`/api/vesc`), only shown
+// on the real car (see `startHardwarePanels`).
+// ---------------------------------------------------------------------
+
+const vescNavBtn = document.querySelector('.panel-nav-btn[data-panel="vesc"]');
+const vescStateEl = document.getElementById("vesc-state");
+const vescBatteryEl = document.getElementById("vesc-battery");
+const vescSpeedEl = document.getElementById("vesc-speed");
+const vescCommandedEl = document.getElementById("vesc-commanded");
+const vescServoEl = document.getElementById("vesc-servo");
+const vescCurrentEl = document.getElementById("vesc-current");
+const vescTemperatureEl = document.getElementById("vesc-temperature");
+const vescTachometerEl = document.getElementById("vesc-tachometer");
+
+/** How often the VESC panel is refreshed. */
+const VESC_POLL_MS = 250;
+/** Older than this, the VESC's readings mean the VESC was lost. */
+const VESC_STALE_MS = 500;
+
+/** The panel's headline, and how alarming it is: `ok`, `warning` or `fault`. */
+function vescState(response) {
+  const status = response.value;
+  if (response.age_ms === null) return ["Waiting for the VESC...", "warning"];
+  if (response.age_ms > VESC_STALE_MS) return ["VESC lost - reconnecting", "fault"];
+  if (status.fault !== "NONE") return [`Fault: ${status.fault}`, "fault"];
+  if (status.low_battery) return ["Battery low - recharge it", "warning"];
+  if (status.timed_out) return ["Stopped by the VESC's own timeout", "warning"];
+  return ["Connected", "ok"];
+}
+
+function renderVesc(response) {
+  const [text, level] = vescState(response);
+  vescStateEl.textContent = text;
+  vescStateEl.className = level;
+  vescNavBtn.classList.toggle("warning", level === "warning");
+  vescNavBtn.classList.toggle("fault", level === "fault");
+
+  const status = response.value;
+  vescBatteryEl.textContent = `${status.input_voltage_v.toFixed(1)} V`;
+  vescBatteryEl.classList.toggle("warning", status.low_battery);
+  vescSpeedEl.textContent = `${status.wheel_speed_mps.toFixed(2)} m/s (${Math.round(status.erpm)} ERPM)`;
+  vescCommandedEl.textContent =
+    status.commanded_erpm === null ? "braking" : `${status.commanded_erpm} ERPM`;
+  vescServoEl.textContent = status.servo_position.toFixed(3);
+  vescCurrentEl.textContent =
+    `${status.motor_current_a.toFixed(2)} A motor, ${status.input_current_a.toFixed(2)} A battery`;
+  vescTemperatureEl.textContent = `${status.temp_fet_c.toFixed(1)} °C MOSFETs, ${status.temp_motor_c.toFixed(1)} °C motor`;
+  vescTachometerEl.textContent = status.tachometer.toLocaleString();
+}
+
+async function pollVesc() {
+  renderVesc(await fetchJSON("/api/vesc"));
+}
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
+// Which binary this is decides what's polled: the real car (`--hardware`)
+// has a VESC and no simulated vehicle, opponents or benchmarks.
 fetchJSON("/api/config")
   .then((config) => {
     humanMaxSpeedMps = config.human_max_speed_mps;
     humanMaxSteeringRad = config.human_max_steering_rad;
+    return config.hardware;
   })
-  .catch((err) => console.error(err));
+  .catch((err) => {
+    console.error(err);
+    return false;
+  })
+  .then((hardware) => (hardware ? startHardwarePanels() : startSimulatorPanels()));
 
 /** How often the current map, vehicle model, autonomous algorithm, SLAM
  *  state, and planner state are re-read, to reflect changes made from
@@ -2397,13 +2459,11 @@ const SELECTION_POLL_MS = 500;
 const drawPoller = startPolling(drawLayers.poll, 1000 / drawRateHz);
 const topicPoller = startPolling(pollSelectedTopic, 1000 / DEFAULT_TOPIC_RATE_HZ);
 startPolling(pollLiveMap, SELECTION_POLL_MS);
-startPolling(pollVehicleModel, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
 startPolling(pollDetector, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);
-startPolling(pollOpponents, SELECTION_POLL_MS);
 startPolling(pollDebug, SELECTION_POLL_MS);
 refreshTopicList().catch((err) => console.error(err));
 syncPollRateSlider();
@@ -2417,9 +2477,25 @@ refreshMapList()
   })
   .catch((err) => console.error(err));
 
-populateVehicleModelOptions()
-  .then(() => pollVehicleModel())
-  .catch((err) => console.error(err));
+/** The panels only a simulated vehicle has: its model, and the opponents
+ *  racing it. */
+function startSimulatorPanels() {
+  startPolling(pollVehicleModel, SELECTION_POLL_MS);
+  startPolling(pollOpponents, SELECTION_POLL_MS);
+  populateVehicleModelOptions()
+    .then(() => pollVehicleModel())
+    .catch((err) => console.error(err));
+}
+
+/** The real car's panels instead: the simulator-only ones are hidden, and
+ *  the VESC's shown. */
+function startHardwarePanels() {
+  for (const btn of document.querySelectorAll(".panel-nav-btn[data-simulator-only]")) {
+    btn.hidden = true;
+  }
+  vescNavBtn.hidden = false;
+  startPolling(pollVesc, VESC_POLL_MS);
+}
 
 // ---------------------------------------------------------------------
 // Bottom panel: lap telemetry (see /lap_panel.js)

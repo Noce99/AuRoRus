@@ -73,24 +73,30 @@ impl OccupancyGrid {
         }
     }
 
-    /// Traces every reading of `scan`, from its corrected pose - Karto's
-    /// `OccupancyGrid::AddScan`. Readings past the scan's range threshold
-    /// are traced up to it, but don't mark where they ended as occupied.
+    /// Traces every reading of `scan`, from where its sensor was at its
+    /// corrected pose - Karto's `OccupancyGrid::AddScan`. Readings past the
+    /// scan's range threshold are traced up to it, but don't mark where they
+    /// ended as occupied.
     pub fn add_scan(&mut self, scan: &LocalizedScan) {
-        let origin = scan.corrected_pose();
+        let pose = scan.corrected_pose();
+        let (mount_x, mount_y) = scan.mount_m();
+        let origin = scan.sensor_origin();
         let threshold_m = scan.range_threshold_m();
         let rays: Vec<((f64, f64), bool)> = scan
             .readings()
             .iter()
             .map(|reading| {
                 let ratio = (threshold_m / reading.range_m).min(1.0);
-                let end = origin.transform_point(reading.x_m * ratio, reading.y_m * ratio);
+                let end = pose.transform_point(
+                    mount_x + (reading.x_m - mount_x) * ratio,
+                    mount_y + (reading.y_m - mount_y) * ratio,
+                );
                 (end, reading.range_m < threshold_m)
             })
             .collect();
 
-        let (mut min_x, mut min_y) = (origin.x_m, origin.y_m);
-        let (mut max_x, mut max_y) = (origin.x_m, origin.y_m);
+        let (mut min_x, mut min_y) = origin;
+        let (mut max_x, mut max_y) = origin;
         for &((x, y), _) in &rays {
             min_x = min_x.min(x);
             min_y = min_y.min(y);
@@ -99,7 +105,7 @@ impl OccupancyGrid {
         }
         self.grow_to_contain(min_x, min_y, max_x, max_y);
 
-        let from = self.world_to_grid(origin.x_m, origin.y_m);
+        let from = self.world_to_grid(origin.0, origin.1);
         for (end, is_hit) in rays {
             let to = self.world_to_grid(end.0, end.1);
             self.trace_line(from, to);

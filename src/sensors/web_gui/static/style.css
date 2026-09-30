@@ -271,6 +271,59 @@
   color: #ef4444;
 }
 
+/* ---------- VESC panel ---------- */
+
+#vesc-state {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #9aa4b2;
+}
+
+#vesc-state.ok {
+  color: #7fd18b;
+}
+
+#vesc-state.warning {
+  color: #e0a458;
+}
+
+#vesc-state.fault {
+  color: #ef4444;
+}
+
+.panel-nav-btn.warning::after {
+  content: " \25CF";
+  color: #e0a458;
+}
+
+.panel-nav-btn.fault::after {
+  content: " \25CF";
+  color: #ef4444;
+}
+
+.readings {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.readings dt {
+  color: #9aa4b2;
+}
+
+.readings dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: #e8e8e8;
+}
+
+.readings dd.warning {
+  color: #e0a458;
+}
+
 #slam-controls,
 #localization-controls,
 #algorithm-controls,

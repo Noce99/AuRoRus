@@ -25,10 +25,10 @@ use crate::topics::{
     SelectedMap, SlamCommand, SlamSaveRequest, SlamState, SlamStatus, StartState,
     VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelParameters,
-    VehicleModelSelection, VehicleModelStatus, VescCommand,
+    VESC_STATUS_TOPIC_NAME, VehicleModelSelection, VehicleModelStatus, VescCommand, VescStatus,
 };
 use crate::web::{bad_request, error_response, json_response, read_json, read_optional_json};
-use crate::{Captain, WriteMeta};
+use crate::{Captain, Stamped, WriteMeta};
 use crate::{actuators, autonomous_control, planning};
 use std::path::Path;
 use std::sync::Mutex;
@@ -40,18 +40,36 @@ use tiny_http::{Request, ResponseBox};
 struct FrontendConfig {
     human_max_speed_mps: f64,
     human_max_steering_rad: f64,
+    /// Whether this is the real car (`--hardware`): its VESC drives the ego
+    /// vehicle, and nothing simulates one.
+    hardware: bool,
 }
 
 /// `GET /api/config` - frontend-facing config values (the WASD human
-/// control limits), so the UI and server never drift apart.
-pub fn config(config: &WebGuiConfig) -> ResponseBox {
+/// control limits, and whether this is the real car), so the UI and server
+/// never drift apart.
+pub fn config(config: &WebGuiConfig, captain: &Captain) -> ResponseBox {
     json_response(
         &FrontendConfig {
             human_max_speed_mps: config.human_max_speed_mps,
             human_max_steering_rad: config.human_max_steering_rad,
+            hardware: captain.try_topic::<VescStatus>(VESC_STATUS_TOPIC_NAME).is_some(),
         },
         200,
     )
+}
+
+/// `GET /api/vesc` - the real car's motor controller's state, from the
+/// `vesc_status` topic, as a [`StampedBody`] - `404` in simulation, where
+/// nothing publishes it.
+pub fn vesc(captain: &Captain) -> ResponseBox {
+    match captain.try_topic::<VescStatus>(VESC_STATUS_TOPIC_NAME) {
+        Some(topic) => {
+            let status = topic.read();
+            stamped_json(&status.value, status.meta)
+        }
+        None => error_response(404, "no VESC in this binary"),
+    }
 }
 
 /// The envelope every topic-reading `GET` endpoint wraps its body in: the
@@ -212,9 +230,9 @@ struct LiveVehicleModel {
 /// tunable parameters, and the actuator limits, with the values in effect,
 /// read from the `vehicle_model_status` topic, as a [`StampedBody`].
 pub fn vehicle_model(captain: &Captain) -> ResponseBox {
-    let status = captain
-        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
-        .read();
+    let Some(status) = running_model(captain) else {
+        return error_response(404, "no simulated vehicle model is running");
+    };
     stamped_json(
         &LiveVehicleModel {
             kind: status.kind.api_str(),
@@ -223,6 +241,14 @@ pub fn vehicle_model(captain: &Captain) -> ResponseBox {
         },
         status.meta,
     )
+}
+
+/// What the running vehicle model publishes on `vehicle_model_status` -
+/// `None` on the real car (`--hardware`), which runs no model.
+fn running_model(captain: &Captain) -> Option<Stamped<VehicleModelStatus>> {
+    captain
+        .try_topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
+        .map(|topic| topic.read())
 }
 
 #[derive(serde::Deserialize)]
@@ -379,11 +405,10 @@ pub fn set_vehicle_limit(request: &mut Request, captain: &Captain, writer_id: u1
 /// of the vehicle's config file, keeping the rest of the file - see
 /// [`actuators::save_vehicle_limits`]. Responds with the file's path.
 pub fn save_vehicle_limits(captain: &Captain) -> ResponseBox {
-    let limits = captain
-        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
-        .read()
-        .into_value()
-        .limits;
+    let Some(status) = running_model(captain) else {
+        return bad_request("no simulated vehicle model is running");
+    };
+    let limits = status.into_value().limits;
     if limits.is_empty() {
         return bad_request("no actuator limits reported yet");
     }
@@ -464,10 +489,10 @@ fn running_model_parameters(
     captain: &Captain,
     kind: &str,
 ) -> Result<(VehicleModelKind, Vec<AlgorithmParameter>), ResponseBox> {
-    let status = captain
-        .topic::<VehicleModelStatus>(VEHICLE_MODEL_STATUS_TOPIC_NAME)
-        .read()
-        .into_value();
+    let Some(status) = running_model(captain) else {
+        return Err(bad_request("no simulated vehicle model is running"));
+    };
+    let status = status.into_value();
     if status.kind.api_str() != kind {
         return Err(bad_request(&format!(
             "{kind:?} isn't the running vehicle model - only that one can be tuned"

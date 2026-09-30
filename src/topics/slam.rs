@@ -121,9 +121,11 @@ pub struct SlamStatus {
     /// first scan. While mapping, in SLAM's own frame (see [`SlamMap`]);
     /// while localizing, in the selected map's frame.
     pub pose: Option<[f64; 3]>,
-    /// While localizing, where odometry's frame sits on the map as
-    /// `(x_m, y_m, heading_rad)`: odometry's pose composed onto this is the
-    /// vehicle's pose on the map, between two scans too. `None` otherwise.
+    /// Where odometry's frame sits on the map as `(x_m, y_m, heading_rad)`:
+    /// odometry's pose composed onto this is the vehicle's pose on the map,
+    /// between two scans too. While localizing, the selected map's frame;
+    /// while mapping, SLAM's own (going by the latest scan kept). `None`
+    /// before the first scan.
     pub map_to_odom: Option<[f64; 3]>,
     /// The [`crate::topics::Odometry::reset_count`] the map is being built
     /// against.

@@ -25,6 +25,13 @@ pub struct LidarScan {
     pub fov: f32,
     /// Signal intensity for each point, parallel to `points`.
     pub intensities: Vec<f32>,
+    /// Where the sensor sits on its vehicle, in meters, in the vehicle's frame
+    /// (x forward, y left, from the point its pose describes): every reading
+    /// starts here, not at the vehicle's pose - see [`Self::origin_m`]. The
+    /// sensor faces the vehicle's forward direction.
+    pub mount_x_m: f32,
+    /// See [`Self::mount_x_m`].
+    pub mount_y_m: f32,
 }
 
 impl LidarScan {
@@ -56,7 +63,40 @@ impl LidarScan {
             max_distance,
             fov,
             intensities,
+            mount_x_m: 0.0,
+            mount_y_m: 0.0,
         }
+    }
+
+    /// This scan, taken by a sensor mounted at `(x_m, y_m)` on its vehicle -
+    /// see [`Self::mount_x_m`]. Unmounted scans start at the vehicle's pose.
+    pub fn mounted_at(self, x_m: f32, y_m: f32) -> Self {
+        Self {
+            mount_x_m: x_m,
+            mount_y_m: y_m,
+            ..self
+        }
+    }
+
+    /// Where the sensor was, in the world frame, when its vehicle was at
+    /// `(x_m, y_m)` facing `heading_rad`: the point every reading starts from.
+    /// The sensor faces `heading_rad` too.
+    pub fn origin_m(&self, x_m: f64, y_m: f64, heading_rad: f64) -> (f64, f64) {
+        Self::sensor_origin_m(self.mount_x_m, self.mount_y_m, x_m, y_m, heading_rad)
+    }
+
+    /// [`Self::origin_m`] of a sensor mounted at `(mount_x_m, mount_y_m)`,
+    /// for whoever produces a scan before having one.
+    pub fn sensor_origin_m(
+        mount_x_m: f32,
+        mount_y_m: f32,
+        x_m: f64,
+        y_m: f64,
+        heading_rad: f64,
+    ) -> (f64, f64) {
+        let (sin, cos) = heading_rad.sin_cos();
+        let (mx, my) = (f64::from(mount_x_m), f64::from(mount_y_m));
+        (x_m + mx * cos - my * sin, y_m + mx * sin + my * cos)
     }
 
     /// The angle of reading `index` (of `num_points` total), relative to the
@@ -93,6 +133,14 @@ mod tests {
         );
         assert_eq!(scan.num_lidar_points, 3);
         assert_eq!(scan.points.len(), scan.intensities.len());
+    }
+
+    #[test]
+    fn the_origin_follows_the_mount_rotated_by_the_heading() {
+        let scan = LidarScan::new(vec![1.0], vec![1.0], 0.1, 12.0, 1.0).mounted_at(0.3, 0.1);
+        let (x, y) = scan.origin_m(2.0, 1.0, std::f64::consts::FRAC_PI_2);
+        // Facing +y: forward is +y, left is -x.
+        assert!((x - 1.9).abs() < 1e-6 && (y - 1.3).abs() < 1e-6, "({x}, {y})");
     }
 
     #[test]

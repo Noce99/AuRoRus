@@ -29,6 +29,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Which vehicle model [`SimulatedVehicle`] should run, and the geometry and
 /// actuator limits it needs to do so. A plain `enum` (rather than a trait)
@@ -644,7 +645,12 @@ fn drawing(
 /// Whether `command` was written, and recently enough to act on - see
 /// [`VESC_COMMAND_TIMEOUT`].
 fn is_fresh(command: &Stamped<VescCommand>) -> bool {
-    command.age().is_some_and(|age| age <= VESC_COMMAND_TIMEOUT)
+    is_fresh_within(command, VESC_COMMAND_TIMEOUT)
+}
+
+/// Whether `command` was written at most `timeout` ago.
+fn is_fresh_within(command: &Stamped<VescCommand>, timeout: Duration) -> bool {
+    command.age().is_some_and(|age| age <= timeout)
 }
 
 /// Picks the command to act on this tick. The human one always overrides:
@@ -655,9 +661,19 @@ fn is_fresh(command: &Stamped<VescCommand>) -> bool {
 /// centered command if neither is - so a writer that stopped publishing
 /// never leaves its last setpoint latched.
 fn select_command(autonomous: Stamped<VescCommand>, human: Stamped<VescCommand>) -> VescCommand {
-    if is_fresh(&human) && human.value != VescCommand::default() {
+    select_command_within(autonomous, human, VESC_COMMAND_TIMEOUT)
+}
+
+/// [`select_command`], with commands older than `timeout` counting as stale
+/// - the real car's (see [`super::Vesc`]) is shorter than the simulator's.
+pub(super) fn select_command_within(
+    autonomous: Stamped<VescCommand>,
+    human: Stamped<VescCommand>,
+    timeout: Duration,
+) -> VescCommand {
+    if is_fresh_within(&human, timeout) && human.value != VescCommand::default() {
         human.value
-    } else if is_fresh(&autonomous) {
+    } else if is_fresh_within(&autonomous, timeout) {
         autonomous.value
     } else {
         VescCommand::default()

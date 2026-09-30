@@ -590,7 +590,7 @@ impl State {
                 localization.localizer.pose(),
                 Some(localization.localizer.map_to_odom()),
             ),
-            None => (self.mapper.pose(), None),
+            None => (self.mapper.pose(), self.mapper.map_to_odom()),
         };
         SlamStatus {
             state,

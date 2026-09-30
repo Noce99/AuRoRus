@@ -26,6 +26,9 @@ pub struct Config {
     /// starts right away, as if started from the Debug panel.
     pub debug_output: Option<PathBuf>,
     pub debug_frequency_hz: f64,
+    /// `--hardware`: run on the real car - its sensors and VESC instead of
+    /// the simulated ones, and no simulated opponents.
+    pub hardware: bool,
 }
 
 /// The raw, unresolved state of `--debug`, before filesystem rules are applied -
@@ -77,6 +80,8 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          \x20                    PATH is a directory: <PATH>/<generated name>.debug\n  \
          \x20                    otherwise: PATH itself (overwritten if it already exists)\n  \
          --debug_frequency HZ  debug recording rate, in Hz (default: {DEFAULT_DEBUG_FREQUENCY_HZ})\n  \
+         --hardware            run on the real car: the Hokuyo lidar and the VESC instead of\n  \
+         \x20                    the simulated lidar, IMU and vehicle, and no simulated opponents\n  \
          -h, --help            print this message",
         aurorus::config::DEFAULT_CONFIG_ROOT,
     );
@@ -92,6 +97,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     let mut benchmarks_root = PathBuf::from(DEFAULT_BENCHMARKS_ROOT);
     let mut debug_arg = DebugCliArg::Disabled;
     let mut debug_frequency_hz = DEFAULT_DEBUG_FREQUENCY_HZ;
+    let mut hardware = false;
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -130,6 +136,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
                     fail(format!("Invalid numeric value for {flag}: {value:?}"))
                 });
             }
+            "--hardware" => hardware = true,
             other => fail(format!("Unknown argument '{other}'")),
         }
     }
@@ -141,6 +148,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
         benchmarks_root,
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
+        hardware,
     }
 }
 
@@ -201,6 +209,12 @@ mod tests {
             .join("session.debug");
         let config = args(&["--debug", path.to_str().unwrap()]);
         assert_eq!(config.debug_output, Some(path));
+    }
+
+    #[test]
+    fn hardware_is_off_unless_asked_for() {
+        assert!(!args(&[]).hardware);
+        assert!(args(&["--hardware"]).hardware);
     }
 
     #[test]

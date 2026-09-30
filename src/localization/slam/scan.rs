@@ -5,7 +5,8 @@ use super::pose::Pose2;
 use crate::topics::LidarScan;
 use std::time::Instant;
 
-/// One usable reading, in the sensor's own frame (x forward, y left).
+/// One usable reading, in the vehicle's frame (x forward, y left) - where it
+/// hit, the sensor's mount included - with its range from the sensor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Reading {
     pub x_m: f64,
@@ -13,10 +14,9 @@ pub struct Reading {
     pub range_m: f64,
 }
 
-/// A scan and the pose it was taken from. The sensor sits on the
-/// vehicle's reference point, facing forward (as
-/// [`crate::sensors::SimulatedLidar`] raycasts from it), so the vehicle's
-/// pose and the sensor's are the same.
+/// A scan and the vehicle pose it was taken from. The sensor faces the
+/// vehicle's forward direction from its mount (see
+/// [`LidarScan::mount_x_m`]), so readings are kept in the vehicle's frame.
 #[derive(Debug, Clone)]
 pub struct LocalizedScan {
     /// When the scan was written.
@@ -29,6 +29,9 @@ pub struct LocalizedScan {
     /// hit", and carries no information about where anything is - Karto
     /// drops those too.
     readings: Vec<Reading>,
+    /// Where the sensor sits, in the vehicle's frame - see
+    /// [`LidarScan::mount_x_m`].
+    mount_m: (f64, f64),
     /// Readings at or beyond this distance are too noisy to match against,
     /// and only mark the cells they pass through as free, up to it -
     /// Karto's `RangeThreshold`.
@@ -50,6 +53,7 @@ impl LocalizedScan {
     ) -> Self {
         let min_m = f64::from(scan.min_distance);
         let max_m = f64::from(scan.max_distance);
+        let mount_m = (f64::from(scan.mount_x_m), f64::from(scan.mount_y_m));
         let readings = scan
             .points
             .iter()
@@ -61,8 +65,8 @@ impl LocalizedScan {
                 }
                 let (sin, cos) = f64::from(scan.angle_rad(i)).sin_cos();
                 Some(Reading {
-                    x_m: range_m * cos,
-                    y_m: range_m * sin,
+                    x_m: mount_m.0 + range_m * cos,
+                    y_m: mount_m.1 + range_m * sin,
                     range_m,
                 })
             })
@@ -72,6 +76,7 @@ impl LocalizedScan {
             odometric_pose,
             corrected_pose: odometric_pose,
             readings,
+            mount_m,
             range_threshold_m,
             world_points: Vec::new(),
         };
@@ -93,9 +98,21 @@ impl LocalizedScan {
             .collect();
     }
 
-    /// Every reading, in the sensor's own frame.
+    /// Every reading, in the vehicle's frame.
     pub fn readings(&self) -> &[Reading] {
         &self.readings
+    }
+
+    /// Where the sensor sits, in the vehicle's frame.
+    pub fn mount_m(&self) -> (f64, f64) {
+        self.mount_m
+    }
+
+    /// Where the sensor was, in the SLAM frame: the point every reading
+    /// starts from.
+    pub fn sensor_origin(&self) -> (f64, f64) {
+        self.corrected_pose
+            .transform_point(self.mount_m.0, self.mount_m.1)
     }
 
     /// The readings close enough to match against - see
@@ -154,5 +171,24 @@ mod tests {
         scan.set_corrected_pose(Pose2::new(1.0, 1.0, FRAC_PI_2));
         let (x, y) = scan.world_points()[1];
         assert!((x - 1.0).abs() < 1e-6 && (y - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn readings_start_from_the_sensor_mount() {
+        let mut scan = LocalizedScan::new(
+            &lidar_scan(vec![1.0, 2.0, 9.0]).mounted_at(0.25, 0.0),
+            Instant::now(),
+            Pose2::default(),
+            8.0,
+        );
+        assert_eq!(scan.readings()[1].range_m, 2.0);
+
+        // Facing +y from (1, 1), mounted 0.25 m ahead: 2 m ahead of the
+        // sensor is at (1, 3.25).
+        scan.set_corrected_pose(Pose2::new(1.0, 1.0, FRAC_PI_2));
+        let (x, y) = scan.world_points()[1];
+        assert!((x - 1.0).abs() < 1e-6 && (y - 3.25).abs() < 1e-6);
+        let (x, y) = scan.sensor_origin();
+        assert!((x - 1.0).abs() < 1e-6 && (y - 1.25).abs() < 1e-6);
     }
 }

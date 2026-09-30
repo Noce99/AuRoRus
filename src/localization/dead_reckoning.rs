@@ -10,7 +10,7 @@
 
 use crate::topics::{
     Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry, Placement,
-    PlacementTopics, Shape, StartState, VehicleTopics,
+    PlacementTopics, Shape, StartState, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -132,6 +132,12 @@ impl Executor for DeadReckoning {
         let odometry_topic = captain.topic::<Odometry>(ODOMETRY_TOPIC_NAME);
         let placement_topics = PlacementTopics::new(captain);
         let drawing_topic = self.config.draw.then(|| captain.drawing(self.id));
+        // In simulation the true vehicle is drawn, and this one is only for
+        // comparing against it; on the real car (`--hardware`) it's the only
+        // one there is from the start, so it's shown by default.
+        let show_vehicle = captain
+            .try_topic::<VehicleStatus>(&VehicleTopics::ego().vehicle_status())
+            .is_none();
 
         let mut placement = Placement::new(&placement_topics.read());
         let mut odometry = Odometry::default();
@@ -189,7 +195,7 @@ impl Executor for DeadReckoning {
             {
                 last_drawn = Instant::now();
                 drawing_topic
-                    .write(self.id, trail.drawing(&odometry))
+                    .write(self.id, trail.drawing(&odometry, show_vehicle))
                     .expect("lost writer authorization for dead reckoning's drawing topic");
             }
 
@@ -362,8 +368,8 @@ impl Trail {
     }
 
     /// The trail, plus a vehicle at `odometry`'s pose - both in world
-    /// coordinates.
-    fn drawing(&self, odometry: &Odometry) -> Drawing {
+    /// coordinates. Only the vehicle can be shown by default (`show_vehicle`).
+    fn drawing(&self, odometry: &Odometry, show_vehicle: bool) -> Drawing {
         let (x_m, y_m) = self.to_world(odometry.x_m, odometry.y_m);
         Drawing::default()
             .element(
@@ -391,7 +397,7 @@ impl Trail {
                     rear_axle_m: DRAWN_AXLE_M,
                     color: DRAWN_COLOR,
                 }],
-                false,
+                show_vehicle,
             )
             .stale_after(Drawing::DEFAULT_STALE_AFTER.max(3 * DRAWING_PERIOD))
             .z_index(DRAWN_Z_INDEX)
@@ -577,6 +583,22 @@ mod tests {
     }
 
     #[test]
+    fn only_the_vehicle_can_be_shown_by_default() {
+        let trail = Trail::new(StartState::default());
+        let visible = |show_vehicle: bool, name: &str| {
+            trail
+                .drawing(&Odometry::default(), show_vehicle)
+                .elements
+                .iter()
+                .find(|element| element.name == name)
+                .expect("drawn")
+                .visible_by_default
+        };
+        assert!(!visible(false, "Vehicle") && !visible(false, "Trail"));
+        assert!(visible(true, "Vehicle") && !visible(true, "Trail"));
+    }
+
+    #[test]
     fn the_drawn_vehicle_sits_at_the_estimate_in_world_coordinates() {
         let trail = Trail::new(StartState {
             x_m: 10.0,
@@ -590,7 +612,7 @@ mod tests {
             speed_mps: 2.0,
             ..Odometry::default()
         };
-        let drawing = trail.drawing(&odometry);
+        let drawing = trail.drawing(&odometry, false);
         let vehicle = drawing
             .shapes
             .iter()

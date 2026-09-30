@@ -1,19 +1,30 @@
 # Configuration for `aurorus::sensors::SimulatedLidar`, a synthetic LIDAR
 # sensor that raycasts against the currently loaded map (and, see
 # see_vehicles, the other vehicles) from the vehicle's real position, for
-# exercising downstream algorithms without real hardware.
+# exercising downstream algorithms without real hardware. Its defaults
+# mirror the real car's Hokuyo UTM-30LX-EW (see hokuyo_lidar.toml), so
+# algorithms tuned in simulation see the same scan layout on the car.
 
-# Rate at which SimulatedLidar publishes a new scan, in Hz.
-rate_hz = 50.0
-# How many points SimulatedLidar puts in every scan.
-num_points = 360
-# SimulatedLidar's reported minimum distance, in meters.
-min_distance_m = 0.15
-# SimulatedLidar's reported maximum distance, in meters.
-max_distance_m = 12.0
+# Rate at which SimulatedLidar publishes a new scan, in Hz (UTM-30LX-EW: 40).
+rate_hz = 40.0
+# How many points SimulatedLidar puts in every scan (UTM-30LX-EW: 1081, one
+# every 0.25 degrees).
+num_points = 1081
+# SimulatedLidar's reported minimum distance, in meters (UTM-30LX-EW: 0.1).
+min_distance_m = 0.1
+# SimulatedLidar's reported maximum distance, in meters (UTM-30LX-EW: 30).
+max_distance_m = 30.0
 # SimulatedLidar's field of view, centered on the vehicle's forward
-# direction, in radians (2*pi = 6.283185307179586).
-fov_rad = 4.2
+# direction, in radians (UTM-30LX-EW: 270 degrees = 4.71238898038469).
+fov_rad = 4.71238898038469
+
+# Where the sensor sits on the vehicle, in meters, from the vehicle's
+# reference point (its center of gravity): mount_x_m forward, mount_y_m to
+# the car's right - positive angles and y are to the right, as the GUI draws
+# them (the simulator's frame has y down). Keep equal to
+# hokuyo_lidar.toml's.
+mount_x_m = 0.0
+mount_y_m = 0.0
 
 # Seed for the noise generator: the same seed gives the same noise sequence
 # on every run. 0 picks a fresh random seed each time.

@@ -89,6 +89,9 @@ fn detect(
     let max_range_m = config
         .max_detection_range_m
         .min(f64::from(scan.max_distance));
+    // Every ray - expected and real - starts at the sensor, not the vehicle.
+    let (x_m, y_m) = scan.origin_m(pose.x_m, pose.y_m, pose.heading_rad);
+    let pose = Pose { x_m, y_m, ..pose };
     let angle = |i: usize| pose.heading_rad + f64::from(scan.angle_rad(i));
     let mut expected_hits = Vec::new();
     let (expected, real): (Vec<f64>, Vec<f64>) = scan

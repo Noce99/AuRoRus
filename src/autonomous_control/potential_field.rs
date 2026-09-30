@@ -169,10 +169,15 @@ pub(crate) fn command(
     (steering_rad, speed.clamp(0.0, limits.max_speed_mps as f32))
 }
 
-/// The drawing of `field`, seen from the vehicle whose topics are `vehicle`,
-/// if there's a pose to draw it from.
-pub(crate) fn field_drawing(captain: &Captain, vehicle: &VehicleTopics, field: &Field) -> Drawing {
-    let Some(origin) = scan_origin(captain, vehicle) else {
+/// The drawing of `field`, seen from where `scan` was taken on the vehicle
+/// whose topics are `vehicle`, if there's a pose to draw it from.
+pub(crate) fn field_drawing(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+    scan: &LidarScan,
+    field: &Field,
+) -> Drawing {
+    let Some(origin) = scan_origin(captain, vehicle, scan) else {
         return Drawing::default();
     };
     let (obstacles, potential, chosen) = field_shapes(origin, field);
@@ -235,7 +240,7 @@ impl Executor for PotentialField {
                 .write(self.id, VescCommand::new(steering_rad as f64, speed_mps as f64))
                 .expect("lost writer authorization for this algorithm's command topic");
             drawing_topic
-                .write(self.id, field_drawing(captain, &self.instance.vehicle, &field).stale_after(stale_after))
+                .write(self.id, field_drawing(captain, &self.instance.vehicle, &scan, &field).stale_after(stale_after))
                 .expect("lost writer authorization for the potential field drawing topic");
             ticker.wait();
         }

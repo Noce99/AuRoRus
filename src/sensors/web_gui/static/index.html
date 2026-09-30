@@ -17,7 +17,8 @@
     <nav id="panel-nav">
       <button class="panel-nav-btn selected" data-panel="maps">Maps</button>
       <button class="panel-nav-btn" data-panel="layers">Layers</button>
-      <button class="panel-nav-btn" data-panel="vehicle-model">Vehicle Model</button>
+      <button class="panel-nav-btn" data-panel="vehicle-model" data-simulator-only>Vehicle Model</button>
+      <button class="panel-nav-btn" data-panel="vesc" hidden>VESC</button>
       <button class="panel-nav-btn" data-panel="topics">Topics</button>
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
       <button class="panel-nav-btn" data-panel="mapping">Mapping</button>
@@ -25,9 +26,9 @@
       <button class="panel-nav-btn" data-panel="detector">Detector</button>
       <button class="panel-nav-btn" data-panel="planning">Planning</button>
       <button class="panel-nav-btn" data-panel="race-lines">Race Lines</button>
-      <button class="panel-nav-btn" data-panel="opponents">Opponents</button>
+      <button class="panel-nav-btn" data-panel="opponents" data-simulator-only>Opponents</button>
       <button class="panel-nav-btn" data-panel="debug">Debug</button>
-      <button class="panel-nav-btn" data-panel="benchmark">Benchmark</button>
+      <button class="panel-nav-btn" data-panel="benchmark" data-simulator-only>Benchmark</button>
     </nav>
   </aside>
 
@@ -102,6 +103,21 @@
         <button type="button" id="vehicle-limits-load-btn" class="parameter-load-btn" title="Run with the limits in the vehicle's config file again, dropping unsaved changes">Load from file</button>
         <p id="vehicle-limits-save-status"></p>
       </div>
+    </section>
+
+    <section id="panel-vesc" class="panel-section" hidden>
+      <h1>VESC</h1>
+      <p id="vesc-state"></p>
+      <p class="parameter-description">The real car's motor controller, read about 100 times a second.</p>
+      <dl id="vesc-readings" class="readings">
+        <dt>Battery</dt><dd id="vesc-battery"></dd>
+        <dt>Speed</dt><dd id="vesc-speed"></dd>
+        <dt>Commanded</dt><dd id="vesc-commanded"></dd>
+        <dt>Steering servo</dt><dd id="vesc-servo"></dd>
+        <dt>Current</dt><dd id="vesc-current"></dd>
+        <dt>Temperature</dt><dd id="vesc-temperature"></dd>
+        <dt>Tachometer</dt><dd id="vesc-tachometer"></dd>
+      </dl>
     </section>
 
     <section id="panel-topics" class="panel-section" hidden>

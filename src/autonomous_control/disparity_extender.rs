@@ -163,7 +163,7 @@ impl Executor for DisparityExtender {
                 .expect("lost writer authorization for this algorithm's command topic");
 
             let mut drawing = Drawing::default();
-            if let Some(origin) = scan_origin(captain, &self.instance.vehicle) {
+            if let Some(origin) = scan_origin(captain, &self.instance.vehicle, &scan) {
                 let processed = control
                     .window
                     .clone()
