@@ -337,13 +337,13 @@ pub fn import(request: &mut Request, maps_root: &Path) -> ResponseBox {
 /// browser can't) into what the import popup works on: an 8-byte header
 /// (width, then height, each a little-endian `u32`) followed by one
 /// brightness byte per pixel, row-major, `255` being white. See
-/// [`tiff_to_grayscale`].
+/// [`environment::decode_tiff_grayscale`].
 pub fn decode_tiff(request: &mut Request) -> ResponseBox {
     let mut bytes = Vec::new();
     if let Err(err) = request.as_reader().read_to_end(&mut bytes) {
         return bad_request(&format!("failed to read request body: {err}"));
     }
-    match tiff_to_grayscale(&bytes) {
+    match environment::decode_tiff_grayscale(&bytes) {
         Ok((width, height, gray)) => {
             let mut body = Vec::with_capacity(8 + gray.len());
             body.extend_from_slice(&width.to_le_bytes());
@@ -355,81 +355,6 @@ pub fn decode_tiff(request: &mut Request) -> ResponseBox {
         }
         Err(message) => bad_request(&format!("can't decode this TIFF: {message}")),
     }
-}
-
-/// Decodes the first image of a TIFF (any compression the `tiff` crate
-/// knows, CCITT Group 4 included) into `(width, height, gray)`: one
-/// brightness byte per pixel, row-major, `255` being white (the crate
-/// already resolves `WhiteIsZero`), treating transparent pixels as black
-/// like the browser-side decoding does. Grayscale and RGB, with or without alpha, at
-/// 1, 8 or 16 bits per sample.
-fn tiff_to_grayscale(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
-    use tiff::ColorType;
-    use tiff::decoder::{Decoder, DecodingResult};
-
-    let mut decoder = Decoder::new(std::io::Cursor::new(bytes)).map_err(|err| err.to_string())?;
-    let (width, height) = decoder.dimensions().map_err(|err| err.to_string())?;
-    let color_type = decoder.colortype().map_err(|err| err.to_string())?;
-    let (channels, bits) = match color_type {
-        ColorType::Gray(bits) => (1, bits),
-        ColorType::GrayA(bits) => (2, bits),
-        ColorType::RGB(bits) => (3, bits),
-        ColorType::RGBA(bits) => (4, bits),
-        other => return Err(format!("unsupported color type {other:?}")),
-    };
-    let image = decoder.read_image().map_err(|err| err.to_string())?;
-
-    let (width_px, height_px) = (width as usize, height as usize);
-    let samples_per_row = width_px * channels;
-    // Every sample of pixel row `y`, scaled to 0-255.
-    let row_samples: Box<dyn Fn(usize) -> Vec<u8>> = match (bits, &image) {
-        (1, DecodingResult::U8(packed)) => {
-            // Bit-packed, MSB first, each row padded to a whole byte.
-            let row_bytes = samples_per_row.div_ceil(8);
-            Box::new(move |y| {
-                (0..samples_per_row)
-                    .map(|i| {
-                        let byte = packed.get(y * row_bytes + i / 8).copied().unwrap_or(0);
-                        if byte & (0x80 >> (i % 8)) != 0 {
-                            255
-                        } else {
-                            0
-                        }
-                    })
-                    .collect()
-            })
-        }
-        (8, DecodingResult::U8(samples)) => {
-            Box::new(move |y| samples[y * samples_per_row..][..samples_per_row].to_vec())
-        }
-        (16, DecodingResult::U16(samples)) => Box::new(move |y| {
-            samples[y * samples_per_row..][..samples_per_row]
-                .iter()
-                .map(|&sample| (sample >> 8) as u8)
-                .collect()
-        }),
-        _ => return Err(format!("unsupported {bits}-bit samples")),
-    };
-
-    let mut gray = Vec::with_capacity(width_px * height_px);
-    for y in 0..height_px {
-        for pixel in row_samples(y).chunks_exact(channels) {
-            let (value, alpha) = match *pixel {
-                [g] => (g, 255),
-                [g, a] => (g, a),
-                [r, g, b] => (luma(r, g, b), 255),
-                [r, g, b, a] => (luma(r, g, b), a),
-                _ => unreachable!("chunks_exact(channels) with channels in 1..=4"),
-            };
-            gray.push((value as u16 * alpha as u16 / 255) as u8);
-        }
-    }
-    Ok((width, height, gray))
-}
-
-/// Rec. 601 luma of an RGB pixel, like the browser-side decoding.
-fn luma(r: u8, g: u8, b: u8) -> u8 {
-    (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64).round() as u8
 }
 
 /// A freshly imported map's summary, returned by a successful [`import`].
@@ -475,7 +400,7 @@ mod tests {
         let bytes = std::fs::read(folder.join("map.tiff")).unwrap();
         std::fs::remove_dir_all(&folder).ok();
 
-        let (decoded_width, decoded_height, gray) = tiff_to_grayscale(&bytes).unwrap();
+        let (decoded_width, decoded_height, gray) = environment::decode_tiff_grayscale(&bytes).unwrap();
         assert_eq!((decoded_width, decoded_height), (width, height));
         let expected: Vec<u8> = white.iter().map(|&w| if w { 255 } else { 0 }).collect();
         assert_eq!(gray, expected);
@@ -483,6 +408,6 @@ mod tests {
 
     #[test]
     fn garbage_is_an_error_not_a_panic() {
-        assert!(tiff_to_grayscale(b"not a tiff at all").is_err());
+        assert!(environment::decode_tiff_grayscale(b"not a tiff at all").is_err());
     }
 }

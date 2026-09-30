@@ -1,9 +1,9 @@
-//! Encodes/decodes a [`Raster`] as a CCITT Group 4 (T.6) compressed,
-//! single-strip TIFF file, via the `fax` crate's encoder/decoder and its own
-//! `fax::tiff::wrap` helper - which builds a complete, valid minimal TIFF
-//! container, so no hand-rolled IFD writing is needed for [`write`]. [`read`]
-//! parses just enough of that same minimal, single-IFD, single-strip layout
-//! back out (not general TIFF).
+//! Encodes/decodes a [`Raster`] as a TIFF file. [`write`] produces a CCITT
+//! Group 4 (T.6) compressed, single-strip TIFF via the `fax` crate's encoder
+//! and its own `fax::tiff::wrap` helper - which builds a complete, valid
+//! minimal TIFF container, so no hand-rolled IFD writing is needed. [`read`]
+//! goes through the general `tiff` crate instead, so maps re-saved by an
+//! image editor (e.g. GIMP splitting the image into several strips) still load.
 
 use crate::environment::raster::Raster;
 use std::path::Path;
@@ -76,54 +76,90 @@ impl From<std::io::Error> for TiffReadError {
     }
 }
 
-/// Reads back a raster written by [`write`]: a little-endian, single-IFD,
-/// single-strip CCITT Group 4 TIFF, exactly the shape `fax::tiff::wrap`
-/// produces. Only the four tags `write` relies on
-/// (`ImageWidth`/`ImageLength`/`StripOffsets`/`StripByteCounts`, tags
-/// `256`/`257`/`273`/`279`) are read; each is a `count = 1` `LONG`, so its
-/// 4-byte value sits directly in bytes `8..12` of its 12-byte IFD entry, with
-/// no indirection to resolve.
+/// Reads a map raster from any TIFF [`decode_grayscale`] understands - not
+/// only the single-strip Group 4 files [`write`] produces, but also ones
+/// re-saved by an image editor (multiple strips, other compressions, 8-bit
+/// gray or RGB). Pixels at least half-bright count as white (drivable).
 pub fn read(path: &Path) -> Result<Raster, TiffReadError> {
     let bytes = std::fs::read(path)?;
-    if bytes.len() < 8 || &bytes[0..4] != b"II*\0" {
-        return Err(TiffReadError::Invalid("not a little-endian TIFF".into()));
-    }
-    let ifd_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let entry_count =
-        u16::from_le_bytes(bytes[ifd_offset..ifd_offset + 2].try_into().unwrap()) as usize;
+    let (width, height, gray) = decode_grayscale(&bytes).map_err(TiffReadError::Invalid)?;
+    let white = gray.into_iter().map(|value| value >= 128).collect();
+    Ok(Raster::new(width, height, white))
+}
 
-    let (mut width, mut height, mut strip_offset, mut strip_len) = (None, None, None, None);
-    for i in 0..entry_count {
-        let entry_start = ifd_offset + 2 + i * 12;
-        let entry = &bytes[entry_start..entry_start + 12];
-        let tag = u16::from_le_bytes(entry[0..2].try_into().unwrap());
-        let value = u32::from_le_bytes(entry[8..12].try_into().unwrap());
-        match tag {
-            256 => width = Some(value),
-            257 => height = Some(value),
-            273 => strip_offset = Some(value as usize),
-            279 => strip_len = Some(value as usize),
-            _ => {}
+/// Decodes the first image of a TIFF (any compression the `tiff` crate
+/// knows, CCITT Group 4 included) into `(width, height, gray)`: one
+/// brightness byte per pixel, row-major, `255` being white (the crate
+/// already resolves `WhiteIsZero`), treating transparent pixels as black
+/// like the browser-side decoding does. Grayscale and RGB, with or without alpha, at
+/// 1, 8 or 16 bits per sample.
+pub fn decode_grayscale(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    use tiff::ColorType;
+    use tiff::decoder::{Decoder, DecodingResult};
+
+    let mut decoder = Decoder::new(std::io::Cursor::new(bytes)).map_err(|err| err.to_string())?;
+    let (width, height) = decoder.dimensions().map_err(|err| err.to_string())?;
+    let color_type = decoder.colortype().map_err(|err| err.to_string())?;
+    let (channels, bits) = match color_type {
+        ColorType::Gray(bits) => (1, bits),
+        ColorType::GrayA(bits) => (2, bits),
+        ColorType::RGB(bits) => (3, bits),
+        ColorType::RGBA(bits) => (4, bits),
+        other => return Err(format!("unsupported color type {other:?}")),
+    };
+    let image = decoder.read_image().map_err(|err| err.to_string())?;
+
+    let (width_px, height_px) = (width as usize, height as usize);
+    let samples_per_row = width_px * channels;
+    // Every sample of pixel row `y`, scaled to 0-255.
+    let row_samples: Box<dyn Fn(usize) -> Vec<u8>> = match (bits, &image) {
+        (1, DecodingResult::U8(packed)) => {
+            // Bit-packed, MSB first, each row padded to a whole byte.
+            let row_bytes = samples_per_row.div_ceil(8);
+            Box::new(move |y| {
+                (0..samples_per_row)
+                    .map(|i| {
+                        let byte = packed.get(y * row_bytes + i / 8).copied().unwrap_or(0);
+                        if byte & (0x80 >> (i % 8)) != 0 {
+                            255
+                        } else {
+                            0
+                        }
+                    })
+                    .collect()
+            })
+        }
+        (8, DecodingResult::U8(samples)) => {
+            Box::new(move |y| samples[y * samples_per_row..][..samples_per_row].to_vec())
+        }
+        (16, DecodingResult::U16(samples)) => Box::new(move |y| {
+            samples[y * samples_per_row..][..samples_per_row]
+                .iter()
+                .map(|&sample| (sample >> 8) as u8)
+                .collect()
+        }),
+        _ => return Err(format!("unsupported {bits}-bit samples")),
+    };
+
+    let mut gray = Vec::with_capacity(width_px * height_px);
+    for y in 0..height_px {
+        for pixel in row_samples(y).chunks_exact(channels) {
+            let (value, alpha) = match *pixel {
+                [g] => (g, 255),
+                [g, a] => (g, a),
+                [r, g, b] => (luma(r, g, b), 255),
+                [r, g, b, a] => (luma(r, g, b), a),
+                _ => unreachable!("chunks_exact(channels) with channels in 1..=4"),
+            };
+            gray.push((value as u16 * alpha as u16 / 255) as u8);
         }
     }
+    Ok((width, height, gray))
+}
 
-    let width = width.ok_or_else(|| TiffReadError::Invalid("missing ImageWidth tag".into()))?;
-    let height = height.ok_or_else(|| TiffReadError::Invalid("missing ImageLength tag".into()))?;
-    let strip_offset =
-        strip_offset.ok_or_else(|| TiffReadError::Invalid("missing StripOffsets tag".into()))?;
-    let strip_len =
-        strip_len.ok_or_else(|| TiffReadError::Invalid("missing StripByteCounts tag".into()))?;
-    let strip = bytes
-        .get(strip_offset..strip_offset + strip_len)
-        .ok_or_else(|| TiffReadError::Invalid("strip data out of bounds".into()))?;
-
-    let mut white = Vec::with_capacity((width * height) as usize);
-    fax::decoder::decode_g4(strip.iter().copied(), width, Some(height), |line| {
-        white.extend(fax::decoder::pels(line, width).map(|c| c == fax::Color::White));
-    })
-    .ok_or_else(|| TiffReadError::Invalid("failed to decode Group 4 data".into()))?;
-
-    Ok(Raster::new(width, height, white))
+/// Rec. 601 luma of an RGB pixel, like the browser-side decoding.
+fn luma(r: u8, g: u8, b: u8) -> u8 {
+    (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64).round() as u8
 }
 
 #[cfg(test)]

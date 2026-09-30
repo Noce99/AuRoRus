@@ -27,3 +27,4 @@ pub use race_line::{RaceLineWriteError, SpeedPoint};
 pub use race_lines::{RaceLineEntry, RaceLineMethod};
 pub use raster::Raster;
 pub use simulator::{GeneratedMap, GenerationConfig, MapGenerationError, generate, random_seed};
+pub use tiff::decode_grayscale as decode_tiff_grayscale;
