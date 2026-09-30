@@ -9,6 +9,7 @@ use super::debug_api;
 use super::detector_api;
 use super::draw_api;
 use super::live_api;
+use super::map_edit_api;
 use super::maps_api;
 use super::opponents_api;
 use super::race_lines_api;
@@ -84,7 +85,15 @@ pub fn handle(
         (Method::Post, "/api/maps/generate") => maps_api::generate(&mut request, maps_root),
         (Method::Post, "/api/maps/import") => maps_api::import(&mut request, maps_root),
         (Method::Post, "/api/maps/import/decode_tiff") => maps_api::decode_tiff(&mut request),
+        (Method::Post, "/api/maps/start_finish_line") => {
+            maps_api::set_start_finish_line(&mut request, captain, writer_id, maps_root)
+        }
         (Method::Get, path) if path.starts_with("/api/maps/") => route_map_get(path, maps_root),
+        (Method::Get, "/api/map_edit") => map_edit_api::info(&url, captain, maps_root),
+        (Method::Get, "/api/map_edit/raster") => map_edit_api::raster(&url, maps_root),
+        (Method::Post, "/api/map_edit/raster") => {
+            map_edit_api::save(&mut request, captain, writer_id, maps_root)
+        }
         (Method::Get, "/api/map") => live_api::map(captain),
         (Method::Post, "/api/map_selection") => {
             live_api::select_map(&mut request, captain, writer_id, maps_root)

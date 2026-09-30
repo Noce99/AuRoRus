@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 
 /// Name of the raster file inside a map folder.
 pub const MAP_TIFF_FILE_NAME: &str = "map.tiff";
+/// Name of the untouched copy of `map.tiff` kept inside a map folder once
+/// its pixels are edited by hand - see [`replace_raster`].
+pub const ORIGINAL_MAP_TIFF_FILE_NAME: &str = "map.orig.tiff";
 /// Name of the race lines folder inside a map folder.
 pub const RACE_LINES_DIR_NAME: &str = "race_lines";
 /// Name of the centerline file inside `race_lines/`.
@@ -123,6 +126,63 @@ pub fn read_info(folder: &Path) -> Result<MapInfo, InfoReadError> {
     info::read(&folder.join(INFO_FILE_NAME))
 }
 
+/// Replaces a map folder's `info.json` with `info`, leaving its raster and
+/// race lines alone - e.g. to move its start/finish line.
+pub fn write_info(folder: &Path, info: &MapInfo) -> Result<(), InfoWriteError> {
+    info::write(info, &folder.join(INFO_FILE_NAME))
+}
+
+/// Reads a map folder's `map.tiff` alone, without its `info.json` or race
+/// lines.
+pub fn read_raster(folder: &Path) -> Result<Raster, TiffReadError> {
+    tiff::read(&folder.join(MAP_TIFF_FILE_NAME))
+}
+
+/// Reads the untouched raster [`replace_raster`] kept aside, or `None` if
+/// the map's pixels were never edited.
+pub fn read_original_raster(folder: &Path) -> Result<Option<Raster>, TiffReadError> {
+    let path = folder.join(ORIGINAL_MAP_TIFF_FILE_NAME);
+    if !path.exists() {
+        return Ok(None);
+    }
+    tiff::read(&path).map(Some)
+}
+
+/// Error returned by [`replace_raster`].
+#[derive(Debug)]
+pub enum RasterReplaceError {
+    Io(std::io::Error),
+    Tiff(TiffWriteError),
+}
+
+impl std::fmt::Display for RasterReplaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "failed to replace map.tiff: {err}"),
+            Self::Tiff(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for RasterReplaceError {}
+
+/// Replaces a map folder's `map.tiff` with `raster`, e.g. after editing its
+/// pixels by hand. The first time, the current `map.tiff` is copied to
+/// [`ORIGINAL_MAP_TIFF_FILE_NAME`] - never afterwards, so it always holds
+/// the map as it was made (generated, imported or mapped), whatever edits
+/// came since. The new file is written aside and renamed over the old one,
+/// so a failed write never leaves the map without a raster.
+pub fn replace_raster(folder: &Path, raster: &Raster) -> Result<(), RasterReplaceError> {
+    let current = folder.join(MAP_TIFF_FILE_NAME);
+    let original = folder.join(ORIGINAL_MAP_TIFF_FILE_NAME);
+    if !original.exists() {
+        std::fs::copy(&current, &original).map_err(RasterReplaceError::Io)?;
+    }
+    let staged = folder.join(format!("{MAP_TIFF_FILE_NAME}.tmp"));
+    tiff::write(raster, &staged).map_err(RasterReplaceError::Tiff)?;
+    std::fs::rename(&staged, &current).map_err(RasterReplaceError::Io)
+}
+
 /// Where the map named `name` lives under `maps_root` - `None` unless `name`
 /// is a plain folder name: non-empty, and free of any path separator or `..`
 /// component, so it can never escape `maps_root` (names come from arbitrary
@@ -167,4 +227,52 @@ pub fn save(folder: &Path, info: &MapInfo, raster: &Raster) -> Result<(), MapSav
     std::fs::create_dir_all(folder).map_err(MapSaveError::Io)?;
     tiff::write(raster, &folder.join(MAP_TIFF_FILE_NAME)).map_err(MapSaveError::Tiff)?;
     info::write(info, &folder.join(INFO_FILE_NAME)).map_err(MapSaveError::Info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::environment::{ImageOrigin, MapSource, StartFinishLine, WorldPoint, now_rfc3339};
+
+    fn raster(white: [bool; 4]) -> Raster {
+        Raster::new(2, 2, white.to_vec())
+    }
+
+    #[test]
+    fn replacing_the_raster_keeps_the_first_one_as_the_original() {
+        let folder =
+            std::env::temp_dir().join(format!("aurorus_replace_raster_{}", std::process::id()));
+        std::fs::remove_dir_all(&folder).ok();
+        let info = MapInfo {
+            resolution_m_per_px: 0.05,
+            width_px: 2,
+            height_px: 2,
+            origin: ImageOrigin {
+                x: 0.0,
+                y: 0.0,
+                theta_rad: 0.0,
+            },
+            start_finish_line: StartFinishLine {
+                a: WorldPoint { x: 0.0, y: 0.0 },
+                b: WorldPoint { x: 0.1, y: 0.0 },
+            },
+            generated_at: now_rfc3339(),
+            source: MapSource::Real,
+            generation: None,
+        };
+        let mapped = [true, false, false, true];
+        save(&folder, &info, &raster(mapped)).unwrap();
+        assert!(read_original_raster(&folder).unwrap().is_none());
+
+        let first_edit = [true, true, false, true];
+        replace_raster(&folder, &raster(first_edit)).unwrap();
+        let second_edit = [false, false, false, true];
+        replace_raster(&folder, &raster(second_edit)).unwrap();
+
+        let current = read_raster(&folder).unwrap();
+        let original = read_original_raster(&folder).unwrap().unwrap();
+        std::fs::remove_dir_all(&folder).ok();
+        assert_eq!(current.to_bytes(), raster(second_edit).to_bytes());
+        assert_eq!(original.to_bytes(), raster(mapped).to_bytes());
+    }
 }

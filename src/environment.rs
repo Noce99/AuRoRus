@@ -21,7 +21,8 @@ pub use info::{
 };
 pub use map::{
     CENTERLINE_FILE_NAME, INFO_FILE_NAME, MAP_TIFF_FILE_NAME, Map, MapLoadError, MapSaveError,
-    RACE_LINES_DIR_NAME, map_folder, read_info, save, write_line,
+    ORIGINAL_MAP_TIFF_FILE_NAME, RACE_LINES_DIR_NAME, RasterReplaceError, map_folder, read_info,
+    read_original_raster, read_raster, replace_raster, save, write_info, write_line,
 };
 pub use race_line::{RaceLineWriteError, SpeedPoint};
 pub use race_lines::{RaceLineEntry, RaceLineMethod};

@@ -57,6 +57,11 @@ pub struct SelectedMap {
 pub struct MapSelection {
     /// Wanted map folder, or `None` for no map selected.
     pub path: Option<PathBuf>,
+    /// Bumped to have the same folder read from disk again, after its files
+    /// changed (e.g. `web_gui` moving its start/finish line) - any change
+    /// reloads it, even with `path` unchanged.
+    #[serde(default)]
+    pub revision: u64,
 }
 
 #[cfg(test)]

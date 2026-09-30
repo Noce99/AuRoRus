@@ -119,6 +119,10 @@ async function pollLiveMap() {
   const live = (await fetchJSON("/api/map")).value;
   if (live.name === liveMapName) return;
   liveMapName = live.name;
+  // A line half-drawn on the old map means nothing on the new one.
+  disarmStartLine();
+  startLineBtn.disabled = !liveMapName;
+  mapEditBtn.disabled = !liveMapName;
   MapView.requestRedraw();
   await refreshMapList();
 }
@@ -2228,15 +2232,753 @@ placePoseBtn.addEventListener("click", () => {
     disarmPlacePose();
     return;
   }
+  resetStartLine();
+  showMapToolsStatus(null);
   placePose.stage = "position";
   placePoseBtn.classList.add("active");
   MapView.setPointerTool(placePoseTool);
 });
 
 // ---------------------------------------------------------------------
+// Start/finish line tool (the Maps panel's bottom button): the first click
+// on the map picks the line's left end, the second its right end - as seen
+// driving through it, so an arrow across the line shows the direction of
+// travel in between - then the selected map's info.json is rewritten and
+// the map reloaded with it.
+// ---------------------------------------------------------------------
+
+const startLineBtn = document.getElementById("start-line-btn");
+const mapToolsStatusEl = document.getElementById("map-tools-status");
+
+/** Lines shorter than this (in CSS pixels) are taken as a stray click. */
+const START_LINE_MIN_PX = 5;
+const START_LINE_COLOR = "#e5484d";
+const START_LINE_ARROW_COLOR = "#3f9ce5";
+
+/** `"idle"`, `"a"` (waiting for the left end) or `"b"` (waiting for the
+ *  right end), plus the world points picked so far. */
+const startLine = { stage: "idle", a: null, current: null };
+
+function showMapToolsStatus(message) {
+  mapToolsStatusEl.textContent = message ?? "";
+  mapToolsStatusEl.hidden = message == null;
+}
+
+const startLineTool = {
+  cursor: "crosshair",
+
+  onClick(world) {
+    if (startLine.stage === "a") {
+      startLine.a = world;
+      startLine.current = world;
+      startLine.stage = "b";
+      showMapToolsStatus("Click the right end. The arrow shows the direction of travel.");
+      MapView.requestRedraw();
+      return;
+    }
+    const { a } = startLine;
+    const lengthPx = Math.hypot(world.x - a.x, world.y - a.y) * MapView.scalePxPerMeter();
+    if (lengthPx < START_LINE_MIN_PX * (window.devicePixelRatio || 1)) return;
+    const name = liveMapName;
+    disarmStartLine();
+    saveStartLine(name, a, world);
+  },
+
+  onMove(world) {
+    if (startLine.stage !== "b") return;
+    startLine.current = world;
+    MapView.requestRedraw();
+  },
+
+  onCancel() {
+    resetStartLine();
+    showMapToolsStatus(null);
+  },
+
+  drawOverlay(ctx, { worldToScreen, dpr }) {
+    if (startLine.stage !== "b") return;
+    const scale = dpr();
+    const a = worldToScreen(startLine.a.x, startLine.a.y);
+    const b = worldToScreen(startLine.current.x, startLine.current.y);
+    ctx.fillStyle = START_LINE_COLOR;
+    ctx.strokeStyle = START_LINE_COLOR;
+    ctx.lineWidth = 3 * scale;
+    ctx.lineCap = "round";
+
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 4 * scale, 0, 2 * Math.PI);
+    ctx.fill();
+
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length < 1) return;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    // The direction of travel: `b - a` rotated a quarter turn, as
+    // `StartFinishLine::start_pose` does - the canvas keeps world axes, so
+    // this holds in screen space too.
+    const direction = { x: -(b.y - a.y) / length, y: (b.x - a.x) / length };
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const arrowLength = 30 * scale;
+    const head = 10 * scale;
+    const tip = { x: mid.x + direction.x * arrowLength, y: mid.y + direction.y * arrowLength };
+    ctx.fillStyle = START_LINE_ARROW_COLOR;
+    ctx.strokeStyle = START_LINE_ARROW_COLOR;
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.moveTo(mid.x, mid.y);
+    ctx.lineTo(tip.x - direction.x * head * 0.8, tip.y - direction.y * head * 0.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(
+      tip.x - direction.x * head - direction.y * head * 0.6,
+      tip.y - direction.y * head + direction.x * head * 0.6,
+    );
+    ctx.lineTo(
+      tip.x - direction.x * head + direction.y * head * 0.6,
+      tip.y - direction.y * head - direction.x * head * 0.6,
+    );
+    ctx.closePath();
+    ctx.fill();
+  },
+};
+
+async function saveStartLine(name, a, b) {
+  showMapToolsStatus("Saving...");
+  try {
+    const response = await fetch("/api/maps/start_finish_line", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${response.status}`);
+    }
+    showMapToolsStatus(`Saved in ${name}/info.json.`);
+  } catch (err) {
+    showMapToolsStatus(`Couldn't save the start/finish line: ${err.message}`);
+  }
+}
+
+function resetStartLine() {
+  startLine.stage = "idle";
+  startLine.a = null;
+  startLine.current = null;
+  startLineBtn.classList.remove("active");
+}
+
+function disarmStartLine() {
+  if (startLine.stage === "idle") return;
+  resetStartLine();
+  MapView.setPointerTool(null);
+}
+
+startLineBtn.addEventListener("click", () => {
+  if (startLine.stage !== "idle") {
+    disarmStartLine();
+    showMapToolsStatus(null);
+    return;
+  }
+  if (!liveMapName) return;
+  resetPlacePose();
+  startLine.stage = "a";
+  startLineBtn.classList.add("active");
+  showMapToolsStatus("Click the left end of the new start/finish line, as seen driving through it.");
+  MapView.setPointerTool(startLineTool);
+});
+
+// ---------------------------------------------------------------------
+// Map pixel editor (the Maps panel's "Edit map pixels" button): a pop-up
+// with its own pan/zoom canvas of the selected map's raster, painted
+// black (wall) or white (drivable) with a round pen. Saving replaces the
+// map's map.tiff - the server keeps the map as it was made aside the first
+// time, which "Revert to original" brings back - and reloads it.
+// ---------------------------------------------------------------------
+
+const mapEditBtn = document.getElementById("map-edit-btn");
+const mapEditOverlay = document.getElementById("map-edit-overlay");
+const mapEditModal = document.getElementById("map-edit-modal");
+const mapEditNameEl = document.getElementById("map-edit-name");
+const mapEditColorBtns = [...document.querySelectorAll(".map-edit-color")];
+const mapEditRadiusEl = document.getElementById("map-edit-radius");
+const mapEditRadiusValueEl = document.getElementById("map-edit-radius-value");
+const mapEditUndoBtn = document.getElementById("map-edit-undo-btn");
+const mapEditRevertBtn = document.getElementById("map-edit-revert-btn");
+const mapEditFitBtn = document.getElementById("map-edit-fit-btn");
+const mapEditStageEl = document.getElementById("map-edit-stage");
+const mapEditCanvas = document.getElementById("map-edit-canvas");
+const mapEditErrorEl = document.getElementById("map-edit-error");
+const mapEditCancelBtn = document.getElementById("map-edit-cancel-btn");
+const mapEditSaveBtn = document.getElementById("map-edit-save-btn");
+
+/** Pixel values, as the raster API sends them. */
+const MAP_EDIT_WALL = 0;
+const MAP_EDIT_TRACK = 255;
+/** How a wall pixel is shown - true black, the stage around the map being
+ *  a lighter gray so the map's edge stays visible. */
+const MAP_EDIT_WALL_RGB = [0, 0, 0];
+/** The pixel grid appears from this many screen pixels per map pixel, and
+ *  is fully visible by twice that. */
+const MAP_EDIT_GRID_MIN_PX = 8;
+const MAP_EDIT_GRID_COLOR = "#3f9ce5";
+const MAP_EDIT_RACE_LINE_COLOR = "rgba(255, 159, 67, 0.85)";
+const MAP_EDIT_START_LINE_COLOR = "#e5484d";
+/** Zoom range, in screen pixels per map pixel. */
+const MAP_EDIT_MAX_SCALE = 80;
+const MAP_EDIT_MIN_SCALE_OF_FIT = 0.25;
+
+/** Everything about the map being edited - null while the pop-up is closed. */
+let mapEdit = null;
+/** The pen's pixel value, kept from one opening of the pop-up to the next. */
+let mapEditColor = MAP_EDIT_WALL;
+
+function mapEditDpr() {
+  return window.devicePixelRatio || 1;
+}
+
+function showMapEditError(message) {
+  mapEditErrorEl.textContent = message ?? "";
+  mapEditErrorEl.hidden = message == null;
+}
+
+function setMapEditColor(value) {
+  mapEditColor = value;
+  for (const btn of mapEditColorBtns) {
+    btn.setAttribute("aria-checked", String(Number(btn.dataset.value) === value));
+  }
+  requestMapEditDraw();
+}
+
+function syncMapEditRadius() {
+  const radius = Number(mapEditRadiusEl.value);
+  const diameter = 2 * radius + 1;
+  const meters = mapEdit ? ` (${(diameter * mapEdit.info.resolution_m_per_px).toFixed(2)} m)` : "";
+  mapEditRadiusValueEl.textContent = `${radius} px${meters}`;
+  requestMapEditDraw();
+}
+
+function syncMapEditButtons() {
+  const edited = mapEdit !== null && mapEdit.undo.length > 0;
+  mapEditUndoBtn.disabled = !edited || mapEdit.saving;
+  mapEditSaveBtn.disabled = !edited || mapEdit.saving;
+  mapEditRevertBtn.disabled = mapEdit === null || !mapEdit.info.has_original || mapEdit.saving;
+}
+
+async function openMapEditor() {
+  const name = liveMapName;
+  if (!name) return;
+  disarmStartLine();
+  disarmPlacePose();
+  showMapToolsStatus(null);
+  showMapEditError(null);
+  mapEditNameEl.textContent = name;
+  mapEdit = null;
+  syncMapEditButtons();
+  mapEditOverlay.hidden = false;
+  mapEditModal.focus({ preventScroll: true });
+  resizeMapEditCanvas();
+
+  const query = new URLSearchParams({ name });
+  let info;
+  let pixels;
+  try {
+    const [infoResponse, rasterResponse] = await Promise.all([
+      fetchJSON(`/api/map_edit?${query}`),
+      fetch(`/api/map_edit/raster?${query}`),
+    ]);
+    if (!rasterResponse.ok) throw new Error(`can't read the map's pixels (HTTP ${rasterResponse.status})`);
+    info = infoResponse;
+    pixels = new Uint8Array(await rasterResponse.arrayBuffer());
+    if (pixels.length !== info.width_px * info.height_px) throw new Error("the map's pixels don't match its size");
+  } catch (err) {
+    showMapEditError(`Couldn't open the map: ${err.message}`);
+    return;
+  }
+  if (mapEditOverlay.hidden) return; // closed while loading
+
+  const bitmap = document.createElement("canvas");
+  bitmap.width = info.width_px;
+  bitmap.height = info.height_px;
+  const bitmapCtx = bitmap.getContext("2d");
+  mapEdit = {
+    name,
+    info,
+    pixels,
+    original: null,
+    bitmap,
+    bitmapCtx,
+    imageData: bitmapCtx.createImageData(info.width_px, info.height_px),
+    view: { scale: 1, x: 0, y: 0 },
+    undo: [],
+    stroke: null,
+    lastPaint: null,
+    pan: null,
+    hover: null,
+    saving: false,
+  };
+  for (let i = 0; i < pixels.length; i++) paintMapEditImagePixel(i);
+  bitmapCtx.putImageData(mapEdit.imageData, 0, 0);
+  syncMapEditRadius();
+  syncMapEditButtons();
+  fitMapEditView();
+}
+
+/** Copies pixel `index`'s value into the bitmap's `ImageData`. */
+function paintMapEditImagePixel(index) {
+  const { pixels, imageData } = mapEdit;
+  const rgb = pixels[index] ? [255, 255, 255] : MAP_EDIT_WALL_RGB;
+  const data = imageData.data;
+  data[4 * index] = rgb[0];
+  data[4 * index + 1] = rgb[1];
+  data[4 * index + 2] = rgb[2];
+  data[4 * index + 3] = 255;
+}
+
+function refreshMapEditBitmap() {
+  for (let i = 0; i < mapEdit.pixels.length; i++) paintMapEditImagePixel(i);
+  mapEdit.bitmapCtx.putImageData(mapEdit.imageData, 0, 0);
+  requestMapEditDraw();
+}
+
+/** Closes the pop-up, first asking before throwing away unsaved strokes. */
+function closeMapEditor() {
+  if (mapEdit && mapEdit.saving) return;
+  if (mapEdit && mapEdit.undo.length > 0 && !window.confirm("Discard your edits to this map?")) return;
+  mapEdit = null;
+  mapEditOverlay.hidden = true;
+}
+
+// --- view -------------------------------------------------------------
+
+function resizeMapEditCanvas() {
+  const dpr = mapEditDpr();
+  const width = Math.max(1, Math.round(mapEditStageEl.clientWidth * dpr));
+  const height = Math.max(1, Math.round(mapEditStageEl.clientHeight * dpr));
+  if (mapEditCanvas.width !== width || mapEditCanvas.height !== height) {
+    mapEditCanvas.width = width;
+    mapEditCanvas.height = height;
+  }
+  requestMapEditDraw();
+}
+
+new ResizeObserver(resizeMapEditCanvas).observe(mapEditStageEl);
+
+/** Scale (device pixels per map pixel) that fits the whole map in view. */
+function mapEditFitScale() {
+  const { width_px, height_px } = mapEdit.info;
+  return 0.95 * Math.min(mapEditCanvas.width / width_px, mapEditCanvas.height / height_px);
+}
+
+function fitMapEditView() {
+  if (!mapEdit) return;
+  const { width_px, height_px } = mapEdit.info;
+  const scale = mapEditFitScale();
+  mapEdit.view = {
+    scale,
+    x: (mapEditCanvas.width - width_px * scale) / 2,
+    y: (mapEditCanvas.height - height_px * scale) / 2,
+  };
+  requestMapEditDraw();
+}
+
+/** A mouse event's position in device pixels on the canvas. */
+function mapEditDevicePoint(event) {
+  const rect = mapEditCanvas.getBoundingClientRect();
+  const dpr = mapEditDpr();
+  return { x: (event.clientX - rect.left) * dpr, y: (event.clientY - rect.top) * dpr };
+}
+
+/** A device-pixel point in map pixel coordinates (fractional). */
+function mapEditToPixel({ x, y }) {
+  const { view } = mapEdit;
+  return { x: (x - view.x) / view.scale, y: (y - view.y) / view.scale };
+}
+
+/** A world point (meters) in map pixel coordinates - the image's origin is
+ *  its (0, 0) corner, axes unflipped (see `ImageOrigin`). */
+function mapEditWorldToPixel(x, y) {
+  const { origin, resolution_m_per_px } = mapEdit.info;
+  return { x: (x - origin.x) / resolution_m_per_px, y: (y - origin.y) / resolution_m_per_px };
+}
+
+// --- painting -----------------------------------------------------------
+
+/** Paints the pen's disc around the pixel containing `point` (map pixel
+ *  coordinates), recording each pixel's old value in the current stroke. */
+function stampMapEdit(point) {
+  const { pixels, info, stroke } = mapEdit;
+  const color = mapEditColor;
+  const radius = Number(mapEditRadiusEl.value);
+  const cx = Math.floor(point.x);
+  const cy = Math.floor(point.y);
+  // r^2 + r rather than r^2: rounder discs, without the single pixel
+  // sticking out at each compass point.
+  const reach = radius * radius + radius;
+  const x0 = Math.max(0, cx - radius);
+  const x1 = Math.min(info.width_px - 1, cx + radius);
+  const y0 = Math.max(0, cy - radius);
+  const y1 = Math.min(info.height_px - 1, cy + radius);
+  let changed = false;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 > reach) continue;
+      const index = y * info.width_px + x;
+      if (pixels[index] === color) continue;
+      if (!stroke.has(index)) stroke.set(index, pixels[index]);
+      pixels[index] = color;
+      paintMapEditImagePixel(index);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Paints from the last painted point to `point`, stamping every pixel or
+ *  so along the way - mouse moves arrive spaced out, and a fast drag would
+ *  otherwise leave a dotted line. */
+function paintMapEditTo(point) {
+  const from = mapEdit.lastPaint ?? point;
+  const steps = Math.max(1, Math.ceil(Math.hypot(point.x - from.x, point.y - from.y)));
+  let changed = false;
+  for (let step = 1; step <= steps; step++) {
+    const t = step / steps;
+    changed = stampMapEdit({ x: from.x + (point.x - from.x) * t, y: from.y + (point.y - from.y) * t }) || changed;
+  }
+  mapEdit.lastPaint = point;
+  if (changed) {
+    mapEdit.bitmapCtx.putImageData(mapEdit.imageData, 0, 0);
+    requestMapEditDraw();
+  }
+}
+
+function endMapEditStroke() {
+  if (!mapEdit || !mapEdit.stroke) return;
+  if (mapEdit.stroke.size > 0) mapEdit.undo.push(mapEdit.stroke);
+  mapEdit.stroke = null;
+  mapEdit.lastPaint = null;
+  syncMapEditButtons();
+}
+
+function undoMapEdit() {
+  if (!mapEdit || mapEdit.stroke || mapEdit.saving) return;
+  const stroke = mapEdit.undo.pop();
+  if (!stroke) return;
+  for (const [index, value] of stroke) mapEdit.pixels[index] = value;
+  refreshMapEditBitmap();
+  syncMapEditButtons();
+}
+
+async function revertMapEdit() {
+  if (!mapEdit || !mapEdit.info.has_original) return;
+  const edit = mapEdit;
+  if (!edit.original) {
+    try {
+      const response = await fetch(`/api/map_edit/raster?${new URLSearchParams({ name: edit.name, original: "true" })}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      edit.original = new Uint8Array(await response.arrayBuffer());
+    } catch (err) {
+      showMapEditError(`Couldn't read the original map: ${err.message}`);
+      return;
+    }
+  }
+  if (mapEdit !== edit) return; // closed meanwhile
+  if (edit.original.length !== edit.pixels.length) {
+    showMapEditError("The original map has a different size - it can't be restored here.");
+    return;
+  }
+  // One stroke covering every differing pixel, so reverting is undoable
+  // like any other edit.
+  const stroke = new Map();
+  for (let i = 0; i < edit.pixels.length; i++) {
+    if (edit.pixels[i] !== edit.original[i]) {
+      stroke.set(i, edit.pixels[i]);
+      edit.pixels[i] = edit.original[i];
+    }
+  }
+  if (stroke.size > 0) edit.undo.push(stroke);
+  refreshMapEditBitmap();
+  syncMapEditButtons();
+}
+
+async function saveMapEdit() {
+  if (!mapEdit || mapEdit.undo.length === 0) return;
+  const edit = mapEdit;
+  edit.saving = true;
+  syncMapEditButtons();
+  showMapEditError(null);
+  try {
+    const saved = await fetchJSON(`/api/map_edit/raster?${new URLSearchParams({ name: edit.name })}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: edit.pixels,
+    });
+    mapEdit = null;
+    mapEditOverlay.hidden = true;
+    const stale =
+      saved.race_lines > 0
+        ? ` Its ${saved.race_lines === 1 ? "race line was" : `${saved.race_lines} race lines were`} computed on the old pixels - plan again if the edit touched the track.`
+        : "";
+    showMapToolsStatus(`Saved the pixels of ${edit.name}.${stale}`);
+  } catch (err) {
+    // Includes the 409 while mapping or localization runs.
+    edit.saving = false;
+    syncMapEditButtons();
+    showMapEditError(`Couldn't save: ${err.message}`);
+  }
+}
+
+// --- drawing ------------------------------------------------------------
+
+let mapEditDrawRequested = false;
+
+function requestMapEditDraw() {
+  if (mapEditDrawRequested) return;
+  mapEditDrawRequested = true;
+  requestAnimationFrame(() => {
+    mapEditDrawRequested = false;
+    drawMapEdit();
+  });
+}
+
+function drawMapEdit() {
+  const ctx = mapEditCanvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, mapEditCanvas.width, mapEditCanvas.height);
+  if (!mapEdit) return;
+  const { view, info } = mapEdit;
+  const dpr = mapEditDpr();
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(mapEdit.bitmap, view.x, view.y, info.width_px * view.scale, info.height_px * view.scale);
+
+  drawMapEditGrid(ctx);
+  drawMapEditOverlays(ctx, dpr);
+  drawMapEditPen(ctx, dpr);
+}
+
+/** Blue lines along the pixel edges, fading in once zoomed in enough to
+ *  tell pixels apart - only over the part of the map in view. */
+function drawMapEditGrid(ctx) {
+  const { view, info } = mapEdit;
+  const alpha = Math.min(1, (view.scale - MAP_EDIT_GRID_MIN_PX) / MAP_EDIT_GRID_MIN_PX);
+  if (alpha <= 0) return;
+  const i0 = Math.max(0, Math.floor(-view.x / view.scale));
+  const i1 = Math.min(info.width_px, Math.ceil((mapEditCanvas.width - view.x) / view.scale));
+  const j0 = Math.max(0, Math.floor(-view.y / view.scale));
+  const j1 = Math.min(info.height_px, Math.ceil((mapEditCanvas.height - view.y) / view.scale));
+  if (i1 < i0 || j1 < j0) return;
+  const top = view.y + j0 * view.scale;
+  const bottom = view.y + j1 * view.scale;
+  const left = view.x + i0 * view.scale;
+  const right = view.x + i1 * view.scale;
+  ctx.globalAlpha = 0.6 * alpha;
+  ctx.strokeStyle = MAP_EDIT_GRID_COLOR;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = i0; i <= i1; i++) {
+    const x = Math.round(view.x + i * view.scale) + 0.5;
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+  }
+  for (let j = j0; j <= j1; j++) {
+    const y = Math.round(view.y + j * view.scale) + 0.5;
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+/** The race line and the start/finish line, to paint around. */
+function drawMapEditOverlays(ctx, dpr) {
+  const { view, info } = mapEdit;
+  const toScreen = (x, y) => {
+    const pixel = mapEditWorldToPixel(x, y);
+    return { x: view.x + pixel.x * view.scale, y: view.y + pixel.y * view.scale };
+  };
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  if (info.race_line.length > 1) {
+    ctx.strokeStyle = MAP_EDIT_RACE_LINE_COLOR;
+    ctx.lineWidth = 2 * dpr;
+    ctx.beginPath();
+    info.race_line.forEach(([x, y], index) => {
+      const point = toScreen(x, y);
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  const { a, b } = info.start_finish_line;
+  const from = toScreen(a.x, a.y);
+  const to = toScreen(b.x, b.y);
+  ctx.strokeStyle = MAP_EDIT_START_LINE_COLOR;
+  ctx.lineWidth = 3 * dpr;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+}
+
+/** The pen's outline, covering exactly the pixels a click would paint. */
+function drawMapEditPen(ctx, dpr) {
+  const { view, hover, pan } = mapEdit;
+  const color = mapEditColor;
+  if (!hover || pan) return;
+  const pixel = mapEditToPixel(hover);
+  const radius = Number(mapEditRadiusEl.value);
+  const cx = view.x + (Math.floor(pixel.x) + 0.5) * view.scale;
+  const cy = view.y + (Math.floor(pixel.y) + 0.5) * view.scale;
+  const r = Math.max((Math.sqrt(radius * radius + radius) + 0.5) * view.scale, 3 * dpr);
+  ctx.lineWidth = 3 * dpr;
+  ctx.strokeStyle = color === MAP_EDIT_WALL ? "rgba(255, 255, 255, 0.9)" : "rgba(0, 0, 0, 0.9)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.strokeStyle = color === MAP_EDIT_WALL ? "#000" : "#fff";
+  ctx.stroke();
+}
+
+// --- mouse and keys -----------------------------------------------------
+
+mapEditCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+mapEditCanvas.addEventListener("mousedown", (event) => {
+  if (!mapEdit || mapEdit.saving) return;
+  event.preventDefault();
+  // Keeps keyboard focus inside the pop-up, so WASD never drives the car
+  // from here.
+  mapEditModal.focus({ preventScroll: true });
+  const point = mapEditDevicePoint(event);
+  if (event.button === 2) {
+    mapEdit.pan = { x: point.x, y: point.y };
+    mapEditCanvas.classList.add("panning");
+    requestMapEditDraw();
+  } else if (event.button === 0 && !mapEdit.pan) {
+    mapEdit.stroke = new Map();
+    mapEdit.lastPaint = null;
+    paintMapEditTo(mapEditToPixel(point));
+  }
+});
+
+window.addEventListener("mousemove", (event) => {
+  if (!mapEdit) return;
+  const point = mapEditDevicePoint(event);
+  if (mapEdit.pan) {
+    mapEdit.view.x += point.x - mapEdit.pan.x;
+    mapEdit.view.y += point.y - mapEdit.pan.y;
+    mapEdit.pan = point;
+  } else if (mapEdit.stroke) {
+    paintMapEditTo(mapEditToPixel(point));
+  }
+  const inside = event.target === mapEditCanvas;
+  mapEdit.hover = inside ? point : null;
+  requestMapEditDraw();
+});
+
+window.addEventListener("mouseup", (event) => {
+  if (!mapEdit) return;
+  if (event.button === 2 && mapEdit.pan) {
+    mapEdit.pan = null;
+    mapEditCanvas.classList.remove("panning");
+    requestMapEditDraw();
+  } else if (event.button === 0) {
+    endMapEditStroke();
+  }
+});
+
+mapEditCanvas.addEventListener("mouseleave", () => {
+  if (!mapEdit) return;
+  mapEdit.hover = null;
+  requestMapEditDraw();
+});
+
+mapEditCanvas.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    if (!mapEdit) return;
+    const point = mapEditDevicePoint(event);
+    const { view } = mapEdit;
+    const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));
+    const minScale = MAP_EDIT_MIN_SCALE_OF_FIT * mapEditFitScale();
+    const scale = Math.min(MAP_EDIT_MAX_SCALE * mapEditDpr(), Math.max(minScale, view.scale * factor));
+    // Zoom around the cursor: the map pixel under it stays under it.
+    view.x = point.x - ((point.x - view.x) * scale) / view.scale;
+    view.y = point.y - ((point.y - view.y) * scale) / view.scale;
+    view.scale = scale;
+    requestMapEditDraw();
+  },
+  { passive: false },
+);
+
+mapEditOverlay.addEventListener("keydown", (event) => {
+  if (!mapEdit && event.key !== "Escape") return;
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === "z") {
+    event.preventDefault();
+    undoMapEdit();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  switch (key) {
+    case "b":
+      setMapEditColor(MAP_EDIT_WALL);
+      break;
+    case "w":
+      setMapEditColor(MAP_EDIT_TRACK);
+      break;
+    case "[":
+    case "]":
+      mapEditRadiusEl.value = Number(mapEditRadiusEl.value) + (key === "]" ? 1 : -1);
+      syncMapEditRadius();
+      break;
+    case "escape":
+      closeMapEditor();
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+});
+
+// A click on the blurred backdrop closes the pop-up - only one that also
+// started there, not the end of a stroke dragged out of the canvas.
+let mapEditBackdropPressed = false;
+mapEditOverlay.addEventListener("mousedown", (event) => {
+  mapEditBackdropPressed = event.target === mapEditOverlay;
+});
+mapEditOverlay.addEventListener("click", (event) => {
+  if (event.target === mapEditOverlay && mapEditBackdropPressed) closeMapEditor();
+});
+
+for (const btn of mapEditColorBtns) {
+  btn.addEventListener("click", () => setMapEditColor(Number(btn.dataset.value)));
+}
+mapEditRadiusEl.addEventListener("input", syncMapEditRadius);
+mapEditUndoBtn.addEventListener("click", undoMapEdit);
+mapEditRevertBtn.addEventListener("click", revertMapEdit);
+mapEditFitBtn.addEventListener("click", fitMapEditView);
+mapEditCancelBtn.addEventListener("click", closeMapEditor);
+mapEditSaveBtn.addEventListener("click", saveMapEdit);
+mapEditBtn.addEventListener("click", () => {
+  openMapEditor().catch((err) => console.error(err));
+});
+setMapEditColor(MAP_EDIT_WALL);
+syncMapEditRadius();
+
+// ---------------------------------------------------------------------
 // "R" -> restart everything, then reload this page
 // "P" -> place the vehicle at the start line
-// "Esc" -> cancel the place-vehicle tool
+// "Esc" -> cancel the place-vehicle or start/finish line tool
 // ---------------------------------------------------------------------
 
 window.addEventListener("keydown", (event) => {
@@ -2262,6 +3004,11 @@ window.addEventListener("keydown", (event) => {
       if (placePose.stage !== "idle") {
         event.preventDefault();
         disarmPlacePose();
+      }
+      if (startLine.stage !== "idle") {
+        event.preventDefault();
+        disarmStartLine();
+        showMapToolsStatus(null);
       }
       break;
   }

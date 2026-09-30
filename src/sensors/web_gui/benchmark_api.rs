@@ -705,6 +705,7 @@ fn soft_reset(ctx: &Orchestrator, plan: &Plan, spec: &RunSpec, folder: &Path) ->
                 ctx.id,
                 MapSelection {
                     path: Some(folder.to_path_buf()),
+                    ..Default::default()
                 },
             )
             .expect("lost writer authorization for the map_selection topic");

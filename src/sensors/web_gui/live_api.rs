@@ -334,9 +334,10 @@ pub fn select_map(
         },
     };
 
-    captain
-        .topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME)
-        .write(writer_id, MapSelection { path })
+    let selection_topic = captain.topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME);
+    let revision = selection_topic.read().revision;
+    selection_topic
+        .write(writer_id, MapSelection { path, revision })
         .expect("lost writer authorization for the map_selection topic");
     write_slam_command(captain, writer_id, SlamState::Off);
     json_response(&(), 200)

@@ -28,6 +28,7 @@ mod detector_api;
 mod draw_api;
 mod handlers;
 mod live_api;
+mod map_edit_api;
 mod maps_api;
 mod opponents_api;
 mod race_lines_api;

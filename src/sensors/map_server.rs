@@ -209,7 +209,8 @@ fn start_state(map: &Map) -> StartState {
 /// Claims [`MAP_TOPIC_NAME`], [`START_STATE_TOPIC_NAME`] and
 /// [`RACE_LINE_TOPIC_NAME`] and republishes them whenever
 /// [`MAP_SELECTION_TOPIC_NAME`]'s wanted path no longer matches the
-/// currently published one - loading the new map from disk, or clearing to
+/// currently published one, or its revision changed (the same folder's
+/// files were rewritten) - loading the map from disk, or clearing to
 /// their `Default`s if the selection was cleared. Also switches the race
 /// line whenever [`RACE_LINE_SELECTION_TOPIC_NAME`] picks one of the
 /// published map's, and to the newest one whenever
@@ -262,6 +263,9 @@ impl Executor for MapServer {
         // executor (`Runner::switch_executor`) doesn't reload a map that's
         // already published.
         let mut published = map_topic.read().into_value();
+        // The selection's revision that `published` was loaded for - seeded
+        // the same way, so a restart doesn't reload for an old one.
+        let mut published_revision = selection_topic.read().revision;
         // The planner's latest outcome already accounted for - seeded the
         // same way, so a restart doesn't reload for an old one.
         let planned_request = || {
@@ -290,7 +294,7 @@ impl Executor for MapServer {
         while captain.is_running(self.id) {
             let wanted = selection_topic.read();
 
-            if wanted.path != published.path {
+            if wanted.path != published.path || wanted.revision != published_revision {
                 let next = match &wanted.path {
                     None => Some(Loaded {
                         map: SelectedMap::default(),
@@ -316,6 +320,7 @@ impl Executor for MapServer {
                         .write(self.id, next.race_line)
                         .expect("lost writer authorization for the race_line topic");
                     published = next.map;
+                    published_revision = wanted.revision;
                 }
             }
 

@@ -73,6 +73,11 @@
       <ul id="map-list"></ul>
       <button id="generate-btn">Generate Map</button>
       <button id="import-btn">Import Map</button>
+      <div id="map-tools">
+        <button type="button" id="start-line-btn" title="Move the selected map's start/finish line: click its left end, then its right end (Esc or right-click cancels)" disabled>Set start/finish line</button>
+        <button type="button" id="map-edit-btn" title="Paint the selected map's pixels by hand, e.g. to clean up a map made by mapping" disabled>Edit map pixels</button>
+        <p id="map-tools-status" class="parameter-description" hidden></p>
+      </div>
     </section>
 
     <section id="panel-layers" class="panel-section" hidden>
@@ -368,6 +373,36 @@
           <button type="submit" id="import-confirm-btn" class="modal-primary" disabled>Import</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="map-edit-overlay" class="modal-overlay" hidden>
+    <div id="map-edit-modal" class="modal" tabindex="-1">
+      <div id="map-edit-toolbar">
+        <h2>Edit <span id="map-edit-name"></span></h2>
+        <div id="map-edit-colors" role="radiogroup" aria-label="Pen color">
+          <button type="button" class="map-edit-color" data-value="0" role="radio" title="Paint walls (B)"><span class="map-edit-swatch"></span>Black</button>
+          <button type="button" class="map-edit-color" data-value="255" role="radio" title="Paint drivable track (W)"><span class="map-edit-swatch"></span>White</button>
+        </div>
+        <label id="map-edit-radius-row">Pen radius
+          <input type="range" id="map-edit-radius" min="0" max="40" step="1" value="2" title="In map pixels ([ and ] change it)" />
+          <span id="map-edit-radius-value"></span>
+        </label>
+        <div id="map-edit-actions">
+          <button type="button" id="map-edit-undo-btn" title="Undo the last stroke (Ctrl+Z)" disabled>Undo</button>
+          <button type="button" id="map-edit-revert-btn" title="Go back to the map as it was made, before any hand edit - undoable, and only written once saved" disabled>Revert to original</button>
+          <button type="button" id="map-edit-fit-btn" title="Fit the whole map in view">Reset view</button>
+        </div>
+      </div>
+      <div id="map-edit-stage">
+        <canvas id="map-edit-canvas"></canvas>
+      </div>
+      <p class="parameter-description">Left click paints &middot; wheel zooms &middot; right drag pans &middot; B/W color &middot; [ ] pen radius &middot; Ctrl+Z undo. The race line (orange) and start/finish line (red) are shown to paint around.</p>
+      <p id="map-edit-error" class="modal-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" id="map-edit-cancel-btn">Cancel</button>
+        <button type="button" id="map-edit-save-btn" class="modal-primary" disabled>Save</button>
+      </div>
     </div>
   </div>
 

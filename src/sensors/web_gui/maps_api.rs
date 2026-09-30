@@ -3,11 +3,15 @@
 //! [`crate::environment`] module (`Map::load`, `read_info`,
 //! `GenerationConfig`, `generate`, `save`).
 
+use crate::Captain;
 use crate::environment::{
     self, GenerationConfig, ImageOrigin, Map, MapGenerationError, MapInfo, MapSource, Raster,
     StartFinishLine, WorldPoint, random_seed,
 };
-use crate::web::{bad_request, error_response, header, json_response, not_found, query_param};
+use crate::topics::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
+use crate::web::{
+    bad_request, error_response, header, json_response, not_found, query_param, read_json,
+};
 use std::path::{Path, PathBuf};
 use tiny_http::{Request, Response, ResponseBox};
 
@@ -361,6 +365,78 @@ pub fn decode_tiff(request: &mut Request) -> ResponseBox {
 #[derive(serde::Serialize)]
 struct ImportedMapSummary {
     name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StartFinishLineBody {
+    name: String,
+    a: WorldPoint,
+    b: WorldPoint,
+}
+
+/// `POST /api/maps/start_finish_line` - body `{"name": ..., "a": {"x":
+/// .., "y": ..}, "b": {..}}`, in world coordinates, `a` on the driver's left
+/// (see [`StartFinishLine`]): moves that map's start/finish line, rewriting
+/// its `info.json`. If it's the live map, `map_selection`'s revision is
+/// bumped so [`crate::sensors::MapServer`] reloads it - and with it the
+/// start state and the drawn line.
+pub fn set_start_finish_line(
+    request: &mut Request,
+    captain: &Captain,
+    writer_id: u16,
+    maps_root: &Path,
+) -> ResponseBox {
+    let body: StartFinishLineBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let Some(folder) = safe_map_folder(&body.name, maps_root) else {
+        return bad_request("invalid map name");
+    };
+    let (a, b) = (body.a, body.b);
+    if ![a.x, a.y, b.x, b.y].iter().all(|value| value.is_finite()) {
+        return bad_request("the start line's ends must be finite");
+    }
+    if a.x == b.x && a.y == b.y {
+        return bad_request("the start line's two ends must differ");
+    }
+    let mut info = match environment::read_info(&folder) {
+        Ok(info) => info,
+        Err(_) => return not_found(),
+    };
+    info.start_finish_line = StartFinishLine { a, b };
+    if let Err(err) = environment::write_info(&folder, &info) {
+        return error_response(500, &err.to_string());
+    }
+
+    reload_if_live(captain, writer_id, &folder);
+    json_response(&info.start_finish_line, 200)
+}
+
+/// Has [`crate::sensors::MapServer`] read `folder` from disk again if it's
+/// the live map, by bumping `map_selection`'s revision - after its files
+/// were rewritten in place.
+pub(super) fn reload_if_live(captain: &Captain, writer_id: u16, folder: &Path) {
+    let live = captain
+        .topic::<SelectedMap>(MAP_TOPIC_NAME)
+        .read()
+        .path
+        .as_deref()
+        == Some(folder);
+    if !live {
+        return;
+    }
+    let selection_topic = captain.topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME);
+    let revision = selection_topic.read().revision.wrapping_add(1);
+    selection_topic
+        .write(
+            writer_id,
+            MapSelection {
+                path: Some(folder.to_path_buf()),
+                revision,
+            },
+        )
+        .expect("lost writer authorization for the map_selection topic");
 }
 
 /// `name`'s folder under `maps_root` - see [`environment::map_folder`].

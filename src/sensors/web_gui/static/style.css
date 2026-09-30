@@ -421,6 +421,21 @@
   flex: 0 0 auto;
 }
 
+#map-tools {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #2b323b;
+}
+
+#start-line-btn.active {
+  background: #3f6dc9;
+  border-color: #3f6dc9;
+  color: #fff;
+}
+
 #race-line-list {
   list-style: none;
   margin: 0;
@@ -585,6 +600,108 @@
 #generate-confirm-btn:hover,
 .modal-primary:hover {
   background: #4a7ad9;
+}
+
+/* ---------- map pixel editor ---------- */
+
+#map-edit-modal {
+  width: min(1400px, 94vw);
+  height: 90vh;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  outline: none;
+}
+
+#map-edit-modal > p {
+  flex: 0 0 auto;
+  margin: 8px 0 0;
+}
+
+#map-edit-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-bottom: 12px;
+}
+
+#map-edit-toolbar h2 {
+  margin: 0 auto 0 0;
+}
+
+#map-edit-colors {
+  display: flex;
+  gap: 4px;
+}
+
+.map-edit-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-edit-color[aria-checked="true"] {
+  background: #3f6dc9;
+  border-color: #3f6dc9;
+  color: #fff;
+}
+
+.map-edit-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid #6b7280;
+}
+
+.map-edit-color[data-value="0"] .map-edit-swatch {
+  background: #000;
+}
+
+.map-edit-color[data-value="255"] .map-edit-swatch {
+  background: #fff;
+}
+
+#map-edit-radius-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+#map-edit-radius-value {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+  color: #9aa4b2;
+}
+
+#map-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+#map-edit-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  border: 1px solid #303640;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #262b33;
+}
+
+#map-edit-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: none;
+}
+
+#map-edit-canvas.panning {
+  cursor: grabbing;
 }
 
 /* ---------- import modal ---------- */
