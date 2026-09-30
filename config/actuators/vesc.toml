@@ -42,6 +42,9 @@ brake_current_a = 2.0
 # Below this voltage the GUI warns to recharge: 3.5 V per cell of the 4S
 # LiPo (4.2 V per cell full, ~15.4 V measured at rest).
 low_battery_v = 14.0
+# The battery's cells in series, for estimating its charge from its voltage
+# (a LiPo cell's resting voltage, 3.3 V empty to 4.2 V full).
+battery_cells = 4
 
 # --- IMU ------------------------------------------------------------------
 # Which of the VESC's IMU axes ("+x", "-x", "+y", "-y", "+z", "-z") gives

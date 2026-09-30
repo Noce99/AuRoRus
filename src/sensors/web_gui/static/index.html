@@ -108,9 +108,10 @@
     <section id="panel-vesc" class="panel-section" hidden>
       <h1>VESC</h1>
       <p id="vesc-state"></p>
-      <p class="parameter-description">The real car's motor controller, read about 100 times a second.</p>
+      <p class="parameter-description">The real car's motor controller, read about 100 times a second. The battery's charge is estimated from its voltage, so it reads low while the motor draws current.</p>
       <dl id="vesc-readings" class="readings">
         <dt>Battery</dt><dd id="vesc-battery"></dd>
+        <dd id="vesc-charge-row"><progress id="vesc-charge" max="1" value="0"></progress></dd>
         <dt>Speed</dt><dd id="vesc-speed"></dd>
         <dt>Commanded</dt><dd id="vesc-commanded"></dd>
         <dt>Steering servo</dt><dd id="vesc-servo"></dd>

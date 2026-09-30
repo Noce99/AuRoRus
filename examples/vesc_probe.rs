@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 fn main() {
     let mut args = std::env::args().skip(1);
     let seconds: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(10.0);
-    let path = args.next().map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
+    let path = args
+        .next()
+        .map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
 
     let mut port = VescPort::open(&path, Duration::from_millis(200)).unwrap_or_else(|err| {
         eprintln!("{err}");

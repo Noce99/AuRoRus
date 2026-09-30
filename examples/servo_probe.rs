@@ -33,7 +33,9 @@ fn main() {
             WINDOW.end()
         ));
     }
-    let path = args.next().map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
+    let path = args
+        .next()
+        .map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
 
     let mut port = VescPort::open(&path, Duration::from_millis(200)).unwrap_or_else(|e| fail(e));
     port.set_servo(position).unwrap_or_else(|e| fail(e));

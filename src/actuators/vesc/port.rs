@@ -38,7 +38,10 @@ impl VescPort {
                 _ => format!("can't open {}: {err}", path.display()),
             })?;
         exclusive(&file).map_err(|err| {
-            format!("{} is already in use by another program: {err}", path.display())
+            format!(
+                "{} is already in use by another program: {err}",
+                path.display()
+            )
         })?;
         raw_mode(&file).map_err(|err| format!("can't set up {}: {err}", path.display()))?;
         Ok(Self {

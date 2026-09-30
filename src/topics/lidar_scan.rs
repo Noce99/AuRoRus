@@ -140,7 +140,10 @@ mod tests {
         let scan = LidarScan::new(vec![1.0], vec![1.0], 0.1, 12.0, 1.0).mounted_at(0.3, 0.1);
         let (x, y) = scan.origin_m(2.0, 1.0, std::f64::consts::FRAC_PI_2);
         // Facing +y: forward is +y, left is -x.
-        assert!((x - 1.9).abs() < 1e-6 && (y - 1.3).abs() < 1e-6, "({x}, {y})");
+        assert!(
+            (x - 1.9).abs() < 1e-6 && (y - 1.3).abs() < 1e-6,
+            "({x}, {y})"
+        );
     }
 
     #[test]

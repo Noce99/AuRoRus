@@ -14,6 +14,11 @@ pub struct VescStatus {
     /// Whether the battery is below the voltage it should be recharged at
     /// (see [`crate::actuators::VescConfig::low_battery_v`]).
     pub low_battery: bool,
+    /// The battery's estimated charge, `0.0` (empty) to `1.0` (full), from
+    /// its voltage averaged over a few seconds - reading emptier than it is
+    /// while the motor draws current (see
+    /// [`crate::actuators::vesc::battery_charge`]).
+    pub battery_charge: f64,
     /// Battery current, in amperes - averaged since the previous reading.
     pub input_current_a: f64,
     /// Motor current, in amperes - averaged since the previous reading.

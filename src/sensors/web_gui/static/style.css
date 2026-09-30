@@ -320,6 +320,40 @@
   color: #e8e8e8;
 }
 
+#vesc-charge-row {
+  grid-column: 2;
+}
+
+#vesc-charge {
+  width: 100%;
+  height: 8px;
+  appearance: none;
+  border: none;
+  border-radius: 4px;
+  background: #2a2f3a;
+  overflow: hidden;
+}
+
+#vesc-charge::-webkit-progress-bar {
+  background: #2a2f3a;
+}
+
+#vesc-charge::-webkit-progress-value {
+  background: #7fd18b;
+}
+
+#vesc-charge::-moz-progress-bar {
+  background: #7fd18b;
+}
+
+#vesc-charge.warning::-webkit-progress-value {
+  background: #e0a458;
+}
+
+#vesc-charge.warning::-moz-progress-bar {
+  background: #e0a458;
+}
+
 .readings dd.warning {
   color: #e0a458;
 }

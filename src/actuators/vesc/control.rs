@@ -5,6 +5,12 @@
 use super::protocol::Imu;
 use crate::topics::{ActuatorLimits, ImuReading, VescCommand};
 
+/// A LiPo cell's resting voltage at each tenth of its charge, `0.0` (empty)
+/// to `1.0` (full).
+const LIPO_CELL_V: [f64; 11] = [
+    3.30, 3.69, 3.73, 3.77, 3.80, 3.84, 3.87, 3.95, 4.02, 4.11, 4.20,
+];
+
 /// Standard gravity, in meters/second^2 - the VESC reports accelerations in g.
 const G_MPS2: f64 = 9.806_65;
 
@@ -53,6 +59,8 @@ pub struct VescConfig {
     /// Below this battery voltage, in volts, the battery should be
     /// recharged - flagged in [`crate::topics::VescStatus::low_battery`].
     pub low_battery_v: f64,
+    /// The battery's cells in series - see [`battery_charge`].
+    pub battery_cells: u32,
 
     /// Which of the VESC's IMU axes gives [`ImuReading`]'s x (forward), y and
     /// z - the simulator's frame, whose y is the car's right as the GUI draws
@@ -136,7 +144,8 @@ impl Setpoint {
             limits.max_decel_mps2
         };
         let max_change = rate * dt_s;
-        let speed_mps = self.speed_mps + (target_mps - self.speed_mps).clamp(-max_change, max_change);
+        let speed_mps =
+            self.speed_mps + (target_mps - self.speed_mps).clamp(-max_change, max_change);
         Self {
             steering_rad,
             speed_mps,
@@ -171,8 +180,26 @@ pub fn motor(config: &VescConfig, speed_mps: f64) -> Motor {
     let magnitude = magnitude
         .max(config.min_speed_mps)
         .min(config.limits.max_speed_mps);
-    let erpm = speed_mps.signum() * magnitude * config.speed_to_erpm_gain * config.speed_compensation;
+    let erpm =
+        speed_mps.signum() * magnitude * config.speed_to_erpm_gain * config.speed_compensation;
     Motor::Erpm(erpm.round() as i32)
+}
+
+/// The battery's estimated charge, `0.0` (empty) to `1.0` (full), from its
+/// voltage - interpolated along a LiPo cell's discharge curve. Only a
+/// resting battery's voltage says it well: under load it sags, reading
+/// emptier than it is.
+pub fn battery_charge(config: &VescConfig, voltage_v: f64) -> f64 {
+    let cell_v = voltage_v / f64::from(config.battery_cells.max(1));
+    let above = LIPO_CELL_V.partition_point(|&v| v < cell_v);
+    if above == 0 {
+        return 0.0;
+    }
+    if above == LIPO_CELL_V.len() {
+        return 1.0;
+    }
+    let (low, high) = (LIPO_CELL_V[above - 1], LIPO_CELL_V[above]);
+    ((above - 1) as f64 + (cell_v - low) / (high - low)) / (LIPO_CELL_V.len() - 1) as f64
 }
 
 /// The VESC's readings as an [`ImuReading`]: wheel speed from the motor's
@@ -227,7 +254,10 @@ mod tests {
         let config = config();
         assert_eq!(motor(&config, 0.0), Motor::Brake(config.brake_current_a));
         assert_eq!(motor(&config, 0.01), Motor::Brake(config.brake_current_a));
-        assert_eq!(motor(&config, f64::NAN), Motor::Brake(config.brake_current_a));
+        assert_eq!(
+            motor(&config, f64::NAN),
+            Motor::Brake(config.brake_current_a)
+        );
         let minimum = motor(&config, config.min_speed_mps);
         assert_eq!(motor(&config, 0.1), minimum);
         let Motor::Erpm(reverse) = motor(&config, -0.1) else {
@@ -241,7 +271,10 @@ mod tests {
         let config = config();
         let expected = 0.8 * config.speed_to_erpm_gain * config.speed_compensation;
         assert_eq!(motor(&config, 0.8), Motor::Erpm(expected.round() as i32));
-        assert_eq!(motor(&config, 50.0), motor(&config, config.limits.max_speed_mps));
+        assert_eq!(
+            motor(&config, 50.0),
+            motor(&config, config.limits.max_speed_mps)
+        );
     }
 
     #[test]
@@ -250,7 +283,10 @@ mod tests {
         let command = VescCommand::new(1.0, 5.0);
         let dt_s = 0.01;
         let next = Setpoint::default().toward(command, &limits, dt_s);
-        assert!(close(next.steering_rad, limits.max_steering_rate_rad_s * dt_s));
+        assert!(close(
+            next.steering_rad,
+            limits.max_steering_rate_rad_s * dt_s
+        ));
         assert!(close(next.speed_mps, limits.max_accel_mps2 * dt_s));
 
         let mut setpoint = Setpoint::default();
@@ -270,9 +306,25 @@ mod tests {
         };
         let dt_s = 0.01;
         let stopping = moving.toward(VescCommand::default(), &limits, dt_s);
-        assert!(close(stopping.speed_mps, 1.0 - limits.max_decel_mps2 * dt_s));
+        assert!(close(
+            stopping.speed_mps,
+            1.0 - limits.max_decel_mps2 * dt_s
+        ));
         let reversing = moving.toward(VescCommand::new(0.0, -1.0), &limits, dt_s);
         assert!(close(reversing.speed_mps, stopping.speed_mps));
+    }
+
+    #[test]
+    fn the_battery_charge_follows_the_lipo_curve() {
+        let config = config();
+        let cells = f64::from(config.battery_cells);
+        assert_eq!(battery_charge(&config, 4.3 * cells), 1.0);
+        assert_eq!(battery_charge(&config, 4.2 * cells), 1.0);
+        assert_eq!(battery_charge(&config, 3.0 * cells), 0.0);
+        assert!(close(battery_charge(&config, 3.84 * cells), 0.5));
+        assert!(close(battery_charge(&config, 3.82 * cells), 0.45));
+        let low = battery_charge(&config, config.low_battery_v);
+        assert!(low > 0.0 && low < 0.1, "{low}");
     }
 
     #[test]

@@ -45,7 +45,9 @@ pub struct VehiclePose {
 
 impl VehiclePose {
     pub fn new(captain: &Captain, vehicle: VehicleTopics) -> Self {
-        let placement = (captain.try_topic::<StartState>(START_STATE_TOPIC_NAME).is_some()
+        let placement = (captain
+            .try_topic::<StartState>(START_STATE_TOPIC_NAME)
+            .is_some()
             && captain
                 .try_topic::<PlaceAtStart>(PLACE_AT_START_TOPIC_NAME)
                 .is_some())

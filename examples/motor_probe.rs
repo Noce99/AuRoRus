@@ -45,12 +45,18 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| fail(usage.into()));
     if erpm == 0 || erpm.abs() > MAX_ERPM {
-        fail(format!("ERPM must be nonzero and within +-{MAX_ERPM}, got {erpm}"));
+        fail(format!(
+            "ERPM must be nonzero and within +-{MAX_ERPM}, got {erpm}"
+        ));
     }
     if !(seconds > 0.0 && seconds <= MAX_SECONDS) {
-        fail(format!("SECONDS must be in (0, {MAX_SECONDS}], got {seconds}"));
+        fail(format!(
+            "SECONDS must be in (0, {MAX_SECONDS}], got {seconds}"
+        ));
     }
-    let path = args.next().map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
+    let path = args
+        .next()
+        .map_or_else(|| PathBuf::from("/dev/sensors/vesc"), PathBuf::from);
 
     let stop = Arc::new(AtomicBool::new(false));
     let handler_stop = stop.clone();
@@ -60,7 +66,10 @@ fn main() {
     let mut port = VescPort::open(&path, Duration::from_millis(100)).unwrap_or_else(|e| fail(e));
     let before = port.values().unwrap_or_else(|e| fail(e));
     if !before.fault.is_none() {
-        fail(format!("the VESC reports fault {} - not spinning", before.fault.name()));
+        fail(format!(
+            "the VESC reports fault {} - not spinning",
+            before.fault.name()
+        ));
     }
     println!(
         "{:.2} V, tachometer {} - spinning at {erpm} ERPM for {seconds} s",

@@ -2,7 +2,9 @@
 //! [`crate::actuators::SimulatedVehicle`] under `web_gui --hardware`.
 
 use super::VescPort;
-use super::control::{Motor, Setpoint, VescConfig, imu_reading, motor, servo_position};
+use super::control::{
+    Motor, Setpoint, VescConfig, battery_charge, imu_reading, motor, servo_position,
+};
 use super::protocol::Fault;
 use crate::actuators::simulated_vehicle::select_command_within;
 use crate::topics::{
@@ -20,6 +22,9 @@ const STOP_BRAKING_FOR: Duration = Duration::from_secs(1);
 const STOPPED_ERPM: f64 = 100.0;
 /// How often a wait before reconnecting checks whether to stop.
 const POLL: Duration = Duration::from_millis(50);
+/// The time constant the battery voltage is averaged over for estimating its
+/// charge, in seconds - long enough to ride out the motor's bursts.
+const BATTERY_SMOOTHING_S: f64 = 3.0;
 
 /// The real car's actuators: every [`VescConfig::rate_hz`], sends the VESC the
 /// command to act on - the human's over the autonomous one, as
@@ -55,8 +60,7 @@ impl Vesc {
     /// still can be.
     fn drive(&self, captain: &Captain) -> Result<(), String> {
         let path = Path::new(&self.config.port);
-        let mut port =
-            VescPort::open(path, Duration::from_secs_f64(self.config.reply_timeout_s))?;
+        let mut port = VescPort::open(path, Duration::from_secs_f64(self.config.reply_timeout_s))?;
         let firmware = port.firmware()?;
         println!(
             "{}: VESC firmware {}.{:02} on {} at {}",
@@ -83,6 +87,7 @@ impl Vesc {
         let mut ticker = Ticker::new(self.config.rate_hz);
         let mut setpoint = Setpoint::default();
         let mut fault = Fault(0);
+        let mut battery_v: Option<f64> = None;
 
         while captain.is_running(self.id) {
             let command =
@@ -102,6 +107,11 @@ impl Vesc {
                 fault = values.fault;
                 eprintln!("{}: VESC fault {}", self.name, fault.name());
             }
+            let smoothed_v = match battery_v {
+                Some(v) => v + (values.input_voltage_v - v) * dt_s / (BATTERY_SMOOTHING_S + dt_s),
+                None => values.input_voltage_v,
+            };
+            battery_v = Some(smoothed_v);
             imu_topic
                 .write(self.id, imu_reading(&self.config, values.erpm, &imu))
                 .expect("lost writer authorization for the imu topic");
@@ -111,6 +121,7 @@ impl Vesc {
                     VescStatus {
                         input_voltage_v: values.input_voltage_v,
                         low_battery: values.input_voltage_v < self.config.low_battery_v,
+                        battery_charge: battery_charge(&self.config, smoothed_v),
                         input_current_a: values.input_current_a,
                         motor_current_a: values.motor_current_a,
                         temp_fet_c: values.temp_fet_c,

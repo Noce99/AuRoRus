@@ -386,7 +386,9 @@ pub fn parse_imu(payload: &[u8]) -> Result<Imu, String> {
     let mut reader = Reader::new(payload, COMM_GET_IMU_DATA, "IMU")?;
     let mask = reader.u16()?;
     if mask != IMU_MASK {
-        return Err(format!("IMU reply has fields {mask:#06x}, expected {IMU_MASK:#06x}"));
+        return Err(format!(
+            "IMU reply has fields {mask:#06x}, expected {IMU_MASK:#06x}"
+        ));
     }
     let mut three = || -> Result<[f64; 3], String> {
         Ok([reader.f32_auto()?, reader.f32_auto()?, reader.f32_auto()?])
@@ -436,7 +438,10 @@ mod tests {
     #[test]
     fn requests_frame_as_the_firmware_expects() {
         let crc = crc16(&[COMM_GET_VALUES]).to_be_bytes();
-        assert_eq!(frame(&request(COMM_GET_VALUES)), vec![2, 1, 4, crc[0], crc[1], 3]);
+        assert_eq!(
+            frame(&request(COMM_GET_VALUES)),
+            vec![2, 1, 4, crc[0], crc[1], 3]
+        );
         assert_eq!(imu_request(), vec![65, 0x01, 0xFF]);
         let long = frame(&[7; 300]);
         assert_eq!(&long[..3], &[3, 1, 44]);
@@ -553,6 +558,10 @@ mod tests {
         let close = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
         assert!(close(imu.rpy_rad, [0.1, -0.2, 3.0]), "{:?}", imu.rpy_rad);
         assert!(close(imu.accel_g, [0.01, -0.02, 1.0]), "{:?}", imu.accel_g);
-        assert!(close(imu.gyro_deg_s, [0.5, -1.5, 90.0]), "{:?}", imu.gyro_deg_s);
+        assert!(
+            close(imu.gyro_deg_s, [0.5, -1.5, 90.0]),
+            "{:?}",
+            imu.gyro_deg_s
+        );
     }
 }

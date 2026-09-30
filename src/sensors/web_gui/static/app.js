@@ -2386,6 +2386,7 @@ debugStopBtn.addEventListener("click", () => {
 const vescNavBtn = document.querySelector('.panel-nav-btn[data-panel="vesc"]');
 const vescStateEl = document.getElementById("vesc-state");
 const vescBatteryEl = document.getElementById("vesc-battery");
+const vescChargeEl = document.getElementById("vesc-charge");
 const vescSpeedEl = document.getElementById("vesc-speed");
 const vescCommandedEl = document.getElementById("vesc-commanded");
 const vescServoEl = document.getElementById("vesc-servo");
@@ -2417,7 +2418,10 @@ function renderVesc(response) {
   vescNavBtn.classList.toggle("fault", level === "fault");
 
   const status = response.value;
-  vescBatteryEl.textContent = `${status.input_voltage_v.toFixed(1)} V`;
+  const charge = Math.round(status.battery_charge * 100);
+  vescBatteryEl.textContent = `${status.input_voltage_v.toFixed(1)} V, ~${charge}%`;
+  vescChargeEl.value = status.battery_charge;
+  vescChargeEl.classList.toggle("warning", status.low_battery);
   vescBatteryEl.classList.toggle("warning", status.low_battery);
   vescSpeedEl.textContent = `${status.wheel_speed_mps.toFixed(2)} m/s (${Math.round(status.erpm)} ERPM)`;
   vescCommandedEl.textContent =

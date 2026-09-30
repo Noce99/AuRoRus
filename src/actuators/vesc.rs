@@ -11,7 +11,7 @@ mod driver;
 mod port;
 pub mod protocol;
 
-pub use control::{ImuAxis, VescConfig};
+pub use control::{ImuAxis, VescConfig, battery_charge};
 #[cfg(unix)]
 pub use driver::Vesc;
 #[cfg(unix)]
