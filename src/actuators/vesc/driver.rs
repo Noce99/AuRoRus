@@ -10,9 +10,9 @@ use crate::actuators::simulated_vehicle::select_command_within;
 use crate::hardware::CarCalibration;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    IMU_TOPIC_NAME, ImuReading, VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME,
-    VESC_STATUS_TOPIC_NAME, VehicleGeometry, VehicleTopics, VescCommand, VescParameters,
-    VescParametersStatus, VescStatus,
+    IMU_TOPIC_NAME, ImuReading, JOYSTICK_VESC_COMMAND_TOPIC_NAME,
+    VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME, VESC_STATUS_TOPIC_NAME,
+    VehicleGeometry, VehicleTopics, VescCommand, VescParameters, VescParametersStatus, VescStatus,
 };
 use crate::{Captain, Executor, RwLockTopic, Ticker};
 use std::any::Any;
@@ -31,8 +31,8 @@ const POLL: Duration = Duration::from_millis(50);
 const BATTERY_SMOOTHING_S: f64 = 3.0;
 
 /// The real car's actuators: every [`VescConfig::rate_hz`], sends the VESC the
-/// command to act on - the human's over the autonomous one, as
-/// [`crate::actuators::SimulatedVehicle`] picks it, stale after
+/// command to act on - a human's (the joystick's, then WASD's) over the
+/// autonomous one, as [`crate::actuators::SimulatedVehicle`] picks it, stale after
 /// [`VescConfig::command_timeout_s`] - moved towards within
 /// [`VescConfig::actuator_limits`] and steered through the car's
 /// [`crate::hardware::SteeringTable`], and publishes what the VESC reads: its IMU and
@@ -113,6 +113,7 @@ impl Vesc {
     ) -> Result<(), String> {
         let autonomous_topic = captain.topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
         let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
+        let joystick_topic = captain.try_topic::<VescCommand>(JOYSTICK_VESC_COMMAND_TOPIC_NAME);
         let imu_topic = captain.topic::<ImuReading>(IMU_TOPIC_NAME);
         let status_topic = captain.topic::<VescStatus>(VESC_STATUS_TOPIC_NAME);
         let mut rate_hz = tuning.config.rate_hz;
@@ -132,7 +133,11 @@ impl Vesc {
             let dt_s = 1.0 / rate_hz;
             let command = select_command_within(
                 autonomous_topic.read(),
-                human_topic.read(),
+                joystick_topic
+                    .as_ref()
+                    .map(|topic| topic.read())
+                    .into_iter()
+                    .chain([human_topic.read()]),
                 Duration::from_secs_f64(config.command_timeout_s),
             );
             setpoint = setpoint.toward(command, &config.actuator_limits(car), dt_s);

@@ -74,8 +74,8 @@ pub use vehicle_model::{
 pub use vehicle_status::{VEHICLE_STATUS_TOPIC_NAME, VehicleStatus};
 pub use vehicle_topics::{AlgorithmTopics, OPPONENT_TOPIC_PREFIX, VehicleTopics};
 pub use vesc_command::{
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT,
-    VescCommand,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, HUMAN_VESC_COMMAND_TOPIC_NAME,
+    JOYSTICK_VESC_COMMAND_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VescCommand,
 };
 pub use vesc_parameters::{
     VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME, VescParameters,

@@ -28,11 +28,12 @@ use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    LAP_TELEMETRY_TOPIC_NAME, LapTelemetry, MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection,
-    OpponentRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection,
-    Racer, SelectedMap, SelectedRaceLine, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
-    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleGeometry, VehicleModelKind,
-    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand, now_ms,
+    JOYSTICK_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry,
+    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, OpponentRequest,
+    RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection, Racer, SelectedMap,
+    SelectedRaceLine, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
+    VEHICLE_STATUS_TOPIC_NAME, VehicleGeometry, VehicleModelKind, VehicleModelSelection,
+    VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand, now_ms,
 };
 use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, DebugRecorder, DebugState, Stamped, Ticker, actuators, autonomous_control};
@@ -782,6 +783,7 @@ fn drive(
         .ok_or_else(|| Halt::Failed("benchmarks need the simulated vehicle".into()))?;
     let command_topic = captain.try_topic::<VescCommand>(AUTONOMOUS_VESC_COMMAND_TOPIC_NAME);
     let human_topic = captain.topic::<VescCommand>(HUMAN_VESC_COMMAND_TOPIC_NAME);
+    let joystick_topic = captain.try_topic::<VescCommand>(JOYSTICK_VESC_COMMAND_TOPIC_NAME);
     // Laps already on this line before the run - a placement keeps them.
     let baseline = lap_telemetry(captain).laps.len();
     let mut laps: Vec<LapResult> = Vec::new();
@@ -794,6 +796,9 @@ fn drive(
         if ctx.benchmark.aborted()
             || !captain.is_running(ctx.id)
             || human_drives(&human_topic.read())
+            || joystick_topic
+                .as_ref()
+                .is_some_and(|topic| human_drives(&topic.read()))
         {
             return Ok((RunStatus::AbortedByUser, laps));
         }
@@ -924,9 +929,9 @@ fn select_algorithm(ctx: &Orchestrator, name: &str, running: bool) {
         .expect("lost writer authorization for the autonomous_algorithm_selection topic");
 }
 
-/// Whether someone is driving with WASD: a fresh command that asks for
-/// anything - `web_gui` keeps re-sending a stationary one while no key is
-/// held.
+/// Whether someone is driving with WASD or the joystick: a fresh command
+/// that asks for anything - both keep re-sending a stationary one while no
+/// control is held.
 fn human_drives(command: &Stamped<VescCommand>) -> bool {
     command.value != VescCommand::default()
         && command

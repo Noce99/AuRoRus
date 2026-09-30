@@ -1,0 +1,38 @@
+# Configuration for `aurorus::sensors::Joystick`, driving the vehicle with a
+# gamepad as WASD does - publishing on joystick_vesc_command, which overrides
+# both WASD and the autonomous algorithm while the pad asks for anything.
+# The axis and button numbers are an Xbox 360 pad's under the kernel's xpad
+# driver - check another pad's with `jstest /dev/input/js0`.
+
+# The pad's Linux joystick device. /dev/input/by-id/...-joystick names one pad
+# for good; js0 is simply the first one plugged in.
+device = "/dev/input/js0"
+# How often the pad's state is published, in Hz.
+rate_hz = 50.0
+# How long to wait before reopening the pad after losing it (or not finding
+# it), in seconds.
+reconnect_delay_s = 1.0
+# Speed, in m/s, that a trigger pulled all the way commands - never more than
+# the vehicle's own limit. Full steering is always the vehicle's steering
+# lock.
+max_speed_mps = 3.0
+# How the triggers' travel maps to speed: 1.0 is linear, above 1.0 finer at
+# low speed.
+speed_exponent = 2.0
+# Steering axis: the left stick's x, right positive.
+steering_axis = 0
+# Forward axis: the right trigger.
+throttle_axis = 5
+# Reverse axis: the left trigger.
+reverse_axis = 2
+# Flips the steering axis, for a pad whose stick reads left positive.
+invert_steering = false
+# Stick travel ignored around the center, as a fraction of full travel - so a
+# stick that doesn't center perfectly never overrides the autonomous
+# algorithm.
+stick_deadzone = 0.1
+# Trigger travel ignored at rest, as a fraction of full travel.
+trigger_deadzone = 0.05
+# A button that must be held for the pad to drive at all (a dead man's
+# switch) - e.g. 4, the left bumper. Leave it out to drive without one.
+# deadman_button = 4

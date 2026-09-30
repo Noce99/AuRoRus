@@ -8,8 +8,9 @@ use aurorus::opponents::OpponentsManager;
 use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{
-    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, LidarMounting, MapServer, MapServerConfig,
-    SimulatedImu, SimulatedImuConfig, SimulatedLidar, SimulatedLidarConfig, WebGui, WebGuiConfig,
+    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, Joystick, JoystickConfig, LidarMounting,
+    MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
+    SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
 use aurorus::topics::VehicleModelKind;
@@ -67,6 +68,8 @@ fn main() {
     let hokuyo_lidar_config =
         aurorus::config::load(&config.config_dir.join("sensors/hokuyo_lidar.toml"))
             .unwrap_or_else(|_| HokuyoLidarConfig::default());
+    let joystick_config = aurorus::config::load(&config.config_dir.join("sensors/joystick.toml"))
+        .unwrap_or_else(|_| JoystickConfig::default());
     let simulated_imu_config =
         aurorus::config::load(&config.config_dir.join("sensors/simulated_imu.toml"))
             .unwrap_or_else(|_| SimulatedImuConfig::default());
@@ -110,6 +113,9 @@ fn main() {
         .boxed(),
     );
     runner.add_executor(MapServer::new("MapServer", map_server_config).boxed());
+    // A gamepad drives the car and the simulator alike - and is waited for
+    // if not plugged in.
+    runner.add_executor(Joystick::new("Joystick", joystick_config).boxed());
     // On a car: its sensors and actuators, and no simulated ones. The VESC
     // also stands in for the IMU dead reckoning integrates.
     if let Some(car) = hardware {

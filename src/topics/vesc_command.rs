@@ -4,7 +4,8 @@
 //! currently selected, forwarded by
 //! [`crate::autonomous_control::AutonomousControlsHandler`]) and
 //! [`HUMAN_VESC_COMMAND_TOPIC_NAME`] (a human driver, e.g. `web_gui`'s WASD
-//! control) - both sharing this same shape so any consumer reads them
+//! control) - and on a third, [`JOYSTICK_VESC_COMMAND_TOPIC_NAME`] (a human
+//! driving with a gamepad, see [`crate::sensors::Joystick`]) - all sharing this same shape so any consumer reads them
 //! identically. Every autonomous algorithm's own output (see
 //! [`crate::topics::AUTONOMOUS_CONTROL_TOPIC_PREFIX`]) has this shape too.
 
@@ -19,6 +20,11 @@ pub const AUTONOMOUS_VESC_COMMAND_TOPIC_NAME: &str = "autonomous_vesc_command";
 /// Name of the topic a human driver's desired steering/speed setpoint is
 /// published on, e.g. by `web_gui`'s WASD control.
 pub const HUMAN_VESC_COMMAND_TOPIC_NAME: &str = "human_vesc_command";
+/// Name of the topic [`crate::sensors::Joystick`] publishes a human driver's
+/// gamepad setpoint on - a topic of its own, since `web_gui` already writes
+/// [`HUMAN_VESC_COMMAND_TOPIC_NAME`]. Overrides that one, and the autonomous
+/// one, while the gamepad asks for anything.
+pub const JOYSTICK_VESC_COMMAND_TOPIC_NAME: &str = "joystick_vesc_command";
 
 /// How old a [`VescCommand`] may get before its consumer stops trusting it
 /// and falls back to a stationary, centered command - so a writer that
