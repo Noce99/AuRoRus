@@ -21,8 +21,8 @@ use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig, LidarMounting};
 use aurorus::topics::{LIDAR_SCAN_TOPIC_NAME, LidarScan};
 use aurorus::web::{bad_request, json_response, not_found, read_json, respond_and_close};
 use aurorus::{Executor, Runner};
-use bench::{Bench, MotorRequest};
-use session::{GeometryBody, Session};
+use bench::Bench;
+use session::{GeometryBody, HoldKind, Session};
 use tiny_http::{Method, Request, ResponseBox};
 
 fn main() {
@@ -43,7 +43,7 @@ fn main() {
     runner.run_all();
     let lidar = runner.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
 
-    let bench = Bench::start(vesc_config);
+    let bench = Bench::start(vesc_config, lidar.clone());
     let mut session = Session::new(config.config_dir.clone(), bench.clone(), lidar);
     let car = match config.car {
         Some(name) => Some(name),
@@ -126,7 +126,7 @@ struct Angles {
 #[derive(serde::Deserialize)]
 struct Hold {
     #[serde(flatten)]
-    request: MotorRequest,
+    request: HoldKind,
     /// A fresh press of the button - see [`Bench::hold`].
     start: bool,
 }
@@ -138,6 +138,15 @@ struct Forward {
 struct Turns {
     wheel_turns: f64,
     wheel_diameter_m: f64,
+}
+#[derive(serde::Deserialize)]
+struct Floor {
+    speed_mps: f64,
+    stop_m: f64,
+}
+#[derive(serde::Deserialize)]
+struct Index {
+    index: usize,
 }
 #[derive(serde::Deserialize)]
 struct Save {
@@ -178,6 +187,14 @@ fn post(
             session.set_gain(turns.wheel_turns, turns.wheel_diameter_m)
         }
         "/api/motor/apply_ramp" => session.apply_ramp(),
+        "/api/floor/settings" => {
+            let floor = read_json::<Floor>(request)?;
+            session.set_floor(floor.speed_mps, floor.stop_m)
+        }
+        "/api/floor/straight" => session.analyze_straight(),
+        "/api/floor/apply_straight" => session.apply_straight(),
+        "/api/floor/arc" => session.analyze_arc(read_json::<Index>(request)?.index),
+        "/api/floor/apply_arcs" => session.apply_arcs(),
         "/api/save" => session.save(read_json::<Save>(request)?.write_car_name),
         _ => return Err(not_found()),
     })

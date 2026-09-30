@@ -2,9 +2,10 @@
 //! calibration, what each step has measured so far - and the web API that
 //! drives it. Nothing is written until [`Session::save`].
 
-use crate::analysis::{self, RampResult, ScanHalf};
-use crate::bench::{Bench, ImuCapture, MAX_ERPM, MotorRequest, RAMP_ERPM};
+use crate::analysis::{self, RampResult, ScanHalf, StraightResult};
+use crate::bench::{Bench, FloorTest, ImuCapture, MAX_ERPM, MotorRequest, RAMP_ERPM};
 use aurorus::RwLockTopic;
+use aurorus::hardware::SteeringPoint;
 use aurorus::hardware::{self, CarCalibration, ImuMounting};
 use aurorus::topics::LidarScan;
 use serde_json::{Value, json};
@@ -18,6 +19,12 @@ use std::time::Duration;
 const IMU_CAPTURE: Duration = Duration::from_millis(1500);
 /// A lidar scan older than this counts as the lidar being away.
 const LIDAR_STALE: Duration = Duration::from_millis(500);
+/// How far a floor drive goes at most: straight at a wall, and one arc - in
+/// meters.
+const STRAIGHT_MAX_M: f64 = 5.0;
+const ARC_M: f64 = 2.5;
+/// The fastest floor drive, in meters/second.
+const FLOOR_MAX_SPEED_MPS: f64 = 1.0;
 
 /// One calibration - see the module docs.
 pub struct Session {
@@ -40,6 +47,15 @@ pub struct Session {
     /// Whether positive ERPM turned the wheels forward.
     motor_forward: Option<bool>,
     ramp_result: Option<RampResult>,
+    /// How fast the floor tests drive, in meters/second, and how far from
+    /// anything ahead they stop, in meters.
+    floor_speed_mps: f64,
+    stop_m: f64,
+    straight_result: Option<StraightResult>,
+    /// The servo positions the arcs are driven at - fixed at the first arc,
+    /// so its points stay comparable - and what each measured.
+    arc_servos: Option<Vec<f64>>,
+    arcs: Vec<Option<SteeringPoint>>,
     /// Where the last save went.
     saved_to: Option<PathBuf>,
 }
@@ -56,6 +72,18 @@ pub enum Step {
     Direction,
     Gain,
     Ramp,
+    Straight,
+    Arcs,
+}
+
+/// A hold-to-run request from the page - see [`Session::hold_motor`].
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HoldKind {
+    Spin { erpm: i32 },
+    Ramp,
+    Straight,
+    Arc { index: usize },
 }
 
 /// The steering marks' order in [`Session::steering_marks`].
@@ -77,6 +105,11 @@ impl Session {
             steering_marks: [None; 3],
             motor_forward: None,
             ramp_result: None,
+            floor_speed_mps: 0.6,
+            stop_m: 0.7,
+            straight_result: None,
+            arc_servos: None,
+            arcs: Vec::new(),
             saved_to: None,
         }
     }
@@ -97,6 +130,11 @@ impl Session {
             self.config_root.clone(),
             self.bench.clone(),
             self.lidar.clone(),
+        );
+        // Somewhat above the slowest the motor runs smoothly.
+        self.floor_speed_mps = round_to(
+            (draft.motor.min_speed_mps * 1.3).clamp(0.5, FLOOR_MAX_SPEED_MPS),
+            0.05,
         );
         self.original = original;
         self.draft = Some(draft);
@@ -281,12 +319,172 @@ impl Session {
         self.update(Step::Steering, |car| {
             car.steering = table;
             Ok(())
+        })?;
+        // A new range: the arcs start over.
+        self.arc_servos = None;
+        self.arcs.clear();
+        Ok(())
+    }
+
+    /// Keeps the motor doing `kind` - see [`Bench::hold`]. The floor drives'
+    /// servo, ERPM and distance come from the draft calibration.
+    pub fn hold_motor(&mut self, kind: HoldKind, start: bool) -> Result<(), String> {
+        let request = match kind {
+            HoldKind::Spin { erpm } => {
+                self.draft()?;
+                MotorRequest::Spin { erpm }
+            }
+            HoldKind::Ramp => {
+                self.draft()?;
+                MotorRequest::Ramp
+            }
+            HoldKind::Straight => {
+                let servo = self.draft()?.steering.straight_servo();
+                self.drive(FloorTest::Straight, servo, STRAIGHT_MAX_M)?
+            }
+            HoldKind::Arc { index } => {
+                let servo = *self
+                    .arc_servos()?
+                    .get(index)
+                    .ok_or_else(|| format!("there's no arc {index}"))?;
+                self.drive(FloorTest::Arc(index), servo, ARC_M)?
+            }
+        };
+        self.bench.hold(request, start)
+    }
+
+    /// A floor drive at `servo`, for `meters` at most.
+    fn drive(&mut self, test: FloorTest, servo: f64, meters: f64) -> Result<MotorRequest, String> {
+        let (speed_mps, stop_m) = (self.floor_speed_mps, self.stop_m);
+        let motor = self.draft()?.motor;
+        let erpm = (speed_mps * motor.speed_to_erpm_gain * motor.speed_compensation).round();
+        if erpm > f64::from(MAX_ERPM) {
+            return Err(format!(
+                "{speed_mps} m/s is over {MAX_ERPM} ERPM - drive slower"
+            ));
+        }
+        let steps_per_m =
+            motor.speed_to_erpm_gain / 60.0 * analysis::TACH_STEPS_PER_ELECTRICAL_TURN;
+        Ok(MotorRequest::Drive {
+            test,
+            servo,
+            erpm: erpm as i32,
+            max_steps: (meters * steps_per_m).round() as i64,
+            stop_m,
         })
     }
 
-    pub fn hold_motor(&mut self, request: MotorRequest, start: bool) -> Result<(), String> {
-        self.draft()?;
-        self.bench.hold(request, start)
+    /// The arcs' servo positions - planned from the draft's steering table
+    /// the first time they're asked for.
+    fn arc_servos(&mut self) -> Result<&Vec<f64>, String> {
+        if self.arc_servos.is_none() {
+            let servos = analysis::arc_servos(&self.draft()?.steering);
+            self.arcs = vec![None; servos.len()];
+            self.arc_servos = Some(servos);
+        }
+        Ok(self.arc_servos.as_ref().expect("just planned"))
+    }
+
+    pub fn set_floor(&mut self, speed_mps: f64, stop_m: f64) -> Result<(), String> {
+        let min = self.draft()?.motor.min_speed_mps;
+        if !(min..=FLOOR_MAX_SPEED_MPS).contains(&speed_mps) {
+            return Err(format!(
+                "drive between the car's minimum speed ({min} m/s) and {FLOOR_MAX_SPEED_MPS} m/s"
+            ));
+        }
+        if !(0.3..=2.0).contains(&stop_m) {
+            return Err("stop between 0.3 and 2 m from anything ahead".to_string());
+        }
+        self.floor_speed_mps = speed_mps;
+        self.stop_m = stop_m;
+        Ok(())
+    }
+
+    /// The last floor drive, if it was `test` and the car has stopped since.
+    fn finished_drive(&self, test: FloorTest) -> Result<crate::bench::DriveRun, String> {
+        let bench = self.bench.state();
+        let drive = bench
+            .drive
+            .clone()
+            .filter(|drive| drive.test == test)
+            .ok_or("drive it first")?;
+        if drive.stop_reason.is_none() || !bench.motor_stopped() {
+            return Err("wait for the car to stop".to_string());
+        }
+        Ok(drive)
+    }
+
+    /// Works out the last drive straight at a wall - see
+    /// [`analysis::straight_result`]. Only shown until applied.
+    pub fn analyze_straight(&mut self) -> Result<(), String> {
+        let drive = self.finished_drive(FloorTest::Straight)?;
+        let start_m = drive
+            .start_ahead_m
+            .ok_or("the lidar saw no wall ahead at the start")?;
+        let end_m = self
+            .bench
+            .distance_ahead_m()
+            .ok_or("the lidar sees no wall ahead now")?;
+        let tachometer = self
+            .bench
+            .state()
+            .values
+            .as_ref()
+            .ok_or("no reading from the VESC")?
+            .tachometer;
+        let steps = i64::from(tachometer) - i64::from(drive.start_tachometer);
+        let car = self.draft()?.clone();
+        self.straight_result = Some(analysis::straight_result(
+            start_m,
+            end_m,
+            steps,
+            &drive.samples,
+            drive.gyro_bias_deg_s,
+            &car,
+        )?);
+        Ok(())
+    }
+
+    /// Sets the speed gain and the straight servo position from the drive
+    /// straight at a wall.
+    pub fn apply_straight(&mut self) -> Result<(), String> {
+        let result = self.straight_result.ok_or("work out a drive first")?;
+        let table = analysis::with_straight(&self.draft()?.steering, result.straight_servo)?;
+        self.update(Step::Straight, |car| {
+            car.motor.speed_to_erpm_gain = round_to(result.speed_to_erpm_gain, 1.0);
+            car.steering = table;
+            Ok(())
+        })?;
+        self.straight_result = None;
+        Ok(())
+    }
+
+    /// Works out the last drive of the arc `index` - see
+    /// [`analysis::arc_point`].
+    pub fn analyze_arc(&mut self, index: usize) -> Result<(), String> {
+        let drive = self.finished_drive(FloorTest::Arc(index))?;
+        let car = self.draft()?.clone();
+        let point = analysis::arc_point(drive.servo, &drive.samples, drive.gyro_bias_deg_s, &car)?;
+        let arcs = &mut self.arcs;
+        *arcs
+            .get_mut(index)
+            .ok_or_else(|| format!("there's no arc {index}"))? = Some(point);
+        Ok(())
+    }
+
+    /// Replaces the steering table with the one the arcs measured.
+    pub fn apply_arcs(&mut self) -> Result<(), String> {
+        let arcs: Vec<SteeringPoint> = self.arcs.iter().flatten().copied().collect();
+        let draft = self.draft()?;
+        let table = analysis::table_from_arcs(
+            &arcs,
+            draft.steering.straight_servo(),
+            draft.steering.servo_range(),
+        )?;
+        self.update(Step::Arcs, |car| {
+            car.steering = table;
+            Ok(())
+        })
     }
 
     pub fn stop_motor(&mut self) {
@@ -373,6 +571,60 @@ impl Session {
         Ok(())
     }
 
+    /// The floor tests' part of [`Self::state`].
+    fn floor_state(&self, bench: &crate::bench::BenchState) -> Value {
+        // Whether the lowest servo positions steer left (the first car's).
+        let low_is_left = self
+            .draft
+            .as_ref()
+            .is_none_or(|car| car.steering.points[0].angle_rad < 0.0);
+        let planned = self
+            .arc_servos
+            .clone()
+            .or_else(|| {
+                self.draft
+                    .as_ref()
+                    .map(|car| analysis::arc_servos(&car.steering))
+            })
+            .unwrap_or_default();
+        let half = planned.len() / 2;
+        let arcs: Vec<Value> = planned
+            .iter()
+            .enumerate()
+            .map(|(i, &servo)| {
+                let fraction =
+                    analysis::ARC_FRACTIONS[if i < half { half - 1 - i } else { i - half }];
+                let point = self.arcs.get(i).copied().flatten();
+                json!({
+                    "servo": servo,
+                    "side": if (i < half) == low_is_left { "left" } else { "right" },
+                    "fraction": fraction,
+                    "angle_rad": point.map(|p| p.angle_rad),
+                })
+            })
+            .collect();
+        let drive = bench.drive.as_ref().map(|drive| {
+            let driven = bench.values.as_ref().map(|values| {
+                (i64::from(values.tachometer) - i64::from(drive.start_tachometer)).abs()
+            });
+            json!({
+                "test": drive.test,
+                "stop_reason": drive.stop_reason,
+                "completed": drive.completed,
+                "driven_steps": driven,
+            })
+        });
+        json!({
+            "speed_mps": self.floor_speed_mps,
+            "stop_m": self.stop_m,
+            "ahead_m": self.bench.distance_ahead_m(),
+            "drive": drive,
+            "straight_result": self.straight_result,
+            "arcs": arcs,
+            "wheelbase_m": self.draft.as_ref().map(|car| car.geometry.wheelbase_m),
+        })
+    }
+
     /// Everything the page shows.
     pub fn state(&self) -> Value {
         let bench = self.bench.state();
@@ -441,6 +693,7 @@ impl Session {
             "ramp": bench.ramp.clone().unwrap_or_default(),
             "ramp_result": self.ramp_result,
             "limits": { "max_erpm": MAX_ERPM, "ramp_erpm": RAMP_ERPM },
+            "floor": self.floor_state(&bench),
         })
     }
 }

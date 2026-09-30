@@ -288,7 +288,8 @@ button:disabled {
   color: var(--muted);
 }
 
-.bench.locked {
+.bench.locked,
+.floor.locked {
   opacity: 0.45;
   pointer-events: none;
 }

@@ -182,11 +182,80 @@ function render(next) {
   $("compensation").textContent = fmt(draft.motor.speed_compensation, 3);
   $("min-speed").textContent = fmt(draft.motor.min_speed_mps, 2);
 
+  // Floor.
+  renderFloor(state.floor, draft);
+
   // Review.
   renderChanges(car.changes);
   const carNameBox = $("write-car-name");
   if (!carNameBox.dataset.touched) carNameBox.checked = !state.car_name_file || state.car_name_file === car.name;
   $("saved").textContent = car.saved_to ? `Saved to ${car.saved_to}.` : "";
+}
+
+function renderFloor(floor, draft) {
+  $("ahead").textContent = floor.ahead_m == null ? "no wall seen" : `${fmt(floor.ahead_m, 2)} m`;
+  const drive = floor.drive;
+  const perMeter = (draft.motor.speed_to_erpm_gain / 60) * 6;
+  $("drive-status").textContent = drive
+    ? `Last drive: ${drive.test.kind === "straight" ? "straight" : "arc " + (drive.test.index + 1)}, ` +
+      `${fmt((drive.driven_steps ?? 0) / perMeter, 2)} m` +
+      (drive.stop_reason ? ` - ${drive.stop_reason}` : " - driving...")
+    : "";
+  const result = floor.straight_result;
+  $("straight-result").hidden = !result;
+  if (result) {
+    $("sr-distance").textContent = fmt(result.distance_m, 2);
+    $("sr-gain").textContent = fmt(result.speed_to_erpm_gain, 0);
+    $("sr-gain-was").textContent = fmt(draft.motor.speed_to_erpm_gain, 0);
+    const k = result.curvature_per_m;
+    $("sr-curve").textContent =
+      Math.abs(k) < 0.01 ? "hardly at all" : `${k > 0 ? "right" : "left"}, radius ${fmt(1 / Math.abs(k), 1)} m`;
+    $("sr-straight").textContent = fmt(result.straight_servo);
+    const straight = draft.steering.points.find((p) => p.angle_rad === 0);
+    $("sr-straight-was").textContent = straight ? fmt(straight.servo) : "-";
+  }
+
+  const body = $("arcs").querySelector("tbody");
+  const key = floor.arcs.map((arc) => arc.servo).join(",");
+  if (body.dataset.key !== key) {
+    body.dataset.key = key;
+    body.replaceChildren(
+      ...floor.arcs.map((arc, index) => {
+        const row = document.createElement("tr");
+        const hold = document.createElement("button");
+        hold.type = "button";
+        hold.className = "hold";
+        hold.textContent = "HOLD to drive";
+        holdToRun(hold, () => ({ kind: "arc", index }), "floor-check");
+        const analyze = document.createElement("button");
+        analyze.type = "button";
+        analyze.textContent = "Work it out";
+        analyze.onclick = () => step("/api/floor/arc", { index });
+        const cells = [
+          `${arc.side} ${Math.round(arc.fraction * 100)}%`,
+          fmt(arc.servo),
+          hold,
+          analyze,
+          "",
+          "",
+        ];
+        for (const content of cells) {
+          const cell = document.createElement("td");
+          cell.append(content);
+          row.append(cell);
+        }
+        return row;
+      }),
+    );
+  }
+  floor.arcs.forEach((arc, index) => {
+    const cells = body.children[index].children;
+    const angle = arc.angle_rad;
+    cells[4].textContent = angle == null ? "-" : `${fmt(deg(angle), 1)}°`;
+    cells[5].textContent =
+      angle == null || Math.abs(angle) < 1e-3 ? "-" : `${fmt(floor.wheelbase_m / Math.tan(Math.abs(angle)), 2)} m`;
+  });
+  $("steering-table-floor").textContent = $("steering-table").textContent;
 }
 
 function renderRamp(ramp) {
@@ -267,6 +336,8 @@ function fillForms(draft) {
   $("lock-right").value = right ? fmt(deg(right.angle_rad), 1) : "";
   const straight = points.find((p) => p.angle_rad === 0);
   if (straight) $("servo").value = straight.servo;
+  $("floor-speed").value = state.floor.speed_mps;
+  $("floor-stop").value = state.floor.stop_m;
 }
 
 // ---------------------------------------------------------------------
@@ -351,6 +422,16 @@ $("gain-btn").onclick = () =>
   );
 $("ramp-apply-btn").onclick = () => step("/api/motor/apply_ramp", {}, "Minimum speed and compensation set.");
 
+$("floor-settings-btn").onclick = () =>
+  step(
+    "/api/floor/settings",
+    { speed_mps: Number($("floor-speed").value), stop_m: Number($("floor-stop").value) },
+    "Set.",
+  );
+$("straight-analyze-btn").onclick = () => step("/api/floor/straight", {});
+$("straight-apply-btn").onclick = () => step("/api/floor/apply_straight", {}, "Speed per ERPM and straight set.");
+$("arcs-apply-btn").onclick = () => step("/api/floor/apply_arcs", {}, "Steering table set from the arcs.");
+
 $("write-car-name").onchange = (event) => {
   event.target.dataset.touched = "1";
 };
@@ -366,18 +447,22 @@ function stopMotor() {
   api("/api/motor/stop", {}).then(render, () => {});
 }
 
-/** Makes `button` hold-to-run: `request()` is what the motor is asked. */
-function holdToRun(button, request) {
+/**
+ * Makes `button` hold-to-run: `request()` is what the motor is asked, and
+ * only while the checkbox `gate` is ticked.
+ */
+function holdToRun(button, request, gate = "off-ground-check") {
   let timer = null;
   const send = (start) =>
     api("/api/motor/hold", { ...request(), start }).then(render, (err) => {
       release();
-      // The ramp finishing while held isn't a problem.
-      if (!state?.ramp?.finished || request().kind !== "ramp") showMessage(err.message);
+      // The ramp or a drive finishing while held isn't a problem - the
+      // page says why it stopped.
+      if (!err.message.startsWith("stopped - press again")) showMessage(err.message);
     });
   const press = (event) => {
     event.preventDefault();
-    if (timer || !$("off-ground-check").checked) return;
+    if (timer || !$(gate).checked) return;
     showMessage(null);
     button.classList.add("holding");
     button.setPointerCapture?.(event.pointerId);
@@ -401,6 +486,7 @@ const spinErpm = () => Math.round(Number($("spin-erpm").value));
 holdToRun($("spin-btn"), () => ({ kind: "spin", erpm: spinErpm() }));
 holdToRun($("count-spin-btn"), () => ({ kind: "spin", erpm: spinErpm() }));
 holdToRun($("ramp-btn"), () => ({ kind: "ramp" }));
+holdToRun($("straight-btn"), () => ({ kind: "straight" }), "floor-check");
 
 const releaseAll = () => releases.forEach((release) => release());
 $("stop-btn").onclick = () => {
@@ -412,13 +498,19 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) releaseAll();
 });
 
-// The steps that move the car stay locked until it's on a stand.
-function lockBench() {
-  const unlocked = $("off-ground-check").checked;
-  for (const section of document.querySelectorAll(".bench")) section.classList.toggle("locked", !unlocked);
-  if (!unlocked) releaseAll();
+// The steps that move the car stay locked until it's on a stand - or, for
+// the floor tests, on the floor: never both at once.
+function lockSteps(changed) {
+  const bench = $("off-ground-check");
+  const floor = $("floor-check");
+  if (changed === bench && bench.checked) floor.checked = false;
+  if (changed === floor && floor.checked) bench.checked = false;
+  for (const section of document.querySelectorAll(".bench")) section.classList.toggle("locked", !bench.checked);
+  for (const section of document.querySelectorAll(".floor")) section.classList.toggle("locked", !floor.checked);
+  releaseAll();
 }
-$("off-ground-check").onchange = lockBench;
-lockBench();
+$("off-ground-check").onchange = (event) => lockSteps(event.target);
+$("floor-check").onchange = (event) => lockSteps(event.target);
+lockSteps(null);
 
 poll();

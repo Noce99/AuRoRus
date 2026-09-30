@@ -151,8 +151,42 @@
     <p class="note">In the calibration: compensation <b id="compensation"></b>, minimum speed <b id="min-speed"></b> m/s</p>
   </section>
 
+  <div class="warning" id="on-floor">
+    <label><input type="checkbox" id="floor-check" /> The car is <b>on the floor</b> with at least 4 &times; 4 m clear, and I'm next to it.</label>
+    <p>These drive the car by itself while you hold <span class="hold-sample">HOLD</span>. It also stops by itself once it has driven its distance, when the lidar sees anything within the stop distance ahead, or if the lidar goes quiet. Needs the steps above done first: the IMU, the speed per ERPM and a steering range.</p>
+  </div>
+
+  <section class="step floor" data-step="straight">
+    <h2>10. Straight at a wall <span class="badge"></span></h2>
+    <div class="grid">
+      <label>Speed, m/s<input type="number" step="0.05" id="floor-speed" /></label>
+      <label>Stop this far from anything ahead, m<input type="number" step="0.05" id="floor-stop" /></label>
+    </div>
+    <button type="button" id="floor-settings-btn">Set</button>
+    <p>Lidar, straight ahead: <b id="ahead">-</b></p>
+    <ol class="actions">
+      <li>Put the car 2.5 to 4 m from a wall, square to it, with the wheels straight.</li>
+      <li><button type="button" class="hold" id="straight-btn">HOLD to drive at the wall</button> - it stops by itself at the stop distance.</li>
+      <li><button type="button" id="straight-analyze-btn">Work it out</button></li>
+    </ol>
+    <p class="live" id="drive-status"></p>
+    <div id="straight-result" hidden>
+      <p>Drove <b id="sr-distance"></b> m. Speed per ERPM <b id="sr-gain"></b> (was <span id="sr-gain-was"></span>). It curved <b id="sr-curve"></b>; straight is servo <b id="sr-straight"></b> (was <span id="sr-straight-was"></span>).</p>
+      <button type="button" id="straight-apply-btn">Use it</button>
+      <p class="note">Drive it again after using it: once it hardly curves, straight is right.</p>
+    </div>
+  </section>
+
+  <section class="step floor" data-step="arcs">
+    <h2>11. Steering angles <span class="badge"></span></h2>
+    <p>Each arc drives 2.5 m with the servo fixed, measuring how sharply the car turns. Start each one with 3 m clear ahead and to the side it turns. Both full-lock arcs are needed; the others refine the table.</p>
+    <table id="arcs"><thead><tr><th>Side</th><th>Servo</th><th></th><th></th><th>Angle</th><th>Radius</th></tr></thead><tbody></tbody></table>
+    <button type="button" id="arcs-apply-btn">Use these as the steering table</button>
+    <p class="note">In the calibration: <span id="steering-table-floor"></span></p>
+  </section>
+
   <section class="step" id="step-save">
-    <h2>10. Review and save</h2>
+    <h2>12. Review and save</h2>
     <p id="changes-empty">Nothing changed yet.</p>
     <table id="changes"><thead><tr><th>Value</th><th>Was</th><th>Now</th></tr></thead><tbody></tbody></table>
     <label class="inline"><input type="checkbox" id="write-car-name" /> This machine drives this car (write <code>CAR_NAME</code>)</label>

@@ -1,6 +1,6 @@
 # Car calibration (design notes)
 
-Status: **being built** (discussed 2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/<car>.toml`, `config/car_template.toml`), `CAR_NAME`, `web_gui --sim`/`--car`, the `vehicle_geometry` topic everything reads (the simulation simulates the named car, else the template), and `car_calibration` steps 0-4 and 6 below (everything but the floor tests). Next: the floor tests (step 5).
+Status: **v1 complete, floor tests untried on the car** (2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/<car>.toml`, `config/car_template.toml`), `CAR_NAME`, `web_gui --sim`/`--car`, the `vehicle_geometry` topic everything reads (the simulation simulates the named car, else the template), and every `car_calibration` step below, floor tests included.
 
 ## Using it
 
@@ -14,8 +14,15 @@ through: car, battery cells, tape and scale measurements, IMU mounting
 (flat / nose up / left side up), lidar direction (empty / object on the
 left), then - on a stand, wheels off the ground - the servo range, motor
 direction, speed per ERPM (counting wheel turns) and the ERPM ramp
-(minimum speed and compensation), and finally a review of every changed
-value and Save. The motor only turns while a HOLD button is held (a
+(minimum speed and compensation), then - on the floor, 4 x 4 m clear - a drive
+straight at a wall (the lidar's distance vs the tachometer: speed per ERPM;
+the gyro's yaw while cruising: the straight servo position) and eight 2.5 m
+arcs at a quarter, half, three quarters and full lock each way (yaw rate /
+speed = curvature, `atan(wheelbase * curvature)` = the steering angle: the
+steering table), and finally a review of every changed value and Save.
+Floor drives also stop by themselves: at the stop distance from anything
+the lidar sees within 35 degrees ahead, if the lidar goes quiet, at their
+distance, or after 20 s. The motor only turns while a HOLD button is held (a
 request every 100 ms; the server brakes 300 ms after the last), a lapse
 never restarts it, and the big STOP button stops it at once. Code:
 `src/bin/car_calibration/` - `analysis.rs` (the maths, tested), `bench.rs`

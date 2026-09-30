@@ -1,60 +1,69 @@
-# The hardware calibration of the car "tom" - see src/hardware.rs for what
-# each value means. Older ones are in config/hardware/history/tom/
-# (gitignored). Positive y and angles are the car's right everywhere.
-#
-# Migrated by hand from config/actuators/vesc.toml and
-# config/sensors/hokuyo_lidar.toml, before car_calibration existed: values
-# marked "placeholder" were never measured on this car.
+# The hardware calibration of the car "tom", written by car_calibration -
+# see src/hardware.rs for what each value means. Older ones are in
+# config/hardware/history/tom/ (gitignored).
 
 schema_version = 1
 name = "tom"
-calibrated_at = "2026-09-30 00:00:00"
+calibrated_at = "2026-09-30 21:23:56"
 
 [geometry]
-# Measured with a tape.
-wheelbase_m = 0.325
-# Placeholder (the simulator's lr_m) - weigh each axle to measure it.
+wheelbase_m = 0.33
 rear_axle_to_cg_m = 0.16
-# Placeholder (the simulator's two_track value).
-track_width_m = 0.2
-# Placeholders (the size the GUI has always drawn).
-body_length_m = 0.45
-body_width_m = 0.25
-# Placeholder (the simulator's value).
+track_width_m = 0.25
+body_length_m = 0.47
+body_width_m = 0.29
 mass_kg = 3.5
 
-[steering]
-# Servo position -> steering angle, measured on the bench, wheels off the
-# ground: straight at 0.50, ends 0.17/0.83 (end stops near 0.15/0.85) at
-# about 27.2 degrees. A floor test at full left lock gave only ~0.31 rad
-# effective - to be re-measured with car_calibration's circles.
-points = [
-    { servo = 0.17, angle_rad = -0.475 },
-    { servo = 0.50, angle_rad = 0.0 },
-    { servo = 0.83, angle_rad = 0.475 },
-]
+[[steering.points]]
+servo = 0.14500000000000002
+angle_rad = -0.33711913381760084
+
+[[steering.points]]
+servo = 0.22112266691357715
+angle_rad = -0.27160165161631156
+
+[[steering.points]]
+servo = 0.2972453338271543
+angle_rad = -0.17252007960095464
+
+[[steering.points]]
+servo = 0.3733680007407314
+angle_rad = -0.0779007612519361
+
+[[steering.points]]
+servo = 0.44949066765430856
+angle_rad = 0.0
+
+[[steering.points]]
+servo = 0.5871180007407314
+angle_rad = 0.16118695593293983
+
+[[steering.points]]
+servo = 0.7247453338271543
+angle_rad = 0.3293023997491553
+
+[[steering.points]]
+servo = 0.8623726669135772
+angle_rad = 0.42945402250062037
+
+[[steering.points]]
+servo = 1.0
+angle_rad = 0.48800282717109805
 
 [motor]
-# 366 electrical turns for 16 turns of a 9 cm wheel (positive ERPM = forward).
-speed_to_erpm_gain = 4854.0
-# The VESC's speed controller settles about 15% short (2500 -> ~2150 ERPM).
-speed_compensation = 1.16
-# The motor stalls at 1000 ERPM but holds ~2150 (0.44 m/s) smoothly.
-min_speed_mps = 0.45
+speed_to_erpm_gain = 4691.0
+speed_compensation = 1.133
+min_speed_mps = 0.44
 
 [battery]
 cells = 4
 
 [imu]
-# The VESC is mounted rotated 90 degrees: its x points to the car's left,
-# its y backwards, its z up - measured by tilting it.
 x = "-y"
 y = "-x"
 z = "-z"
 
 [lidar]
-# The Hokuyo sends its right-most reading first as mounted.
 upside_down = true
-# Placeholder: at the center of gravity, as always assumed so far.
-x_from_rear_axle_m = 0.16
+x_from_rear_axle_m = 0.29
 y_m = 0.0
