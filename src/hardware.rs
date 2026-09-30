@@ -308,8 +308,33 @@ impl ImuAxis {
         sign * v[self.index()]
     }
 
+    /// The IMU's axis `index` (0, 1 or 2 for x, y, z), `positive` or
+    /// reversed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` isn't 0, 1 or 2.
+    pub fn new(index: usize, positive: bool) -> Self {
+        match (index, positive) {
+            (0, true) => Self::PlusX,
+            (0, false) => Self::MinusX,
+            (1, true) => Self::PlusY,
+            (1, false) => Self::MinusY,
+            (2, true) => Self::PlusZ,
+            (2, false) => Self::MinusZ,
+            _ => panic!("an IMU has no axis {index}"),
+        }
+    }
+
+    /// This axis as a unit vector in the IMU's axes.
+    pub fn unit(self) -> [f64; 3] {
+        let mut v = [0.0; 3];
+        v[self.index()] = self.of([1.0, 1.0, 1.0]);
+        v
+    }
+
     /// Which of the IMU's axes, whichever way: 0, 1 or 2.
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             Self::PlusX | Self::MinusX => 0,
             Self::PlusY | Self::MinusY => 1,

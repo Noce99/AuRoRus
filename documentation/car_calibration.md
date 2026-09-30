@@ -1,6 +1,25 @@
 # Car calibration (design notes)
 
-Status: **being built** (discussed 2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/tom.toml`, `config/car_template.toml`), `CAR_NAME`, the Vesc (steering lookup table) and lidar reading it, `web_gui --sim`/`--car`; the `vehicle_geometry` topic every algorithm, dead reckoning, SLAM, the planner and the simulation read (the simulation simulates the named car, else the template). Next: the `car_calibration` binary.
+Status: **being built** (discussed 2026-09-30). Done: the car file (`src/hardware.rs`, `config/hardware/<car>.toml`, `config/car_template.toml`), `CAR_NAME`, `web_gui --sim`/`--car`, the `vehicle_geometry` topic everything reads (the simulation simulates the named car, else the template), and `car_calibration` steps 0-4 and 6 below (everything but the floor tests). Next: the floor tests (step 5).
+
+## Using it
+
+```
+cargo run --release --bin car_calibration        # then open http://<car>:1996
+```
+
+Calibrates the car `--car NAME` or `CAR_NAME` names, or one named on the
+page. Stop `web_gui` first: both need the VESC's port. The page walks
+through: car, battery cells, tape and scale measurements, IMU mounting
+(flat / nose up / left side up), lidar direction (empty / object on the
+left), then - on a stand, wheels off the ground - the servo range, motor
+direction, speed per ERPM (counting wheel turns) and the ERPM ramp
+(minimum speed and compensation), and finally a review of every changed
+value and Save. The motor only turns while a HOLD button is held (a
+request every 100 ms; the server brakes 300 ms after the last), a lapse
+never restarts it, and the big STOP button stops it at once. Code:
+`src/bin/car_calibration/` - `analysis.rs` (the maths, tested), `bench.rs`
+(the VESC thread), `session.rs` (the draft and the API).
 
 The goal is a guided `car_calibration` binary that measures every hardware
 parameter of a car, so the stack can be installed on a new car (different

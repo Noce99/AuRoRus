@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Car Calibration</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header id="top">
+  <div id="top-row">
+    <h1>Car calibration <span id="car-title"></span></h1>
+    <button id="stop-btn" type="button" title="Stop the motor now">STOP</button>
+  </div>
+  <div id="chips">
+    <span class="chip" id="chip-vesc">VESC</span>
+    <span class="chip" id="chip-lidar">Lidar</span>
+    <span class="chip" id="chip-battery">Battery</span>
+    <span class="chip" id="chip-motor">Motor stopped</span>
+  </div>
+  <p id="message" hidden></p>
+</header>
+
+<main>
+  <section class="step" id="step-car">
+    <h2>1. Car</h2>
+    <p>Which car is this? A new name starts from the template; an existing one starts from its last calibration. Nothing is written until you save at the end.</p>
+    <div class="row">
+      <input id="car-name" list="known-cars" placeholder="e.g. tom" autocomplete="off" />
+      <datalist id="known-cars"></datalist>
+      <button type="button" id="car-btn">Calibrate this car</button>
+    </div>
+    <p class="note" id="car-note"></p>
+  </section>
+
+  <div id="steps" hidden>
+  <section class="step" data-step="battery">
+    <h2>2. Battery <span class="badge"></span></h2>
+    <p>Its voltage says how many LiPo cells it has. A full 3S and an empty 4S look alike, so check the cells written on the battery.</p>
+    <p>Reading <b id="battery-voltage">-</b>. Could be: <span id="battery-options"></span></p>
+    <p class="note">In the calibration: <b id="battery-cells"></b> cells.</p>
+  </section>
+
+  <section class="step" data-step="geometry">
+    <h2>3. Measurements <span class="badge"></span></h2>
+    <p>With a tape measure, in meters. Weigh each axle (kitchen scale under the front wheels, then the rear) to find where the center of gravity is; or give its distance and the mass directly.</p>
+    <div class="grid">
+      <label>Wheelbase (axle to axle)<input type="number" step="0.001" id="g-wheelbase_m" /></label>
+      <label>Track width (wheel center to wheel center)<input type="number" step="0.001" id="g-track_width_m" /></label>
+      <label>Body length (bumpers included)<input type="number" step="0.001" id="g-body_length_m" /></label>
+      <label>Body width (wheels included)<input type="number" step="0.001" id="g-body_width_m" /></label>
+      <label>Front axle load, kg<input type="number" step="0.01" id="g-front_axle_kg" placeholder="optional" /></label>
+      <label>Rear axle load, kg<input type="number" step="0.01" id="g-rear_axle_kg" placeholder="optional" /></label>
+      <label>Or: CG ahead of the rear axle<input type="number" step="0.001" id="g-rear_axle_to_cg_m" /></label>
+      <label>Or: mass, kg<input type="number" step="0.01" id="g-mass_kg" /></label>
+      <label>Lidar center ahead of the rear axle<input type="number" step="0.001" id="g-lidar_x_from_rear_axle_m" /></label>
+      <label>Lidar center right of the centerline (left: negative)<input type="number" step="0.001" id="g-lidar_y_m" /></label>
+    </div>
+    <button type="button" id="geometry-btn">Use these measurements</button>
+  </section>
+
+  <section class="step" data-step="imu">
+    <h2>4. IMU mounting <span class="badge"></span></h2>
+    <p>Finds how the VESC is mounted from gravity. Each capture needs the car held still for two seconds: <span id="imu-still" class="pill">-</span></p>
+    <p class="live" id="imu-live">-</p>
+    <ol class="actions">
+      <li>On a flat floor, untouched. <button type="button" data-imu="flat">Capture flat</button> <span class="tick" id="imu-flat"></span></li>
+      <li>Lift the nose a hand's width, back wheels on the floor. <button type="button" data-imu="nose_up">Capture nose up</button> <span class="tick" id="imu-nose_up"></span></li>
+      <li>Check: lift the LEFT side (driver's left, facing forward). <button type="button" data-imu="left_up">Capture left side up</button> <span class="tick" id="imu-left_up"></span></li>
+    </ol>
+    <p class="note">In the calibration: x = <b id="imu-x"></b>, y = <b id="imu-y"></b>, z = <b id="imu-z"></b></p>
+  </section>
+
+  <section class="step" data-step="lidar">
+    <h2>5. Lidar <span class="badge"></span></h2>
+    <p>Finds which way round the lidar sends its readings.</p>
+    <ol class="actions">
+      <li>Clear a meter around the car. <button type="button" data-lidar="baseline">Capture empty</button> <span class="tick" id="lidar-baseline"></span></li>
+      <li>Hold a box or your hand half a meter from the car's LEFT side. <button type="button" data-lidar="object">Capture with object</button></li>
+    </ol>
+    <p class="note">In the calibration: upside down = <b id="lidar-upside"></b></p>
+  </section>
+
+  <div class="warning" id="off-ground">
+    <label><input type="checkbox" id="off-ground-check" /> The car is on a stand: <b>all four wheels off the ground</b>, nothing near them.</label>
+    <p>The steps below move the servo and spin the motor. The motor only turns while you hold a <span class="hold-sample">HOLD</span> button, and stops as soon as you let go.</p>
+  </div>
+
+  <section class="step bench" data-step="steering">
+    <h2>6. Steering range <span class="badge"></span></h2>
+    <p>Move the servo and mark full left, straight and full right: just short of where the steering hits its end stops.</p>
+    <div class="row">
+      <input type="range" id="servo" min="0" max="1" step="0.005" value="0.5" />
+      <b id="servo-value">-</b>
+    </div>
+    <div class="row">
+      <button type="button" data-nudge="-0.01">-0.01</button>
+      <button type="button" data-nudge="-0.002">-0.002</button>
+      <button type="button" data-nudge="0.002">+0.002</button>
+      <button type="button" data-nudge="0.01">+0.01</button>
+    </div>
+    <div class="row">
+      <button type="button" data-mark="left">Full LEFT <span id="mark-left"></span></button>
+      <button type="button" data-mark="straight">Straight <span id="mark-straight"></span></button>
+      <button type="button" data-mark="right">Full RIGHT <span id="mark-right"></span></button>
+    </div>
+    <p>Angle at full lock, in degrees - measured with a protractor (the mean of the inner and outer wheel), or a guess: the floor test will measure it for real.</p>
+    <div class="grid">
+      <label>Full left<input type="number" step="0.1" id="lock-left" /></label>
+      <label>Full right<input type="number" step="0.1" id="lock-right" /></label>
+    </div>
+    <button type="button" id="steering-btn">Use this steering range</button>
+    <p class="note">In the calibration: <span id="steering-table"></span></p>
+  </section>
+
+  <section class="step bench" data-step="direction">
+    <h2>7. Motor direction <span class="badge"></span></h2>
+    <label class="inline">Spin at <input type="number" id="spin-erpm" value="2500" step="100" /> ERPM</label>
+    <div class="row">
+      <button type="button" class="hold" id="spin-btn">HOLD to spin</button>
+      <span class="live" id="erpm-live">-</span>
+    </div>
+    <div class="row">
+      <button type="button" data-direction="true">Wheels turned forward</button>
+      <button type="button" data-direction="false">They turned backward</button>
+    </div>
+  </section>
+
+  <section class="step bench" data-step="gain">
+    <h2>8. Speed per ERPM <span class="badge"></span></h2>
+    <ol class="actions">
+      <li>Mark a rear wheel, then <button type="button" id="counter-btn">Zero the counter</button></li>
+      <li>Hold <button type="button" class="hold" id="count-spin-btn">HOLD to spin</button> and count the marked wheel's turns - 15 or more. Let it stop by itself.</li>
+      <li>Counted: <b id="counted">-</b> electrical turns.</li>
+    </ol>
+    <div class="grid">
+      <label>Wheel turns counted<input type="number" step="0.25" id="wheel-turns" /></label>
+      <label>Wheel diameter, m<input type="number" step="0.001" id="wheel-diameter" /></label>
+    </div>
+    <button type="button" id="gain-btn">Compute</button>
+    <p class="note">In the calibration: <b id="gain"></b> ERPM per m/s</p>
+  </section>
+
+  <section class="step bench" data-step="ramp">
+    <h2>9. Minimum speed and compensation <span class="badge"></span></h2>
+    <p>Steps the motor through <span id="ramp-erpms"></span> ERPM, finding where it runs smoothly and how short of the command it settles. Hold for the whole ramp (about <span id="ramp-seconds"></span> s).</p>
+    <button type="button" class="hold" id="ramp-btn">HOLD to run the ramp</button>
+    <table id="ramp-table"><thead><tr><th>Commanded</th><th>Measured</th><th>Wandered</th><th></th></tr></thead><tbody></tbody></table>
+    <p class="note" id="ramp-status"></p>
+    <button type="button" id="ramp-apply-btn">Use the ramp's result</button>
+    <p class="note">In the calibration: compensation <b id="compensation"></b>, minimum speed <b id="min-speed"></b> m/s</p>
+  </section>
+
+  <section class="step" id="step-save">
+    <h2>10. Review and save</h2>
+    <p id="changes-empty">Nothing changed yet.</p>
+    <table id="changes"><thead><tr><th>Value</th><th>Was</th><th>Now</th></tr></thead><tbody></tbody></table>
+    <label class="inline"><input type="checkbox" id="write-car-name" /> This machine drives this car (write <code>CAR_NAME</code>)</label>
+    <button type="button" id="save-btn" class="primary">Save the calibration</button>
+    <p class="note" id="saved"></p>
+  </section>
+  </div>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

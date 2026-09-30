@@ -1,0 +1,325 @@
+/* car_calibration's page: one column of steps, built to be used from a
+ * phone next to the car. The same dark palette as the other web UIs. */
+
+:root {
+  --bg: #101418;
+  --card: #1a2027;
+  --line: #2c343d;
+  --text: #e8e8e8;
+  --muted: #9aa4ae;
+  --accent: #4a9eff;
+  --ok: #3fb56b;
+  --warn: #e0a030;
+  --danger: #e04848;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+#top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 16px;
+}
+
+#top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+#car-title {
+  color: var(--accent);
+}
+
+#stop-btn {
+  background: var(--danger);
+  border: none;
+  color: white;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 10px 22px;
+  border-radius: 6px;
+}
+
+#chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip,
+.pill {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--line);
+  color: var(--muted);
+}
+
+.chip.ok,
+.pill.ok {
+  background: #1d3b2a;
+  color: #8fe0ad;
+}
+
+.chip.bad,
+.pill.bad {
+  background: #45201f;
+  color: #f2a09b;
+}
+
+.chip.running {
+  background: var(--warn);
+  color: #1a1200;
+  font-weight: 700;
+}
+
+#message {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #45201f;
+  color: #f7c6c2;
+}
+
+#message.info {
+  background: #1d3b2a;
+  color: #c6f0d6;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 16px 60px;
+}
+
+.step {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.step h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge:not(:empty) {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #1d3b2a;
+  color: #8fe0ad;
+}
+
+.step p {
+  margin: 6px 0;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.live {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+input[type="number"],
+input:not([type]) {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 7px 8px;
+  font-size: 15px;
+  min-width: 0;
+}
+
+label.inline input[type="number"] {
+  width: 90px;
+}
+
+input[type="range"] {
+  flex: 1 1 200px;
+}
+
+button {
+  background: #2a323c;
+  border: 1px solid #3a444f;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:hover {
+  background: #333d48;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06121f;
+  font-weight: 600;
+}
+
+button.hold,
+.hold-sample {
+  background: #4a3a12;
+  border-color: var(--warn);
+  color: #ffd98a;
+  font-weight: 700;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.hold-sample {
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--warn);
+}
+
+button.hold.holding {
+  background: var(--warn);
+  color: #1a1200;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.actions {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.actions li {
+  margin: 8px 0;
+}
+
+.tick:not(:empty) {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.warning {
+  border: 1px solid var(--warn);
+  background: #2b2412;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 18px 0 12px;
+}
+
+.warning label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.warning p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.bench.locked {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+td.num {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+tr.rough td {
+  color: var(--muted);
+}
+
+code {
+  font-size: 13px;
+}
