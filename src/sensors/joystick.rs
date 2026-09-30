@@ -7,6 +7,7 @@ use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -22,6 +23,15 @@ const JS_EVENT_AXIS: u8 = 0x02;
 const JS_EVENT_INIT: u8 = 0x80;
 /// An axis's full travel either way.
 const AXIS_MAX: f64 = 32767.0;
+/// `JSIOCGAXES`, `_IOR('j', 0x11, __u8)`: how many axes the device has.
+const JSIOCGAXES: libc::c_ulong = 0x8001_6a11;
+/// `JSIOCGBUTTONS`, `_IOR('j', 0x12, __u8)`: how many buttons it has.
+const JSIOCGBUTTONS: libc::c_ulong = 0x8001_6a12;
+/// `JSIOCGNAME(len)` without its length, `_IOC(_IOC_READ, 'j', 0x13, 0)`:
+/// the device's name.
+const JSIOCGNAME: libc::c_ulong = 0x8000_6a13;
+/// Room for the device's name.
+const NAME_LEN: usize = 128;
 
 /// Every tunable parameter [`Joystick`] needs - loaded from
 /// `config/sensors/joystick.toml` (see [`Default`]) or from an arbitrary path
@@ -89,12 +99,23 @@ impl Joystick {
     }
 
     /// Opens the pad without blocking, so [`Self::run`] can drain its events
-    /// once per tick and still notice being stopped.
-    fn open(&self) -> std::io::Result<File> {
-        OpenOptions::new()
+    /// once per tick and still notice being stopped - refusing a device that
+    /// lacks an axis or button [`JoystickConfig`] drives with, since the
+    /// kernel hands out `/dev/input/js*` to more than gamepads (e.g. a
+    /// touchscreen, whose position would read as a stick held over).
+    fn open(&self) -> std::io::Result<(File, String)> {
+        let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
-            .open(&self.config.device)
+            .open(&self.config.device)?;
+        let layout = PadLayout::of(&file)?;
+        layout.check(&self.config).map_err(|missing| {
+            std::io::Error::other(format!(
+                "{:?} is not a gamepad this config drives: it has no {missing}",
+                layout.name
+            ))
+        })?;
+        Ok((file, layout.name))
     }
 }
 
@@ -127,9 +148,9 @@ impl Executor for Joystick {
         while captain.is_running(self.id) {
             if device.is_none() && Instant::now() >= next_attempt {
                 match self.open() {
-                    Ok(file) => {
+                    Ok((file, pad_name)) => {
                         println!(
-                            "{}: driving with {}",
+                            "{}: driving with {} ({pad_name})",
                             self.name,
                             self.config.device.display()
                         );
@@ -181,6 +202,65 @@ impl Executor for Joystick {
 
     fn fresh(&self) -> Box<dyn Executor> {
         Box::new(Joystick::new(self.name.clone(), self.config.clone()))
+    }
+}
+
+/// What a joystick device has, as the kernel reports it on opening.
+#[derive(Debug, Clone, PartialEq)]
+struct PadLayout {
+    name: String,
+    axes: u8,
+    buttons: u8,
+}
+
+impl PadLayout {
+    /// Asks the kernel about the joystick device `file` is open on.
+    fn of(file: &File) -> std::io::Result<Self> {
+        let fd = file.as_raw_fd();
+        let mut axes: u8 = 0;
+        let mut buttons: u8 = 0;
+        let mut name = [0u8; NAME_LEN];
+        // SAFETY: `fd` is an open descriptor for the whole call, and each
+        // pointer is to a live buffer of the size its request writes.
+        unsafe {
+            if libc::ioctl(fd, JSIOCGAXES, &mut axes as *mut u8) < 0
+                || libc::ioctl(fd, JSIOCGBUTTONS, &mut buttons as *mut u8) < 0
+                || libc::ioctl(
+                    fd,
+                    JSIOCGNAME | ((NAME_LEN as libc::c_ulong) << 16),
+                    name.as_mut_ptr(),
+                ) < 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        let end = name.iter().position(|&byte| byte == 0).unwrap_or(NAME_LEN);
+        Ok(Self {
+            name: String::from_utf8_lossy(&name[..end]).into_owned(),
+            axes,
+            buttons,
+        })
+    }
+
+    /// Whether every axis and button `config` drives with exists - erring
+    /// with the first one missing.
+    fn check(&self, config: &JoystickConfig) -> Result<(), String> {
+        for (role, axis) in [
+            ("steering", config.steering_axis),
+            ("throttle", config.throttle_axis),
+            ("reverse", config.reverse_axis),
+        ] {
+            if axis >= self.axes {
+                return Err(format!("{role} axis {axis} (it has {} axes)", self.axes));
+            }
+        }
+        match config.deadman_button {
+            Some(button) if button >= self.buttons => Err(format!(
+                "dead man's button {button} (it has {} buttons)",
+                self.buttons
+            )),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -351,6 +431,29 @@ mod tests {
         assert_eq!(pad.axes[5], Some(-1.0));
         pad.apply(&[0, 0, 0, 0, 1, 0, JS_EVENT_BUTTON, 4]);
         assert!(pad.buttons[4]);
+    }
+
+    #[test]
+    fn a_device_without_the_configured_controls_is_refused() {
+        let config = JoystickConfig::default();
+        let pad = PadLayout {
+            name: "Xbox 360 Controller".into(),
+            axes: 8,
+            buttons: 11,
+        };
+        assert_eq!(pad.check(&config), Ok(()));
+        // A touchscreen: just x and y.
+        let touchscreen = PadLayout {
+            name: "ILIT2901:00 222A:5539 Mouse".into(),
+            axes: 2,
+            buttons: 5,
+        };
+        assert!(touchscreen.check(&config).is_err());
+        let deadman = JoystickConfig {
+            deadman_button: Some(11),
+            ..JoystickConfig::default()
+        };
+        assert!(pad.check(&deadman).is_err());
     }
 
     #[test]
