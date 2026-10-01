@@ -4,7 +4,7 @@
 
 schema_version = 1
 name = "tom"
-calibrated_at = "2026-09-30 21:23:56"
+calibrated_at = "2026-10-01 09:16:58"
 
 [geometry]
 wheelbase_m = 0.33
@@ -15,43 +15,43 @@ body_width_m = 0.29
 mass_kg = 3.5
 
 [[steering.points]]
-servo = 0.14500000000000002
-angle_rad = -0.33711913381760084
+servo = 0.0
+angle_rad = -0.41359437865463017
 
 [[steering.points]]
-servo = 0.22112266691357715
-angle_rad = -0.27160165161631156
+servo = 0.10999999999999999
+angle_rad = -0.3678282863484679
 
 [[steering.points]]
-servo = 0.2972453338271543
-angle_rad = -0.17252007960095464
+servo = 0.22
+angle_rad = -0.2596427241869284
 
 [[steering.points]]
-servo = 0.3733680007407314
-angle_rad = -0.0779007612519361
+servo = 0.33
+angle_rad = -0.13854783925726
 
 [[steering.points]]
-servo = 0.44949066765430856
+servo = 0.44
 angle_rad = 0.0
 
 [[steering.points]]
-servo = 0.5871180007407314
-angle_rad = 0.16118695593293983
+servo = 0.5800000000000001
+angle_rad = 0.16851197877401136
 
 [[steering.points]]
-servo = 0.7247453338271543
-angle_rad = 0.3293023997491553
+servo = 0.72
+angle_rad = 0.3156478991488464
 
 [[steering.points]]
-servo = 0.8623726669135772
-angle_rad = 0.42945402250062037
+servo = 0.8600000000000001
+angle_rad = 0.4341276949534884
 
 [[steering.points]]
 servo = 1.0
-angle_rad = 0.48800282717109805
+angle_rad = 0.494003428444261
 
 [motor]
-speed_to_erpm_gain = 4691.0
+speed_to_erpm_gain = 4719.0
 speed_compensation = 1.133
 min_speed_mps = 0.44
 

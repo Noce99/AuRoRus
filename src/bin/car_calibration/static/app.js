@@ -255,6 +255,7 @@ function renderFloor(floor, draft) {
     cells[5].textContent =
       angle == null || Math.abs(angle) < 1e-3 ? "-" : `${fmt(floor.wheelbase_m / Math.tan(Math.abs(angle)), 2)} m`;
   });
+  $("servo-value-floor").textContent = $("servo-value").textContent;
   $("steering-table-floor").textContent = $("steering-table").textContent;
 }
 
@@ -430,6 +431,7 @@ $("floor-settings-btn").onclick = () =>
   );
 $("straight-analyze-btn").onclick = () => step("/api/floor/straight", {});
 $("straight-apply-btn").onclick = () => step("/api/floor/apply_straight", {}, "Speed per ERPM and straight set.");
+$("straighten-btn").onclick = () => step("/api/steering/straighten", {}, "Wheels straight.");
 $("arcs-apply-btn").onclick = () => step("/api/floor/apply_arcs", {}, "Steering table set from the arcs.");
 
 $("write-car-name").onchange = (event) => {

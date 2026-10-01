@@ -167,6 +167,7 @@ fn post(
         "/api/imu/capture" => session.capture_imu(&read_json::<Which>(request)?.which),
         "/api/lidar/capture" => session.capture_lidar(&read_json::<Which>(request)?.which),
         "/api/servo" => session.set_servo(read_json::<Position>(request)?.position),
+        "/api/steering/straighten" => session.straighten(),
         "/api/steering/mark" => session.mark_steering(&read_json::<Which>(request)?.which),
         "/api/steering/table" => {
             let angles = read_json::<Angles>(request)?;

@@ -291,6 +291,17 @@ impl Session {
         Ok(())
     }
 
+    /// Moves the servo back to the draft's straight - what an arc leaves
+    /// turned. Refused while the motor runs: a drive's servo stays fixed.
+    pub fn straighten(&mut self) -> Result<(), String> {
+        let servo = self.draft()?.steering.straight_servo();
+        if self.bench.state().motor_running() {
+            return Err("wait for the car to stop".to_string());
+        }
+        self.bench.set_servo(servo);
+        Ok(())
+    }
+
     /// Marks the servo's current position as full `left`, `straight` or
     /// full `right`.
     pub fn mark_steering(&mut self, which: &str) -> Result<(), String> {

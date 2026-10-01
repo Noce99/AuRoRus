@@ -181,6 +181,10 @@
     <h2>11. Steering angles <span class="badge"></span></h2>
     <p>Each arc drives 2.5 m with the servo fixed, measuring how sharply the car turns. Start each one with 3 m clear ahead and to the side it turns. Both full-lock arcs are needed; the others refine the table.</p>
     <table id="arcs"><thead><tr><th>Side</th><th>Servo</th><th></th><th></th><th>Angle</th><th>Radius</th></tr></thead><tbody></tbody></table>
+    <div class="row">
+      <button type="button" id="straighten-btn">Straighten the wheels</button>
+      <span class="note">An arc leaves them turned. Servo now: <b id="servo-value-floor">-</b></span>
+    </div>
     <button type="button" id="arcs-apply-btn">Use these as the steering table</button>
     <p class="note">In the calibration: <span id="steering-table-floor"></span></p>
   </section>
