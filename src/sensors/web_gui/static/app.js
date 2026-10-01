@@ -3271,6 +3271,38 @@ function showCarName(name) {
   MapView.requestRedraw();
 }
 
+// ---------------------------------------------------------------------
+// Bottom right readout: speed and steering
+// ---------------------------------------------------------------------
+
+/** How often the speed and steering readout is re-read. */
+const ACTUATOR_POLL_MS = 100;
+/** How old the `actuator_status` topic may get before the readout shows
+ *  nothing rather than a speed the vehicle no longer has. */
+const ACTUATOR_STALE_MS = 1000;
+
+const driveReadout = document.getElementById("drive-readout");
+const driveSpeed = document.getElementById("drive-speed");
+const steeringArrow = document.getElementById("steering-arrow");
+
+/** Shows the ego vehicle's speed, and its steering angle as the arrow's
+ *  turn from straight up - clockwise steering right, which is what a
+ *  positive angle is. The same in simulation and on the real car. */
+async function pollActuatorStatus() {
+  let status = null;
+  try {
+    const body = await fetchJSON("/api/actuator_status");
+    if (body.age_ms !== null && body.age_ms <= ACTUATOR_STALE_MS) status = body.value;
+  } catch (err) {
+    // Shown as stale below - the server restarting, say.
+  }
+  driveReadout.classList.toggle("stale", status === null);
+  MapView.setText(driveSpeed, status === null ? "-- m/s" : `${status.speed_mps.toFixed(2)} m/s`);
+  steeringArrow.style.transform = `rotate(${status === null ? 0 : status.steering_rad}rad)`;
+}
+
+startPolling(pollActuatorStatus, ACTUATOR_POLL_MS);
+
 function startHardwarePanels() {
   for (const btn of document.querySelectorAll(".panel-nav-btn[data-simulator-only]")) {
     btn.hidden = true;

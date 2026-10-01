@@ -1221,15 +1221,45 @@ body.benchmark-active #place-pose-btn {
 }
 
 #car-name {
+  font-weight: 600;
+}
+
+/* ---------- bottom right readouts ---------- */
+
+/* The speed and steering readout, over the real car's name. */
+#corner-readouts {
   position: absolute;
   right: 12px;
   bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+#corner-readouts > div {
   background: rgba(20, 24, 28, 0.75);
   border: 1px solid #303640;
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
-  font-weight: 600;
   color: #e8e8e8;
-  pointer-events: none;
+}
+
+#drive-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nothing fresh to show (see `pollActuatorStatus`). */
+#drive-readout.stale {
+  color: #7a828c;
+}
+
+#steering-arrow {
+  transition: transform 80ms linear;
 }

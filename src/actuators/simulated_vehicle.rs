@@ -18,7 +18,7 @@ use crate::environment::simulator::vehicle::{
 use crate::hardware::CarCalibration;
 pub use crate::topics::ActuatorLimits;
 use crate::topics::{
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, AlgorithmParameter, Color, Drawing,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorStatus, AlgorithmParameter, Color, Drawing,
     HUMAN_VESC_COMMAND_TOPIC_NAME, JOYSTICK_VESC_COMMAND_TOPIC_NAME, Placement, PlacementTopics,
     Shape, StartState, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VESC_COMMAND_TIMEOUT, VehicleGeometry, VehicleModelKind,
@@ -866,6 +866,11 @@ impl Executor for SimulatedVehicle {
             self.id,
             VehicleStatus::default,
         );
+        captain.claim_writer::<ActuatorStatus>(
+            &self.vehicle.actuator_status(),
+            self.id,
+            ActuatorStatus::default,
+        );
         if self.opponent.is_none() {
             captain.claim_writer::<VehicleModelStatus>(
                 VEHICLE_MODEL_STATUS_TOPIC_NAME,
@@ -892,6 +897,7 @@ impl Executor for SimulatedVehicle {
 
     fn run(&mut self, captain: &Captain) {
         let status_topic = captain.topic::<VehicleStatus>(&self.vehicle.vehicle_status());
+        let actuator_topic = captain.topic::<ActuatorStatus>(&self.vehicle.actuator_status());
         let autonomous_topic = captain.topic::<VescCommand>(
             self.opponent
                 .as_ref()
@@ -1055,6 +1061,15 @@ impl Executor for SimulatedVehicle {
                     },
                 )
                 .expect("lost writer authorization for the vehicle_status topic");
+            actuator_topic
+                .write(
+                    self.id,
+                    ActuatorStatus {
+                        steering_rad: steering_angle_rad,
+                        speed_mps: state.speed_mps(),
+                    },
+                )
+                .expect("lost writer authorization for the actuator_status topic");
             drawing_topic
                 .write(
                     self.id,

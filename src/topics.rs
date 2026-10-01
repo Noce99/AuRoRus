@@ -2,6 +2,7 @@
 //! [`crate::RwLockTopic`]s, so multiple binaries can agree on the same shape
 //! without redefining it.
 
+mod actuator_status;
 mod autonomous_control;
 mod detection;
 mod drawing;
@@ -26,6 +27,7 @@ mod vesc_command;
 mod vesc_parameters;
 mod vesc_status;
 
+pub use actuator_status::{ACTUATOR_STATUS_TOPIC_NAME, ActuatorStatus};
 pub use autonomous_control::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX,

@@ -12,7 +12,7 @@ use aurorus::sensors::{
     MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
     SimulatedLidarConfig, WebGui, WebGuiConfig,
 };
-use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder};
+use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder, TelemetryPoseSource};
 use aurorus::topics::VehicleModelKind;
 use aurorus::{DEBUG_GROUP, DebugRecorder, Executor, Runner};
 
@@ -105,7 +105,15 @@ fn main() {
         recorder.clone(),
         BenchmarkSetup {
             root: config.benchmarks_root.clone(),
-            pose_source: lap_telemetry_config.pose_source,
+            // What "auto" comes down to here, so a run's summary says
+            // which pose its laps were actually timed with.
+            pose_source: match lap_telemetry_config.pose_source {
+                TelemetryPoseSource::Auto if hardware.is_some() => {
+                    TelemetryPoseSource::Localization
+                }
+                TelemetryPoseSource::Auto => TelemetryPoseSource::GroundTruth,
+                source => source,
+            },
         },
         web_gui_config,
     );

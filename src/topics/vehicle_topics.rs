@@ -7,9 +7,10 @@
 //! behind its own prefix, e.g. `opponent/1/vehicle_status`.
 
 use super::{
-    AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX, AUTONOMOUS_CONTROL_TOPIC_PREFIX, LIDAR_SCAN_TOPIC_NAME,
-    ODOMETRY_TOPIC_NAME, RACE_LINE_TOPIC_NAME, VEHICLE_GEOMETRY_TOPIC_NAME,
-    VEHICLE_LIMITS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME,
+    ACTUATOR_STATUS_TOPIC_NAME, AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX,
+    AUTONOMOUS_CONTROL_TOPIC_PREFIX, LIDAR_SCAN_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
+    RACE_LINE_TOPIC_NAME, VEHICLE_GEOMETRY_TOPIC_NAME, VEHICLE_LIMITS_TOPIC_NAME,
+    VEHICLE_STATUS_TOPIC_NAME,
 };
 
 /// Prefix of every opponent's topics: `opponent/<n>/`.
@@ -53,6 +54,10 @@ impl VehicleTopics {
 
     pub fn vehicle_status(&self) -> String {
         self.name(VEHICLE_STATUS_TOPIC_NAME)
+    }
+
+    pub fn actuator_status(&self) -> String {
+        self.name(ACTUATOR_STATUS_TOPIC_NAME)
     }
 
     pub fn vehicle_limits(&self) -> String {
@@ -106,6 +111,7 @@ mod tests {
         let ego = VehicleTopics::ego();
         assert!(ego.is_ego());
         assert_eq!(ego.vehicle_status(), VEHICLE_STATUS_TOPIC_NAME);
+        assert_eq!(ego.actuator_status(), ACTUATOR_STATUS_TOPIC_NAME);
         assert_eq!(ego.vehicle_limits(), VEHICLE_LIMITS_TOPIC_NAME);
         assert_eq!(ego.lidar_scan(), LIDAR_SCAN_TOPIC_NAME);
         assert_eq!(ego.race_line(), RACE_LINE_TOPIC_NAME);

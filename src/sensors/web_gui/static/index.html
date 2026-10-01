@@ -43,7 +43,16 @@
         <span id="status-hint" title="W/S: throttle/reverse · A/D: steer · R: restart everything and reload · P: place vehicle at start line · Esc: cancel placing the vehicle">WASD drive · R restart · P place at start</span>
       </div>
 
-      <div id="car-name" title="Running on this real car" hidden></div>
+      <div id="corner-readouts">
+        <div id="drive-readout" title="The vehicle's speed, and where its front wheels are steered (straight is up)">
+          <span id="drive-speed">-- m/s</span>
+          <svg id="steering-arrow" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 21 V4" />
+            <path d="M6 10 L12 4 L18 10" />
+          </svg>
+        </div>
+        <div id="car-name" title="Running on this real car" hidden></div>
+      </div>
 
       <div id="zoom-controls">
         <button id="home-btn" title="Center on the vehicle, zoom to 10 m" aria-label="Home">&#8962;</button>

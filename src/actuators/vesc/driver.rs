@@ -9,8 +9,8 @@ use super::protocol::Fault;
 use crate::actuators::simulated_vehicle::select_command_within;
 use crate::hardware::CarCalibration;
 use crate::topics::{
-    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    IMU_TOPIC_NAME, ImuReading, JOYSTICK_VESC_COMMAND_TOPIC_NAME,
+    AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, ActuatorStatus,
+    HUMAN_VESC_COMMAND_TOPIC_NAME, IMU_TOPIC_NAME, ImuReading, JOYSTICK_VESC_COMMAND_TOPIC_NAME,
     VESC_PARAMETERS_STATUS_TOPIC_NAME, VESC_PARAMETERS_TOPIC_NAME, VESC_STATUS_TOPIC_NAME,
     VehicleGeometry, VehicleTopics, VescCommand, VescParameters, VescParametersStatus, VescStatus,
 };
@@ -116,6 +116,7 @@ impl Vesc {
         let joystick_topic = captain.try_topic::<VescCommand>(JOYSTICK_VESC_COMMAND_TOPIC_NAME);
         let imu_topic = captain.topic::<ImuReading>(IMU_TOPIC_NAME);
         let status_topic = captain.topic::<VescStatus>(VESC_STATUS_TOPIC_NAME);
+        let actuator_topic = captain.topic::<ActuatorStatus>(&self.vehicle.actuator_status());
         let mut rate_hz = tuning.config.rate_hz;
         let mut ticker = Ticker::new(rate_hz);
         let mut setpoint = Setpoint::default();
@@ -160,6 +161,16 @@ impl Vesc {
                 None => values.input_voltage_v,
             };
             battery_v = Some(smoothed_v);
+            let wheel_speed_mps = values.erpm / car.motor.speed_to_erpm_gain;
+            actuator_topic
+                .write(
+                    self.id,
+                    ActuatorStatus {
+                        steering_rad: car.steering.angle_for(servo),
+                        speed_mps: wheel_speed_mps,
+                    },
+                )
+                .expect("lost writer authorization for the actuator_status topic");
             imu_topic
                 .write(self.id, imu_reading(car, values.erpm, &imu))
                 .expect("lost writer authorization for the imu topic");
@@ -175,7 +186,7 @@ impl Vesc {
                         temp_fet_c: values.temp_fet_c,
                         temp_motor_c: values.temp_motor_c,
                         erpm: values.erpm,
-                        wheel_speed_mps: values.erpm / car.motor.speed_to_erpm_gain,
+                        wheel_speed_mps,
                         tachometer: values.tachometer,
                         fault: fault.name().to_string(),
                         timed_out: values.timed_out,
@@ -266,6 +277,11 @@ impl Executor for Vesc {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<ImuReading>(IMU_TOPIC_NAME, self.id, ImuReading::default);
         captain.claim_writer::<VescStatus>(VESC_STATUS_TOPIC_NAME, self.id, VescStatus::default);
+        captain.claim_writer::<ActuatorStatus>(
+            &self.vehicle.actuator_status(),
+            self.id,
+            ActuatorStatus::default,
+        );
         let limits: ActuatorLimits = self.config.actuator_limits(&self.car);
         captain.claim_writer::<ActuatorLimits>(
             &self.vehicle.vehicle_limits(),

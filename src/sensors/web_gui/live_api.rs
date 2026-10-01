@@ -14,10 +14,10 @@
 use super::WebGuiConfig;
 use super::maps_api::safe_map_folder;
 use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
-    AUTONOMOUS_PARAMETERS_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
-    AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, AutonomousParameters,
-    HUMAN_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry,
+    ACTUATOR_STATUS_TOPIC_NAME, AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME,
+    AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME, ActuatorLimits,
+    ActuatorStatus, AlgorithmParameter, AutonomousAlgorithmSelection, AutonomousAlgorithmStatus,
+    AutonomousParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry,
     MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, PLACE_AT_START_TOPIC_NAME,
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
     PlaceAtStart, PlanningObjective, PlanningParameters, PlanningRequest, PlanningState,
@@ -1017,6 +1017,20 @@ pub fn lap_telemetry(captain: &Captain) -> ResponseBox {
             stamped_json(&telemetry.value, telemetry.meta)
         }
         None => stamped_json(&LapTelemetry::default(), WriteMeta::default()),
+    }
+}
+
+/// `GET /api/actuator_status` - the ego vehicle's steering angle and speed
+/// right now, read from the `actuator_status` topic (published by the
+/// simulated vehicle or the real car's VESC alike), as a [`StampedBody`].
+/// The default (never written) status if nothing publishes that topic.
+pub fn actuator_status(captain: &Captain) -> ResponseBox {
+    match captain.try_topic::<ActuatorStatus>(ACTUATOR_STATUS_TOPIC_NAME) {
+        Some(topic) => {
+            let status = topic.read();
+            stamped_json(&status.value, status.meta)
+        }
+        None => stamped_json(&ActuatorStatus::default(), WriteMeta::default()),
     }
 }
 

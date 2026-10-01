@@ -7,8 +7,10 @@ sample_rate_hz = 100.0
 # is published right away.
 publish_rate_hz = 10.0
 # Where the pose and speed come from: "ground_truth" (the simulator's
-# vehicle_status) or "localization" (SLAM's pose and odometry's speed).
-pose_source = "ground_truth"
+# vehicle_status), "localization" (SLAM's pose and odometry's speed), or
+# "auto" (the ground truth where there is one - in simulation - else the
+# localization - on the real car).
+pose_source = "auto"
 # How many bins one lap's errors are stored in, along the race line.
 bins = 500
 # How far along the line, in meters, the vehicle's projection is searched

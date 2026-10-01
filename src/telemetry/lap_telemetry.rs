@@ -64,6 +64,9 @@ pub enum TelemetryPoseSource {
     GroundTruth,
     /// SLAM's pose, and odometry's speed.
     Localization,
+    /// The ground truth where there's a fresh one (in simulation), else the
+    /// localization (on the real car).
+    Auto,
 }
 
 /// One pose sample: when it was taken, in seconds on the recorder's own
@@ -359,57 +362,103 @@ fn seconds_since(origin: Instant, at: Instant) -> f64 {
     }
 }
 
-/// The latest pose sample from `source`, with the write count of the topic
-/// it came from (to tell a new sample from one already used), or why
+/// Which pose source a [`Sample`] came from, and the write count of the
+/// topic it was stamped by - to tell a new sample from one already used.
+type SampleKey = (TelemetryPoseSource, u64);
+
+/// The latest pose sample from `source`, with its [`SampleKey`], or why
 /// there's none.
 fn sample(
     captain: &Captain,
     source: TelemetryPoseSource,
     origin: Instant,
-) -> Result<(u64, Sample), String> {
+) -> Result<(SampleKey, Sample), String> {
     let vehicle = VehicleTopics::ego();
-    let stamped_sample = |meta: crate::WriteMeta, x_m, y_m, speed_mps| {
-        let at = meta.written_at.unwrap_or(origin);
-        (
-            meta.write_count,
-            Sample {
-                t_s: seconds_since(origin, at),
-                x_m,
-                y_m,
-                speed_mps,
-            },
-        )
-    };
     match source {
-        TelemetryPoseSource::GroundTruth => {
-            let status = captain
-                .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
-                .ok_or("No ground truth pose (vehicle_status) in this binary.")?
-                .read();
-            if status.age().is_none_or(|age| age > POSE_TIMEOUT) {
-                return Err("The ground truth pose (vehicle_status) is stale.".into());
-            }
-            Ok(stamped_sample(
-                status.meta,
-                status.x_m,
-                status.y_m,
-                status.speed_mps,
-            ))
-        }
-        TelemetryPoseSource::Localization => {
-            let pose = localization_pose(captain, &vehicle)?;
-            let odometry = captain
-                .try_topic::<Odometry>(&vehicle.odometry())
-                .ok_or("No odometry in this binary.")?
-                .read();
-            Ok(stamped_sample(
-                odometry.meta,
-                pose.x_m,
-                pose.y_m,
-                odometry.speed_mps,
-            ))
+        TelemetryPoseSource::GroundTruth => ground_truth_sample(captain, &vehicle, origin),
+        TelemetryPoseSource::Localization => localization_sample(captain, &vehicle, origin),
+        TelemetryPoseSource::Auto => {
+            ground_truth_sample(captain, &vehicle, origin).or_else(|no_truth| {
+                localization_sample(captain, &vehicle, origin).map_err(|no_localization| {
+                    // Why the source this binary is meant to use has no pose:
+                    // the ground truth in simulation, localization on the car.
+                    if captain
+                        .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
+                        .is_some()
+                    {
+                        no_truth
+                    } else {
+                        no_localization
+                    }
+                })
+            })
         }
     }
+}
+
+/// A [`Sample`] at `(x_m, y_m)`, taken when `meta`'s topic was written.
+fn stamped_sample(
+    source: TelemetryPoseSource,
+    meta: crate::WriteMeta,
+    origin: Instant,
+    x_m: f64,
+    y_m: f64,
+    speed_mps: f64,
+) -> (SampleKey, Sample) {
+    let at = meta.written_at.unwrap_or(origin);
+    (
+        (source, meta.write_count),
+        Sample {
+            t_s: seconds_since(origin, at),
+            x_m,
+            y_m,
+            speed_mps,
+        },
+    )
+}
+
+/// The simulator's `vehicle_status`, if fresh - else why not.
+fn ground_truth_sample(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+    origin: Instant,
+) -> Result<(SampleKey, Sample), String> {
+    let status = captain
+        .try_topic::<VehicleStatus>(&vehicle.vehicle_status())
+        .ok_or("No ground truth pose (vehicle_status) in this binary.")?
+        .read();
+    if status.age().is_none_or(|age| age > POSE_TIMEOUT) {
+        return Err("The ground truth pose (vehicle_status) is stale.".into());
+    }
+    Ok(stamped_sample(
+        TelemetryPoseSource::GroundTruth,
+        status.meta,
+        origin,
+        status.x_m,
+        status.y_m,
+        status.speed_mps,
+    ))
+}
+
+/// SLAM's pose and odometry's speed, while localizing - else why not.
+fn localization_sample(
+    captain: &Captain,
+    vehicle: &VehicleTopics,
+    origin: Instant,
+) -> Result<(SampleKey, Sample), String> {
+    let pose = localization_pose(captain, vehicle)?;
+    let odometry = captain
+        .try_topic::<Odometry>(&vehicle.odometry())
+        .ok_or("No odometry in this binary.")?
+        .read();
+    Ok(stamped_sample(
+        TelemetryPoseSource::Localization,
+        odometry.meta,
+        origin,
+        pose.x_m,
+        pose.y_m,
+        odometry.speed_mps,
+    ))
 }
 
 impl Executor for LapTelemetryRecorder {
@@ -439,7 +488,7 @@ impl Executor for LapTelemetryRecorder {
         let mut placements = placement_topics
             .as_ref()
             .map(|topics| Placement::new(&topics.read()));
-        let mut sample_writes = None;
+        let mut sample_key = None;
         let mut last_published: Option<Instant> = None;
 
         while captain.is_running(self.id) {
@@ -455,7 +504,7 @@ impl Executor for LapTelemetryRecorder {
                     Line::new(line.points)
                         .map(|points| LapTracker::new(points, line.file, self.config))
                 });
-                sample_writes = None;
+                sample_key = None;
                 last_published = None;
             }
 
@@ -475,9 +524,9 @@ impl Executor for LapTelemetryRecorder {
             ) {
                 (None, _) => Some("No race line on the selected map.".to_string()),
                 (Some(_), Err(why)) => Some(why),
-                (Some(tracker), Ok((writes, sample))) => {
-                    if sample_writes != Some(writes) {
-                        sample_writes = Some(writes);
+                (Some(tracker), Ok((key, sample))) => {
+                    if sample_key != Some(key) {
+                        sample_key = Some(key);
                         let laps = tracker.laps.len();
                         tracker.update(sample);
                         lap_completed = tracker.laps.len() != laps;
@@ -520,6 +569,7 @@ impl Executor for LapTelemetryRecorder {
 mod tests {
     use super::*;
     use crate::environment::SpeedPoint;
+    use crate::topics::{SLAM_STATUS_TOPIC_NAME, SlamState, SlamStatus};
     use std::f64::consts::PI;
 
     const RADIUS_M: f64 = 5.0;
@@ -664,6 +714,78 @@ mod tests {
         tracker.update(at(50.0, 0.8 * 2.0 * PI + 0.05, 0.0, 0.0));
         assert_eq!(tracker.timing, Timing::Out);
         assert!(tracker.current.lateral_m.iter().flatten().count() == 1);
+    }
+
+    /// Publishes a fresh ground truth pose at `(x_m, 0)`.
+    fn publish_ground_truth(captain: &Captain, x_m: f64) {
+        let name = VehicleTopics::ego().vehicle_status();
+        let topic = captain.claim_writer::<VehicleStatus>(&name, 1, VehicleStatus::default);
+        let status = VehicleStatus {
+            x_m,
+            speed_mps: 1.0,
+            ..VehicleStatus::default()
+        };
+        topic.write(1, status).unwrap();
+    }
+
+    /// Publishes a fresh odometry pose at `(x_m, 0)`, and SLAM localizing
+    /// with odometry's frame one meter along the map's y axis.
+    fn publish_localization(captain: &Captain, x_m: f64) {
+        let name = VehicleTopics::ego().odometry();
+        let odometry = captain.claim_writer::<Odometry>(&name, 2, Odometry::default);
+        let pose = Odometry {
+            x_m,
+            speed_mps: 2.0,
+            ..Odometry::default()
+        };
+        odometry.write(2, pose).unwrap();
+        let slam =
+            captain.claim_writer::<SlamStatus>(SLAM_STATUS_TOPIC_NAME, 3, SlamStatus::default);
+        let status = SlamStatus {
+            state: SlamState::Localizing,
+            map_to_odom: Some([0.0, 1.0, 0.0]),
+            ..SlamStatus::default()
+        };
+        slam.write(3, status).unwrap();
+    }
+
+    fn auto_sample(captain: &Captain) -> Result<(SampleKey, Sample), String> {
+        sample(captain, TelemetryPoseSource::Auto, Instant::now())
+    }
+
+    #[test]
+    fn auto_prefers_the_ground_truth() {
+        let captain = Captain::new();
+        publish_ground_truth(&captain, 3.0);
+        publish_localization(&captain, 7.0);
+
+        let ((source, _), sample) = auto_sample(&captain).unwrap();
+        assert_eq!(source, TelemetryPoseSource::GroundTruth);
+        assert_eq!((sample.x_m, sample.y_m, sample.speed_mps), (3.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn auto_falls_back_to_localization_without_a_ground_truth() {
+        let captain = Captain::new();
+        publish_localization(&captain, 7.0);
+
+        let ((source, _), sample) = auto_sample(&captain).unwrap();
+        assert_eq!(source, TelemetryPoseSource::Localization);
+        assert_eq!((sample.x_m, sample.y_m, sample.speed_mps), (7.0, 1.0, 2.0));
+    }
+
+    #[test]
+    fn auto_without_any_pose_says_why_the_expected_source_has_none() {
+        // On the car: no ground truth topic at all.
+        let captain = Captain::new();
+        let why = auto_sample(&captain).unwrap_err();
+        assert!(why.contains("localization"), "{why}");
+
+        // In simulation: a ground truth topic nothing was written to yet.
+        let name = VehicleTopics::ego().vehicle_status();
+        captain.claim_writer::<VehicleStatus>(&name, 1, VehicleStatus::default);
+        let why = auto_sample(&captain).unwrap_err();
+        assert!(why.contains("ground truth"), "{why}");
     }
 
     #[test]
