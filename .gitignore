@@ -11,7 +11,11 @@ other_repos/
 /config/calibration/history/
 
 # Important Maps
-!/maps/Atlanta 2025
-!/maps/Vienna 2026 Final Bridge
-!/maps/Vienna 2026 Final Ground
-!/maps/Vienna 2026 Quali
+!/maps/Atlanta_2025/info.json
+!/maps/Atlanta_2025/map.tiff
+!/maps/Vienna_2026_Final_Bridge/info.json
+!/maps/Vienna_2026_Final_Bridge/map.tiff
+!/maps/Vienna_2026_Final_Ground/info.json
+!/maps/Vienna_2026_Final_Ground/map.tiff
+!/maps/Vienna_2026_Quali/info.json
+!/maps/Vienna_2026_Quali/map.tiff
