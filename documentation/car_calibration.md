@@ -117,6 +117,73 @@ Who reads it:
 - The VESC panel doesn't edit calibrated values; policy values (limits)
   stay editable there.
 
+## The page
+
+The page is one column, made to be used from a phone next to the car. The
+screenshots below were taken on a laptop without the car's hardware, with the
+car `tom` loaded, which is why the status chips are red.
+
+![The header](images/car_calibration/header.jpg)
+
+The header stays at the top while the page scrolls:
+
+- **The car's name,** once chosen.
+- **STOP** stops the motor at once, from any step.
+- **Four status chips,** green when fine and red otherwise: whether the VESC
+  answers (and why not, if it doesn't), whether the lidar sends scans, the
+  battery's voltage, and whether the motor is running.
+
+Each step is a card. A card shows what to do, and under it "In the
+calibration:" with the value currently in the draft, so it is always clear
+what would be saved. The steps are described in
+[The guided process](#the-guided-process).
+
+**Steps 1 to 3:** the car, its battery and the tape-measure values.
+
+![Steps 1 to 3](images/car_calibration/steps_1_3.jpg)
+
+**Steps 4 and 5:** the IMU and lidar mounting, each from a few captures.
+Below them is the first safety check: the steps that follow stay dimmed and
+locked until "the car is on a stand" is ticked.
+
+![Steps 4 and 5, and the stand check](images/car_calibration/steps_4_5.jpg)
+
+**Steps 6 and 7:** the steering range and the motor's direction. The yellow
+**HOLD** buttons are the only ones that turn the motor, and only while they
+are held.
+
+![Steps 6 and 7](images/car_calibration/steps_6_7.jpg)
+
+**Steps 8 and 9:** speed per ERPM and the ERPM ramp. Below them is the second
+safety check, for the steps that drive the car on the floor. Only one of the
+two checks can be ticked at a time: ticking "on the floor" locks the stand
+steps again.
+
+![Steps 8 and 9, and the floor check](images/car_calibration/steps_8_9.jpg)
+
+**Step 10:** the drive at a wall. **Work it out** analyses the drive just
+made and shows the result before it is used.
+
+![Step 10](images/car_calibration/step_10.jpg)
+
+**Steps 11 and 12:** one row per arc, then the review of every changed value
+and the save button.
+
+![Steps 11 and 12](images/car_calibration/steps_11_12.jpg)
+
+How the page talks to the program:
+
+- The page reads the whole state from `GET /api/state` in a loop, which is
+  what keeps the chips and the live readings current.
+- Every button sends one `POST` (for example `/api/imu/capture` or
+  `/api/steering/mark`), and the answer is the whole state again, or an error
+  saying what is wrong.
+- A held **HOLD** button sends `/api/motor/hold` every 100 ms. The program
+  brakes when those requests stop, so a closed page, a lost connection or a
+  dead phone all stop the motor.
+- Requests are handled one at a time, by `src/bin/car_calibration/main.rs`.
+  The page itself is in `src/bin/car_calibration/static/`.
+
 ## The guided process
 
 A separate binary with its own web UI, used from a phone or laptop standing

@@ -164,6 +164,9 @@ loaded at startup.
 | Document | What it covers |
 |---|---|
 | [Core framework](documentation/core_framework.md) | The executor/topic framework, its design decisions, and the two communication benchmarks |
+| [Web GUI](documentation/web_gui.md) | Every part of `web_gui`'s page, with screenshots, and how it works underneath |
+| [Replay web GUI](documentation/replay_web_gui.md) | Playing back a recorded debug session: the map, the timeline, and how it works |
+| [Benchmark viewer](documentation/benchmark_viewer.md) | Filtering, comparing and replaying benchmark runs |
 | [Autonomous algorithms](documentation/autonomous_algorithms.md) | How driving algorithms are structured, selected and tuned live, and how to add one |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
