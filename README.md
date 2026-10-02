@@ -81,12 +81,14 @@ it drives the real hardware instead.
 ./target/release/web_gui --debug        # record a debug session from the start
 ```
 
+See [Web GUI](documentation/web_gui.md) for every part of the page.
+
 ### `replay_web_gui`
 
 Read-only playback of a `.debug` session file recorded by `web_gui` (from its
 Debug panel, or with `--debug`): the same map view, drawing whatever the
 recorded executors drew, with a timeline to scrub through. It only needs the
-file itself.
+file itself. See [Replay web GUI](documentation/replay_web_gui.md).
 
 ```sh
 ./target/release/replay_web_gui --file debugs/<session>.debug
@@ -96,7 +98,8 @@ file itself.
 
 Read-only web UI over the benchmark runs recorded from `web_gui`'s Benchmark
 panel: filter them, compare their lap times, parameters and telemetry, and
-replay several of them together on the map.
+replay several of them together on the map. See
+[Benchmark viewer](documentation/benchmark_viewer.md).
 
 ```sh
 ./target/release/benchmark_viewer
@@ -168,6 +171,7 @@ loaded at startup.
 | [Replay web GUI](documentation/replay_web_gui.md) | Playing back a recorded debug session: the map, the timeline, and how it works |
 | [Benchmark viewer](documentation/benchmark_viewer.md) | Filtering, comparing and replaying benchmark runs |
 | [Autonomous algorithms](documentation/autonomous_algorithms.md) | How driving algorithms are structured, selected and tuned live, and how to add one |
+| [Tutorials](tutorial/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
 | [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |
