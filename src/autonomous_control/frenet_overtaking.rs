@@ -2,13 +2,7 @@
 //! [`path_follower`](super::path_follower)'s PD or P-enhanced law,
 //! and - while the LIDAR sees something on the map's free space, e.g. an
 //! opponent - steers along a Frenet path around it instead (see
-//! [`frenet`](crate::autonomous_control::shared::frenet)). Ported from
-//! ubm's `frenet_map_based_node.cpp`, minus its ROS-only switches (the
-//! external detector, map B, the basic planner).
-//!
-//! Fixed from ubm: the LIDAR field of view is honoured (ubm's filter let
-//! every reading through), and `lidar_downsample` can't be 0 (ubm's scan
-//! loop never ended). Improved: see the `frenet` module.
+//! [`frenet`](crate::autonomous_control::shared::frenet)).
 //!
 //! The pose comes from localization or, in simulation, the ground truth -
 //! see [`FrenetOvertakingConfig::pose_source`]. Without a trustworthy
@@ -49,7 +43,7 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
 
 /// [`FrenetOvertakingConfig::controller`]: PD on the heading error toward the lookahead point.
 const CONTROLLER_PD: u8 = 0;
-/// [`FrenetOvertakingConfig::controller`]: ubm's P-enhanced controller.
+/// [`FrenetOvertakingConfig::controller`]: the P-enhanced controller.
 const CONTROLLER_P_ENHANCED: u8 = 1;
 
 /// Every tunable parameter [`FrenetOvertaking`] needs - loaded from

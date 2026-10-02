@@ -1,9 +1,8 @@
 //! Path Follower: follows the selected map's race line (the
 //! [`RACE_LINE_TOPIC_NAME`] topic) with one of three steering laws - a PD
-//! controller or ubm's "P-enhanced" controller on the heading error toward a
+//! controller or the "P-enhanced" controller on the heading error toward a
 //! lookahead point, or the Stanley controller - plus an optional feedforward
-//! term, at the line's profile speed. Ported from ubm's
-//! `path_follower_node.cpp` and `steering_controller.cpp`.
+//! term, at the line's profile speed.
 //!
 //! The pose comes from localization or, in simulation, the ground truth -
 //! see [`PathFollowerConfig::pose_source`]. Without a trustworthy pose, a
@@ -40,7 +39,7 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
 
 /// [`PathFollowerConfig::controller`]: PD on the heading error toward the lookahead point.
 const CONTROLLER_PD: u8 = 0;
-/// [`PathFollowerConfig::controller`]: ubm's P-enhanced controller.
+/// [`PathFollowerConfig::controller`]: the P-enhanced controller.
 const CONTROLLER_P_ENHANCED: u8 = 1;
 /// [`PathFollowerConfig::controller`]: the Stanley controller.
 const CONTROLLER_STANLEY: u8 = 2;

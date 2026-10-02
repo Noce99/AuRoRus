@@ -22,9 +22,15 @@ keys do, but with analog steering and speed. Code: `src/sensors/joystick.rs`
    cargo run --release --bin web_gui
    ```
 
-   It prints `Joystick: driving with /dev/input/js0` once it has the pad. If
-   the pad isn't there it prints `Joystick: no joystick at ...` once and
-   keeps looking every second, so the pad can be plugged in at any time.
+   It prints `Joystick: driving with /dev/input/js0 (<the pad's name>)` once
+   it has the pad. If the pad isn't there it prints
+   `Joystick: no joystick at ...` once and keeps looking every second, so the
+   pad can be plugged in at any time.
+
+   The kernel hands out `/dev/input/js*` to more than gamepads (a
+   touchscreen or a touchpad can get one). A device that lacks one of the
+   configured axes or the dead man's button is therefore refused, and
+   reported like a missing pad.
 
 3. Drive:
 
@@ -159,6 +165,11 @@ ls /dev/input/by-id/*-joystick
   isn't seen by the kernel. Check `cat /proc/bus/input/devices` for it and
   `dmesg` for the driver; some clones need `xpad` loaded
   (`sudo modprobe xpad`).
+- **`no joystick at /dev/input/js0 ("..." is not a gamepad this config
+  drives: it has no ...)`**: the device at that path isn't the pad (or it's
+  a pad with fewer axes or buttons than the config names). Point `device` at
+  the pad's `/dev/input/by-id/...-joystick` name, or fix the axis and button
+  numbers (see [Another pad](#another-pad)).
 - **The car doesn't move but the pad is found**: check that nothing else
   holds control first - it's the joystick's turn only while the stick or a
   trigger is past its deadzone - and that the VESC is connected

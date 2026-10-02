@@ -36,6 +36,9 @@ flowchart LR
     S -- "map.tiff + info.json" --> F[("maps/")]
 ```
 
+The diagram shows the simulation. On the real car, `HokuyoLidar` publishes
+`lidar_scan` and `Vesc` publishes `imu` instead; nothing else changes.
+
 - **Inputs:** `lidar_scan`, `odometry`, `slam_command` and `slam_save`,
   plus `map` and `start_state` while localizing. SLAM never reads
   `vehicle_status`, which is the simulator's ground truth. It only knows
@@ -43,7 +46,9 @@ flowchart LR
 - **`slam_status`:** the state SLAM is actually in, how many scans the map
   has, the latest corrected pose, the latest match response (0 to 1), how
   long the latest scan took to process, how many loops have been closed, and
-  how long the latest optimization took.
+  how long the latest optimization took. Also the outcome of the latest
+  save (see [Saving the map](#saving-the-map)) and, while localizing, the
+  correction `map_to_odom` (see [Localization](#localization)).
 - **`slam_map`:** the occupancy grid, in SLAM's own frame (see
   [Frames](#frames)). Each pixel is one of `SlamMap::FREE` (255),
   `SlamMap::OCCUPIED` (0) or `SlamMap::UNKNOWN` (128), plus the trajectory.
@@ -215,8 +220,10 @@ Differences from Karto that matter:
 - **Optimization runs on the SLAM thread**, synchronously, as in Karto's
   `TryCloseLoop`. On a lap of about 700 scans it takes under 10 ms. Scans
   that arrive meanwhile are skipped, as with any slow match.
-- **The lidar sits on the vehicle's reference point, facing forward**, as
-  `SimulatedLidar` raycasts. There's no sensor offset.
+- **The lidar faces forward, and its position on the vehicle comes with
+  each scan** (`LidarScan::mount_x_m`/`mount_y_m`, from the car's
+  calibration). Readings are kept in the vehicle's frame, so there's no
+  separate sensor transform to configure.
 
 ## Parameters
 
@@ -226,7 +233,8 @@ The defaults are slam_toolbox's, except:
 
 - `minimum_travel_distance_m` / `minimum_travel_heading_rad` are 0.2 (vs 0.5),
   which suits a 1/10 car on small tracks.
-- `max_laser_range_m` is 12, the simulated lidar's range.
+- `max_laser_range_m` is 12 (vs 20): readings beyond it only mark the cells
+  they cross as free. The lidars themselves reach 30 m.
 
 The loop-closure parameters (`do_loop_closing`, `link_*`, `loop_*`,
 `optimizer_max_iterations`) have slam_toolbox's defaults.
@@ -255,8 +263,9 @@ drifts), try these:
 cargo run --release --bin web_gui   # release: the matcher is heavy in debug
 ```
 
-Set `noise_scale` in `config/sensors/simulated_imu.toml` above `0` so
-odometry drifts. Otherwise there's nothing for SLAM to correct. Then open the
+`noise_scale` in `config/sensors/simulated_imu.toml` must be above `0` (it is
+by default) so odometry drifts. Otherwise there's nothing for SLAM to
+correct. Open the
 **Mapping** panel, press **Play** and drive. DeadReckoning's purple vehicle
 drifts away from the true one while SLAM's green one stays on it.
 
@@ -292,7 +301,9 @@ reports the saved folder or the error on `slam_status`'s `last_save`.
 
 The folder has the same format as a generated map, minus the centerline,
 which isn't known: `map.tiff` and an `info.json` with `"source": "real"` and
-no `generation` block. `map_saver.rs` builds both:
+no `generation` block. The planner computes the centerline from the walls
+the first time a race line is planned on the map (see `planning.md`).
+`map_saver.rs` builds both files:
 
 - **The binary map.** Only free space the vehicle can reach from its
   trajectory is white. The flood fill from the trajectory doesn't cross cells
@@ -362,7 +373,5 @@ map SLAM saved of that track, the error stayed within 5 cm.
 - **Asynchronous optimization.** A long session with several laps grows the
   graph. Optimizing on a separate thread, as slam_toolbox's async mode does
   with its map updates, would keep scan matching on schedule.
-- **A centerline for saved maps**, e.g. from the saved map's skeleton or the
-  mapping trajectory, so they get race lines like generated maps.
 - **Global relocalization:** finding the vehicle on the map with no idea
   where it is (slam_toolbox doesn't do this either).

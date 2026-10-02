@@ -2,7 +2,6 @@
 //! attracted toward a blend of the longest LIDAR reading and a pursuit point
 //! a lookahead distance ahead on the selected map's race line - so it
 //! follows the line while the field steers it around what's in the way.
-//! Ported from ubm's `potential_pursuit_node.cpp`.
 //!
 //! Needs a pose, like `pure_pursuit` - see [`PotentialPursuitConfig::pose_source`].
 //! Without a trustworthy pose, a race line, or while too far from the line,

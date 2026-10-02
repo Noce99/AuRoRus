@@ -11,8 +11,8 @@ desired_fov_deg = 180.0
 max_range_m = 10.0
 # Room kept on each side of the vehicle, in meters: a disparity is extended
 # over half the vehicle's width (its vehicle_geometry) plus this. 0.175 m on
-# a 0.25 m wide car is 0.6 m in all; ubm used 0.30 in all, which scrapes the
-# walls in simulation.
+# a 0.25 m wide car is 0.6 m in all; 0.30 in all scrapes the walls in
+# simulation.
 width_margin_m = 0.175
 # Two neighbouring readings further apart than this are a disparity, in meters.
 disparity_threshold_m = 0.5

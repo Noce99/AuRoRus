@@ -75,8 +75,8 @@ velocity direction leads the heading by `beta`. A simpler rear-axle-only
 variant of the kinematic bicycle model exists (state at the rear axle
 instead of the CG) and has no `beta` term at all (`dheading/dt = (v /
 wheelbase) * tan(delta)` directly) — this module uses the CG-referenced
-form instead, since tracking the CG is what will matter once a dynamic
-(tire-force) model is added later and its state needs to be comparable.
+form instead, since the dynamic (tire-force) models below track the CG too,
+which keeps every model's state comparable.
 
 ### RK4 integration
 
@@ -105,7 +105,7 @@ it keeps the value from growing unbounded over a long-running simulation.
   lateral acceleration or on low-friction surfaces, where actual tire slip
   diverges from this model's prediction - see the dynamic bicycle model
   below for a model that accounts for it.
-- No default vehicle geometry is provided (see [Params](#params-bicycleparams)).
+- No default vehicle geometry is provided (see Params above).
 
 ## Dynamic bicycle model (tire forces)
 

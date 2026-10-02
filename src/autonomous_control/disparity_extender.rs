@@ -3,9 +3,8 @@
 //! the nearer one is extended over enough readings on the farther side for
 //! the vehicle to fit, then the vehicle steers toward the farthest reading
 //! left. Based on
-//! <https://www.nathanotterness.com/2019/04/the-disparity-extender-algorithm-and.html>,
-//! ported from ubm's `disparity_extender.cpp`. See
-//! `documentation/autonomous_algorithms.md`.
+//! <https://www.nathanotterness.com/2019/04/the-disparity-extender-algorithm-and.html>.
+//! See `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::reactive::{
     fov_window, ray, ray_step_rad, scan_origin, speed_proportional_steering, world_point,

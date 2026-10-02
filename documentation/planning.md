@@ -11,9 +11,7 @@ There are two objectives, picked in the panel:
   point mass inside a friction ellipse, starting from the minimum-curvature
   line. See [Minimum time](#minimum-time).
 
-This replaces UBM's CasADi/IPOPT "worm" optimizer
-(`other_repos/ubm-f1tenth/web_interface/web_interface/mpc/mpc_worm_race_line.py`)
-with pure Rust: OpEn's PANOC and augmented Lagrangian solvers (the
+It's pure Rust: OpEn's PANOC and augmented Lagrangian solvers (the
 `optimization_engine` crate), with hand-written gradients.
 
 ## Architecture

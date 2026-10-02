@@ -1,25 +1,22 @@
-//! ubm's Frenet overtaking planner (`frenet_overtaking.cpp`'s
-//! `plan_map_based`), used by `frenet_overtaking`: samples paths that
-//! leave the vehicle's current offset from the race line for a range of end
+//! The Frenet overtaking planner, used by `frenet_overtaking`: samples
+//! paths that leave the vehicle's current offset from the race line for a range of end
 //! offsets and lengths, keeps those staying on the map's free space (shrunk
 //! away from the walls, see [`FreeGrid`]) and clear of the obstacles, and
 //! picks the cheapest.
 //!
-//! Differences from ubm, on purpose:
+//! Design choices:
 //! - a path starts with the vehicle's slope relative to the line, not
 //!   flat, so replanning doesn't kink the path it's on (see [`LateralCubic`]);
-//! - the path field-of-view limit applies to both sides (ubm's only
-//!   rejected paths moving toward negative offsets);
+//! - the path field-of-view limit applies to both sides;
 //! - when no full-length path is clear of the obstacles, [`Plan::reach_m`]
 //!   says how far the most open one gets, so the caller can keep the speed
-//!   it can still stop from (see [`stopping_speed`]) - ubm only slowed down
-//!   to a fixed fraction, and only once even the shortest path was blocked;
+//!   it can still stop from (see [`stopping_speed`]);
 //! - the look-ahead target is the first path point at least the lookahead
-//!   distance along it (ubm's was one point short), and the curvature
-//!   slowdown doesn't compound across ticks;
+//!   distance along it, and the curvature slowdown doesn't compound across
+//!   ticks;
 //! - when no path is free, the fallback keeps clear of the obstacles if any
 //!   path does (only leaving the shrunk free space), else gets farthest
-//!   before its first one - ubm's took the cheapest, obstacles or not.
+//!   before its first one.
 
 use crate::autonomous_control::shared::race_line::{Line, wrap_to_pi};
 use crate::planning::track::squared_distance_transform;
@@ -27,7 +24,7 @@ use crate::topics::SelectedMap;
 
 /// The map's free space, eroded: white pixels farther than a clearance
 /// from every non-white one - so a LIDAR hit on a wall is never mistaken for
-/// an obstacle, and a path never hugs a wall. ubm's `cv::erode` on the map.
+/// an obstacle, and a path never hugs a wall.
 pub(crate) struct FreeGrid {
     width_px: usize,
     height_px: usize,
@@ -81,7 +78,7 @@ impl FreeGrid {
 
 /// A lateral offset profile `d(u)` over `u` in `[0, length]` meters of
 /// line: from `d0` with slope `slope0` to `d1` with slope 0 - a cubic
-/// Hermite. (ubm's started flat and ended with zero curvature instead.)
+/// Hermite.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LateralCubic {
     a: [f64; 4],
@@ -112,7 +109,7 @@ impl LateralCubic {
         a1 + u * (2.0 * a2 + 3.0 * u * a3)
     }
 
-    /// The (constant) third derivative - the jerk ubm's cost penalizes.
+    /// The (constant) third derivative - the jerk the cost penalizes.
     pub(crate) fn third_derivative(&self) -> f64 {
         6.0 * self.a[3]
     }
@@ -236,7 +233,7 @@ impl Plan {
 /// back into use.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Planner {
-    /// ubm's `d_weight`: a decaying average of the chosen end offsets, which
+    /// A decaying average of the chosen end offsets, which
     /// the cost pulls the next choice toward - so the vehicle commits to
     /// one side of an obstacle.
     d_weight: f64,

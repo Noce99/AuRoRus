@@ -3,8 +3,8 @@
 //! the longest reading attracts, and the vehicle steers toward a minimum of
 //! the sum. Based on "A Real-Time Obstacle Avoidance Method for Autonomous
 //! Vehicles Using an Obstacle-Dependent Gaussian Potential Field"
-//! (<https://doi.org/10.1155/2018/5041401>), ported from ubm's
-//! `potential_field.cpp`. See `documentation/autonomous_algorithms.md`.
+//! (<https://doi.org/10.1155/2018/5041401>). See
+//! `documentation/autonomous_algorithms.md`.
 
 use crate::autonomous_control::shared::reactive::{
     Field, FieldConfig, field_shapes, fov_window, potential_field, scan_origin,

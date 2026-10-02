@@ -1,17 +1,11 @@
 //! MPC: follows the selected map's race line (the
 //! [`RACE_LINE_TOPIC_NAME`] topic) with a model predictive controller over
 //! a kinematic bicycle - see [`mpc`](crate::autonomous_control::shared::mpc).
-//! Ported from ubm's `mpc_path_follower_node.cpp` and `mpc_casadi.cpp`,
-//! with PANOC in place of CasADi/IPOPT.
+//! Solved with PANOC.
 //!
-//! Fixed from ubm: the speed is capped by `max_speed_gain` (ubm's bound
-//! used its max speed, 10, as the gain), the steering by the vehicle's
-//! limit (ubm's by a hard-coded 0.8 rad), every weight can be tuned live
-//! (ubm's were baked into the problem when it was built), and the
-//! controls are never read past the end of the horizon. The walls term
-//! is always on (ubm's only with an opponent), from the map's distance
-//! field rather than a precomputed CasADi interpolant looked up with y
-//! flipped.
+//! The speed is capped by `max_speed_gain`, the steering by the vehicle's
+//! limit, and every weight can be tuned live. The walls term is always on,
+//! opponent or not, from the map's distance field.
 //!
 //! The opponent is the one [`UbmDetector`](crate::perception::UbmDetector)
 //! publishes on [`DETECTED_OPPONENT_TOPIC_NAME`] - the closest, with its
@@ -58,12 +52,12 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
     })
 }
 
-/// ubm never commands a speed below this, in m/s.
+/// A speed below this is never commanded, in m/s.
 const MIN_COMMAND_SPEED_MPS: f64 = 0.1;
 
 /// The first steering of a solve is what the vehicle already steers,
-/// but never more than this fraction of the limit - ubm's margin, so the
-/// solver can always turn back.
+/// but never more than this fraction of the limit, so the solver can
+/// always turn back.
 const FIRST_STEERING_MARGIN: f64 = 0.9;
 
 /// Every tunable parameter [`Mpc`] needs - loaded from
@@ -118,7 +112,7 @@ pub struct MpcConfig {
     /// Opponent cost: 1 = Gaussian, 0 = inverse square - see [`Opponent`].
     pub use_gaussian: u8,
     /// How long after its last detection the detector's prediction of the
-    /// opponent is still used, in seconds (ubm: not at all).
+    /// opponent is still used, in seconds.
     pub opponent_timeout_s: f64,
 }
 
@@ -451,7 +445,7 @@ struct Control {
     nearest: Nearest,
 }
 
-/// One tick of ubm's `control_loop`: solve again if there's no prediction
+/// One tick of the control loop: solve again if there's no prediction
 /// to follow, the vehicle strayed more than a step from it, it's far enough
 /// along it, or there's an opponent; then command the controls interpolated at where the
 /// vehicle is along the prediction. Errors if too far from the line or the
@@ -484,7 +478,7 @@ fn control(config: &MpcConfig, input: &Input, state: &mut State) -> Result<Contr
         }
         None => solve_from_scratch(config, input, &nearest, state)?,
         // While there's an opponent, every tick: it moves, and may have
-        // just appeared (ubm waited until the vehicle had moved on).
+        // just appeared.
         Some((along, _))
             if along > config.percentage_of_mpc_prediction_to_follow / 100.0 * horizon as f64
                 || input.opponent.is_some() =>
@@ -511,8 +505,8 @@ fn control(config: &MpcConfig, input: &Input, state: &mut State) -> Result<Contr
     })
 }
 
-/// A solve with no previous solution to start from: ubm's initialization,
-/// straight ahead at the race line's speed.
+/// A solve with no previous solution to start from: initialized straight
+/// ahead at the race line's speed.
 fn solve_from_scratch(
     config: &MpcConfig,
     input: &Input,
@@ -596,7 +590,7 @@ fn bounds(
     )
 }
 
-/// ubm's `compute_closer_state_i`: where `(x, y)` is along `states`, as a
+/// Where `(x, y)` is along `states`, as a
 /// fractional index between the nearest state and its closer neighbor,
 /// and the squared distance to that nearest state. The last state is
 /// never the nearest, so there's always a control after the index.
@@ -622,9 +616,9 @@ fn closer_state_index(states: &[MpcState], x: f64, y: f64) -> (f64, f64) {
     }
 }
 
-/// ubm's `interpolate_controls`: the controls at fractional index `index`,
-/// linearly between its neighbors - clamped to the horizon (ubm read one
-/// past its end when the vehicle was near the last state).
+/// The controls at fractional index `index`, linearly between its
+/// neighbors - clamped to the horizon, so nothing is read past its end
+/// when the vehicle is near the last state.
 fn interpolate(controls: &[[f64; 2]], index: f64) -> [f64; 2] {
     let last = controls.len() - 1;
     let before = (index.max(0.0) as usize).min(last);
@@ -633,9 +627,8 @@ fn interpolate(controls: &[[f64; 2]], index: f64) -> [f64; 2] {
     [0, 1].map(|k| controls[before][k] * (1.0 - t) + controls[after][k] * t)
 }
 
-/// ubm's `translate_state_as_initialization`: `controls` from `from` on,
-/// padded to their length with the last one (ubm padded with straight
-/// ahead at 1 m/s), flattened into a solver's initial guess.
+/// `controls` from `from` on, padded to their length with the last one,
+/// flattened into a solver's initial guess.
 fn shifted(controls: &[[f64; 2]], from: usize) -> Vec<f64> {
     let last = *controls.last().expect("a horizon has at least one control");
     controls
@@ -649,7 +642,7 @@ fn shifted(controls: &[[f64; 2]], from: usize) -> Vec<f64> {
 }
 
 impl State {
-    /// ubm's markers: the prediction colored by its speed, the target
+    /// The prediction colored by its speed, the target
     /// points, the initialization of the latest solve from scratch, where
     /// the opponent was predicted to be, and the nearest point on the line.
     fn drawing(&self, control: &Control, max_speed_mps: f64) -> Drawing {

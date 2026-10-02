@@ -63,9 +63,9 @@ max_decel_mps2 = 6.0
 # --- Minimum time -------------------------------------------------------------
 
 # Distance between the minimum-time optimization's points, in meters - and
-# between race_line_min_time.csv's points (resampling a polyline linearly
-# would put kinks in it). 0.1 gives about the same lap time as 0.2 but takes
-# over twice as long.
+# between the points of the race line file it saves (resampling a polyline
+# linearly would put kinks in it). 0.1 gives about the same lap time as 0.2
+# but takes over twice as long.
 min_time_spacing_m = 0.2
 # The line's sideways offsets follow a smooth curve (a B-spline) through
 # control points this far apart, in meters. Smaller follows narrow sections

@@ -1,5 +1,4 @@
-# Configuration for `aurorus::autonomous_control::frenet_overtaking`,
-# ported from ubm's map-based Frenet overtaking (`frenet_map_based_node`):
+# Configuration for `aurorus::autonomous_control::frenet_overtaking`:
 # follows the selected map's race line, and switches to a Frenet planner
 # around whatever the LIDAR sees on the map's free space (e.g. an opponent).
 
@@ -28,15 +27,14 @@ decay_e = 0.2
 # Lookahead distance: look_ahead_gain_s * speed + min_look_ahead_m.
 look_ahead_gain_s = 0.2
 min_look_ahead_m = 0.45
-# Multiplies the race line's speed profile, pure number (ubm used 1.0).
+# Multiplies the race line's speed profile, pure number.
 scale_speed = 0.6
 # Farther than this from the line, the vehicle stops, in meters.
 max_cross_track_m = 1.5
 
 # Obstacle detection: every lidar_downsample-th reading within
 # desired_fov_deg straight ahead, closer than max_path_length_m, landing on
-# the map's free space shrunk by wall_clearance_m (ubm: a 9 px erosion at
-# 0.05 m/px), is an obstacle.
+# the map's free space shrunk by wall_clearance_m, is an obstacle.
 lidar_downsample = 5
 desired_fov_deg = 200.0
 wall_clearance_m = 0.2

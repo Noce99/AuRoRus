@@ -1,6 +1,6 @@
-# Configuration for `aurorus::autonomous_control::path_follower`, ported
-# from ubm's path follower: follows the selected map's race line with a PD,
-# P-enhanced or Stanley steering law, plus an optional feedforward term.
+# Configuration for `aurorus::autonomous_control::path_follower`: follows
+# the selected map's race line with a PD, P-enhanced or Stanley steering
+# law, plus an optional feedforward term.
 
 # Rate at which a new control is published, in Hz.
 rate_hz = 50.0
@@ -42,7 +42,7 @@ beta_ff_gain = 0.4
 # Learned feedforward: weight of the previous value when updating it
 # (1 = never update), pure number.
 averaging_ff_gain = 1.0
-# Multiplies the race line's speed profile, pure number (ubm used 1.0).
+# Multiplies the race line's speed profile, pure number.
 scale_speed = 0.6
 # If > 0, ignore the speed profile and drive at this speed, in m/s.
 constant_speed = 0.0

@@ -1,8 +1,6 @@
-# Configuration for `aurorus::autonomous_control::mpc`, ported from
-# ubm's MPC path follower (`mpc_path_follower_node` + `mpc_casadi`):
-# follows the selected map's race line with a model predictive controller
-# over a kinematic bicycle, solved with PANOC. Defaults from ubm's
-# `ego_mpc_path_follower` parameters.
+# Configuration for `aurorus::autonomous_control::mpc`: follows the
+# selected map's race line with a model predictive controller over a
+# kinematic bicycle, solved with PANOC.
 
 # Rate at which a new control is published, in Hz. The MPC is only solved
 # again when the vehicle has moved along its prediction - see
@@ -17,7 +15,7 @@ pose_source = 0
 
 # Steps in the prediction, the vehicle's own pose included (at least 4).
 horizon = 15
-# Arc length of one prediction step, in meters (ubm: 2 race line points).
+# Arc length of one prediction step, in meters.
 step_m = 0.2
 # [0, 100] How far into the horizon, in percent, the vehicle must be along
 # the previous prediction before the MPC is solved again from it.
@@ -49,7 +47,7 @@ solver_max_iterations = 300
 # Longest a solve may take, in milliseconds.
 solver_max_ms = 15.0
 
-# WALLS - always on (ubm's only with an opponent).
+# WALLS - always on, opponent or not.
 # Cost of each predicted position's squared depth into walls_margin_m.
 walls_cost_weight = 10.0
 # Closer than this to a wall costs, in meters.
@@ -66,5 +64,4 @@ opponent_radius_m = 1.0
 use_gaussian = 1
 # How long after its last detection the detector's (Kalman) prediction of the
 # opponent is still used, in seconds - the detector misses it in some scans.
-# ubm dropped it at the first miss.
 opponent_timeout_s = 0.5

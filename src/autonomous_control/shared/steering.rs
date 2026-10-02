@@ -1,7 +1,6 @@
-//! ubm's heading-error steering laws - a PD controller and the
-//! "P-enhanced" controller - shared by the algorithms that steer toward a
-//! lookahead point (`path_follower`, `frenet_overtaking`). Ported
-//! from ubm's `steering_controller.cpp`.
+//! Heading-error steering laws - a PD controller and the "P-enhanced"
+//! controller - shared by the algorithms that steer toward a lookahead
+//! point (`path_follower`, `frenet_overtaking`).
 
 use std::time::Instant;
 
@@ -50,7 +49,7 @@ pub(crate) fn pd(
     gains.kk_s * error + derivative
 }
 
-/// ubm's P-enhanced controller: `kk_s` times the heading `error`, damped
+/// The P-enhanced controller: `kk_s` times the heading `error`, damped
 /// above `min_speed` by `(min_speed / speed)^decay_v` and, for errors up to
 /// `max_error`, further by `|error / max_error|^((speed - min_speed) decay_e)`
 /// - so small errors at speed barely steer.

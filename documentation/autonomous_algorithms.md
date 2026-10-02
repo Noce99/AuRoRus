@@ -22,8 +22,9 @@ flowchart LR
     W["WebGui"] -- "autonomous_algorithm_selection" --> H["AutonomousControlsHandler"]
     W -- "autonomous_parameters" --> algos
     H -- "autonomous_algorithm_status" --> W
-    H -- "autonomous_vesc_command" --> V["SimulatedVehicle"]
+    H -- "autonomous_vesc_command" --> V["SimulatedVehicle / Vesc"]
     W -- "human_vesc_command (WASD)" --> V
+    J["Joystick"] -- "joystick_vesc_command" --> V
     V -- "vehicle_limits\nvehicle_geometry" --> algos
 ```
 
@@ -39,6 +40,10 @@ flowchart LR
   on its own topic, `autonomous_control/<name>`. It also publishes a label,
   a description, and its tunable parameters with their current values on
   `autonomous_control_info/<name>`.
+- **The same file also drives opponents.** Each opponent added in
+  `web_gui` runs its own copy of an algorithm, on its own topics
+  (`opponent/<n>/autonomous_control/<name>`, ...) - see
+  [Opponents](#opponents). What a copy drives is its `Instance`.
 - **All algorithms run all the time,** whether selected or not. A switch is
   therefore instant, and stateful algorithms (filters, integrators) stay warm.
   A `--debug` recording also captures what *every* algorithm wanted, not only
@@ -70,8 +75,9 @@ flowchart LR
   tick and untick. The next selection change resets it.
 - **`build.rs`** scans `src/autonomous_control/*.rs` at compile time. It
   generates one `mod` per file plus `autonomous_control::all()`, which returns
-  one executor per file. `web_gui`'s `main.rs` adds everything `all()`
-  returns.
+  one executor per file, each driving the ego vehicle, and
+  `autonomous_control::build(stem, instance)`, which builds one copy for
+  another vehicle. `web_gui`'s `main.rs` adds everything `all()` returns.
 
 ### Safety rules
 
@@ -81,12 +87,17 @@ flowchart LR
 | Selected algorithm never wrote a command | `(0, 0)` |
 | Selected algorithm's command older than **1 s** (`VESC_COMMAND_TIMEOUT`) | `(0, 0)`; the UI shows a warning |
 | A WASD key is held (human command fresh and non-zero) | **The human always overrides** the autonomous command |
-| All keys released | Control returns to the selected algorithm |
+| The joystick asks for anything (see `joystick.md`) | It overrides both WASD and the autonomous command |
+| All keys and the joystick released | Control returns to the selected algorithm |
 
-The human override is decided in `SimulatedVehicle` (`select_command`). The
-page re-sends `(0, 0)` every 250 ms even when no key is held, so "the human is
-driving" means that a fresh, non-zero command is coming in. To stop the car
-for good, press **Pause**.
+The human override is decided by whatever drives the vehicle:
+`SimulatedVehicle` (`select_command`), and `Vesc` on the real car, with the
+same rule. The page re-sends `(0, 0)` every 250 ms even when no key is held,
+so "the human is driving" means that a fresh, non-zero command is coming in.
+To stop the car for good, press **Pause**.
+
+On the real car `Vesc` is stricter about staleness: any command older than
+`command_timeout_s` (0.25 s, `config/actuators/vesc.toml`) is ignored.
 
 ## Topics
 
@@ -98,10 +109,19 @@ for good, press **Pause**.
 | `autonomous_algorithm_selection` | `AutonomousAlgorithmSelection` | `WebGui` | Which algorithm is picked (`null` for none), and whether it's running or paused |
 | `autonomous_algorithm_status` | `AutonomousAlgorithmStatus` | handler | Available algorithms, the selected one, the active one (selected and running), whether its command is fresh |
 | `autonomous_vesc_command` | `VescCommand` | handler | The autonomous command the vehicle follows |
-| `vehicle_limits` | `ActuatorLimits` | `SimulatedVehicle` | Max steering angle and rate, max speed, accel and decel |
+| `human_vesc_command` | `VescCommand` | `WebGui` | WASD's command |
+| `joystick_vesc_command` | `VescCommand` | `Joystick` | The gamepad's command |
+| `vehicle_limits` | `ActuatorLimits` | `SimulatedVehicle` or `Vesc` | Max steering angle and rate, max speed, accel and decel |
+| `vehicle_geometry` | `VehicleGeometry` | `SimulatedVehicle` or `Vesc` | The vehicle's wheelbase, rear-axle-to-CG distance and body size |
+
+An opponent's copies of these per-vehicle topics have the same names behind
+its prefix, `opponent/<n>/`. An algorithm never spells a per-vehicle topic's
+name out: it asks its `Instance` (`instance.vehicle.vehicle_limits()`,
+`instance.algorithm_topics()`, ...).
 
 The types live in `src/topics/autonomous_control.rs`,
-`src/topics/vesc_command.rs`, and `src/topics/vehicle_limits.rs`.
+`src/topics/vesc_command.rs`, `src/topics/vehicle_limits.rs`,
+`src/topics/vehicle_geometry.rs` and `src/topics/vehicle_topics.rs`.
 
 ## Adding an algorithm
 
@@ -112,7 +132,8 @@ Create `src/autonomous_control/<name>.rs`. The file name:
 - must be a snake_case Rust identifier (e.g. `pure_pursuit.rs`), or
   `build.rs` stops the build with an error;
 - becomes the algorithm's **name**. That name is used for its executor, its
-  topics (`autonomous_control/pure_pursuit`, ...), and its selection value.
+  topics (`autonomous_control/pure_pursuit`, ...), its config file, and its
+  selection value.
 
 ### 2. Implement it
 
@@ -120,16 +141,29 @@ The only hard requirement is a function with this exact signature, because
 `build.rs` calls it:
 
 ```rust
-pub fn new(name: &str) -> Box<dyn Executor>
+pub fn new(instance: Instance) -> Box<dyn Executor>
 ```
 
-It must return an executor whose `name()` is `name`. The rest follows the
-template below, which is `always_left.rs` with the parts to change marked:
+It must return an executor whose `name()` is `instance.name`. An `Instance`
+(`src/autonomous_control.rs`) says which vehicle this copy drives:
+
+- `instance.name`: the executor's name, e.g. `pure_pursuit` for the ego
+  vehicle's copy and `opponent/1/pure_pursuit` for opponent 1's;
+- `instance.config_name`: the file stem, which names the config file;
+- `instance.vehicle`: the topics of the vehicle it drives
+  (`vehicle_limits()`, `vehicle_status()`, `lidar_scan()`, `race_line()`,
+  `odometry()`, ...);
+- `instance.algorithm_topics()`: this copy's own command and info topics;
+- `instance.is_opponent()`.
+
+The rest follows the template below, which is `always_left.rs` with the
+parts to change marked:
 
 ```rust
 //! What this algorithm does.
 
-use crate::topics::{ActuatorLimits, AutonomousAlgorithmInfo, VEHICLE_LIMITS_TOPIC_NAME, VescCommand};
+use crate::autonomous_control::Instance;
+use crate::topics::{ActuatorLimits, AutonomousAlgorithmInfo, VescCommand};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 
@@ -137,26 +171,29 @@ use std::any::Any;
 const RATE_HZ: f64 = 50.0;
 
 /// Entry point build.rs calls - required, with exactly this signature.
-pub fn new(name: &str) -> Box<dyn Executor> {
-    Box::new(PurePursuit { id: 0, name: name.to_string() })
+pub fn new(instance: Instance) -> Box<dyn Executor> {
+    Box::new(PurePursuit { id: 0, instance })
 }
 
 struct PurePursuit {
-    id: u8,
-    name: String,
+    id: u16,
+    instance: Instance,
     // any state the algorithm keeps between ticks
 }
 
 impl Executor for PurePursuit {
-    fn init(&mut self, id: u8) {
+    fn init(&mut self, id: u16) {
         self.id = id;
     }
 
     fn claim_writing_topics(&mut self, captain: &Captain) {
-        // Claims autonomous_control/<name> and writes autonomous_control_info/<name>.
+        // Claims this copy's command topic and writes its info topic.
         captain.claim_autonomous_control(
             self.id,
-            AutonomousAlgorithmInfo::new("Pure pursuit", "Follows the race line with pure pursuit."),
+            &self.instance.algorithm_topics(),
+            AutonomousAlgorithmInfo::new("Pure pursuit", "Follows the race line with pure pursuit.")
+                // What it needs to drive - see "Requirements" below.
+                .requires_race_line(),
         );
         // Optional: shapes to show on the map (e.g. the planned path) - see topics/drawing.rs.
         // Publish its elements with `visible_by_default = false`: web_gui shows them while it's selected.
@@ -164,14 +201,18 @@ impl Executor for PurePursuit {
     }
 
     fn run(&mut self, captain: &Captain) {
-        let command_topic = captain.autonomous_control(self.id);
-        let limits_topic = captain.topic::<ActuatorLimits>(VEHICLE_LIMITS_TOPIC_NAME);
-        // Read anything else needed: lidar_scan, vehicle_status, map, ...
+        let command_topic = captain.autonomous_control(&self.instance.algorithm_topics());
+        let limits_topic = captain.topic::<ActuatorLimits>(&self.instance.vehicle.vehicle_limits());
+        // Read anything else needed through `self.instance.vehicle`: lidar_scan, vehicle_status, ...
         let mut ticker = Ticker::new(RATE_HZ);
 
         while captain.is_running(self.id) {
-            // Optional, only for computationally heavy algorithms:
-            // if !captain.is_selected_algorithm(&self.name) { ticker.wait(); continue; }
+            // Optional, only for computationally heavy algorithms - and never for an
+            // opponent's copy, which is never "selected" but always drives:
+            // if !self.instance.is_opponent() && !captain.is_selected_algorithm(&self.instance.name) {
+            //     ticker.wait();
+            //     continue;
+            // }
 
             let limits = limits_topic.read();
             let command = VescCommand::new(0.0 /* steering, rad */, 0.0 /* speed, m/s */);
@@ -183,7 +224,7 @@ impl Executor for PurePursuit {
     }
 
     fn name(&self) -> String {
-        self.name.clone()
+        self.instance.name.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -191,18 +232,30 @@ impl Executor for PurePursuit {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        new(&self.name)
+        new(self.instance.clone())
     }
 }
 ```
 
+### Requirements
+
+`AutonomousAlgorithmInfo::requires_race_line()` and `requires_lidar()` say
+what the algorithm needs to drive. `web_gui` uses them when an opponent is
+added: an algorithm that requires a race line can only be picked together
+with one, and an opponent only gets a simulated lidar if its algorithm
+requires it.
+
 ### Optional: report a message to the driver
 
-`autonomous_control::report_message(captain, id, Some(text))` sets the
-algorithm's `AutonomousAlgorithmInfo::message`, for example to say why the
+`autonomous_control::report_message(captain, id, &instance, Some(text))` sets
+the algorithm's `AutonomousAlgorithmInfo::message`, for example to say why the
 vehicle is held stopped. `web_gui` shows it in yellow under the status line in
 the Autonomous Algos panel. Pass `None` to clear it. The info is only rewritten
 when the message changes, so it's fine to call this every tick.
+
+`autonomous_control::report_stats`, with the same arguments, sets
+`AutonomousAlgorithmInfo::stats` (e.g. the latest solve's time), shown in
+purple below the message.
 
 ### 3. Optional: make parameters tunable live
 
@@ -221,7 +274,8 @@ Open the UI, go to **Autonomous Algos**, and pick the new algorithm.
 
 An algorithm can let `web_gui` tune its parameters while it runs. When it's
 the selected algorithm (running or paused), the "Autonomous Algos" panel
-shows one slider per parameter, plus a **Save parameters** button.
+shows one slider per parameter, plus **Save parameters** and **Load from
+file** buttons.
 
 ```mermaid
 sequenceDiagram
@@ -259,9 +313,11 @@ sequenceDiagram
   by patching the config's JSON form, so no per-parameter code is needed.
   Use `int` for integer fields (`usize`, `u32`, ...) and `float` for `f32`
   or `f64` fields. A name that matches no numeric field panics at startup.
-- **Changes are applied in the loop:** create a `ParameterTuner` at the top
-  of `run()`, and call `tuner.update(captain, &mut self.config)` once per
-  tick. It returns `true` when the config changed.
+- **Changes are applied in the loop:** create a
+  `ParameterTuner::new(self.id, &self.instance)` at the top of `run()`, and
+  call `tuner.update(captain, &mut self.config)` once per tick. It returns
+  `true` when the config changed. An opponent's copy is never tuned live:
+  for it `update` always returns `false`.
 - **Rebuild derived state when `update` returns `true`.** Anything computed
   from the config before the loop (a `Ticker` from a rate, a lookup table,
   ...) is otherwise stale. `gap_follower.rs` rebuilds its `Ticker` this way,
@@ -282,13 +338,58 @@ sequenceDiagram
   (`config/autonomous_control/<name>.toml`, relative to the working
   directory, see `autonomous_control::save_parameters`). Only the tuned
   keys' values change: comments, other keys, and layout stay as they were.
-  Load the config with `autonomous_control::load_config(name)` in `new()`,
-  as `gap_follower.rs` does. The file is then read at runtime, so a saved
+  Load the config with
+  `autonomous_control::load_config(&instance.config_name)` in `new()`, as
+  `gap_follower.rs` does. The file is then read at runtime, so a saved
   value applies from the next restart (R). If the file can't be read, the
   compiled-in `Default` is used.
+- **Load from file** goes back to the TOML file's values, dropping unsaved
+  changes.
 - **A restart (R) resets every unsaved parameter** to its TOML value. A
   `--debug` recording captures every change, since both topics are
   recorded.
+
+## Opponents
+
+`web_gui`'s **Opponents** panel adds other vehicles to the simulation
+(`src/opponents.rs`). Each one is a group of executors on its own topics,
+behind the prefix `opponent/<n>/`:
+
+- a simulated vehicle, with a copy of the ego's model and its own limits;
+- its own copy of one algorithm, built with
+  `autonomous_control::build(stem, Instance::opponent(n, stem))`;
+- a simulated lidar, if the algorithm requires one;
+- a publisher of the race line it was given, if any.
+
+An opponent's copy differs from the ego's in four ways:
+
+- it always drives: it's never selected or paused, and
+  `AutonomousControlsHandler` doesn't forward it;
+- it reads the same config file, but is never tuned live;
+- it always uses the simulator's ground-truth pose, since only the ego
+  vehicle has localization (`pose_source` is ignored);
+- its executor is named `opponent/<n>/<name>`.
+
+There are no collisions, but the lidars see the other vehicles. Opponents
+exist only in simulation.
+
+## Gap follower
+
+`gap_follower.rs` is the follow-the-gap method from the
+[F1TENTH course](https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html).
+It needs only the LIDAR scan. Its parameters live in
+`config/autonomous_control/gap_follower.toml`. Each tick:
+
+1. **Bubble.** It finds the nearest reading and ignores every reading
+   within `b_radius` points of it.
+2. **Gaps.** A gap is a run of more than `n` consecutive readings, outside
+   the bubble, that are at least `t_m` away.
+3. **Steering** is the direction of the middle of the longest gap. With no
+   gap, it keeps the previous steering.
+4. **Speed** is the constant `speed`.
+
+The drawing shows the bubble as a red sector, the gaps as green sectors,
+and the chosen gap in purple.
 
 ## Pure pursuit
 
@@ -335,7 +436,7 @@ Each tick it does the following:
   - Odometry is at most 300 ms old.
   - Odometry's `reset_count` matches the one SLAM reports.
 - **1, ground truth:** `vehicle_status`. This only exists in simulation and is
-  for debugging.
+  for debugging. An opponent's copy always uses it.
 
 **The vehicle is held stopped** in any of these cases:
 - there is no race line;
@@ -361,10 +462,10 @@ The drawing shows:
 
 ## Reactive algorithms
 
-`disparity_extender.rs`, `potential_field.rs` and `potential_pursuit.rs` are
-ported from ubm's `simple_control_algos`. The first two need only the LIDAR
-scan (`lidar_scan`), with no map and no pose. Their building blocks (FOV
-window, speed laws, potential field, drawing helpers) live in
+`disparity_extender.rs`, `potential_field.rs` and `potential_pursuit.rs`
+steer from what the LIDAR sees. The first two need only the LIDAR scan
+(`lidar_scan`), with no map and no pose. Their building blocks (FOV window,
+speed laws, potential field, drawing helpers) live in
 `src/autonomous_control/shared/reactive.rs`.
 
 All three share these conventions:
@@ -372,10 +473,8 @@ All three share these conventions:
 - **Angles** are in the sensor frame: 0 is straight ahead, and positive is
   toward increasing heading (right, on screen). That is the same convention
   as `servo_position_rad`, so a direction in the scan is steered to as is.
-  ubm ran on ROS, where angles grow to the left, so "left" in ubm's
-  parameters means negative angles here.
-- **`desired_fov_deg`** is clamped to the LIDAR's field of view (ubm
-  refused a FOV at least as wide as the sensor's).
+  Left is therefore negative, the opposite of ROS.
+- **`desired_fov_deg`** is clamped to the LIDAR's field of view.
 - **Speed** falls linearly from `max_speed` when driving straight to
   `min_speed` at full lock (`vehicle_limits.max_steering_angle_rad`). The
   result is clamped to the vehicle's `max_speed_mps`.
@@ -472,11 +571,11 @@ pursuit point (green).
 
 ## Path Follower
 
-`path_follower.rs` is a port of ubm's `path_follower_node.cpp` and
-`steering_controller.cpp`. It follows the selected map's race line, like
-`pure_pursuit`, and uses the same pose sources (`pose_source`), which also
-supply the speed `v` (odometry's, or `vehicle_status`'s). Its parameters live
-in `config/autonomous_control/path_follower.toml`.
+`path_follower.rs` follows the selected map's race line, like
+`pure_pursuit`, with a choice of steering laws and an optional feedforward.
+It uses the same pose sources (`pose_source`), which also supply the speed
+`v` (odometry's, or `vehicle_status`'s). Its parameters live in
+`config/autonomous_control/path_follower.toml`.
 
 Each tick it does the following:
 
@@ -486,7 +585,7 @@ Each tick it does the following:
    - **0, PD (default).** The lookahead point is
      `look_ahead_gain_s · v + min_look_ahead_m` metres ahead of the nearest
      point. The heading error is measured from the pose moved back by
-     `L`, as ubm does. Steering is
+     `L`. Steering is
      `kk_s · err + clamp(kd_s · d(err)/dt, ±0.2)`, with no derivative on the
      first tick.
    - **1, P-enhanced.** Steering starts as `kk_s · err`. Above `min_speed`,
@@ -511,17 +610,15 @@ Each tick it does the following:
 
 The vehicle is held stopped in the same cases as `pure_pursuit`: no race
 line, no trustworthy pose, or farther than `max_cross_track_m` from the
-line. ubm had no such guard. Lap statistics and lap progress aren't ported.
+line.
 
 The drawing shows the nearest point (blue), the target (the lookahead or
 Stanley point, purple), and the chord to it.
 
 ## Frenet overtaking
 
-`frenet_overtaking.rs` is a port of ubm's `frenet_map_based_node.cpp`
-and the `plan_map_based` part of `frenet_overtaking.cpp`. It follows the
-race line like the Path Follower's PD or P-enhanced law (`controller`
-0 or 1). When the LIDAR sees something on the track that the map doesn't
+`frenet_overtaking.rs` follows the race line like the Path Follower's PD
+or P-enhanced law (`controller` 0 or 1). When the LIDAR sees something on the track that the map doesn't
 contain, such as an opponent, it steers along a Frenet path around it
 instead. Its parameters live in
 `config/autonomous_control/frenet_overtaking.toml`. The planner is in
@@ -534,8 +631,8 @@ and the selected map.
 ### Each tick
 
 1. **Free space.** The map's white pixels, shrunk away from every wall by
-   `wall_clearance_m`, form the free space. This replaces ubm's 9 px
-   `cv::erode`, and is rebuilt only when the map or the clearance changes.
+   `wall_clearance_m`, form the free space. It's rebuilt only when the map
+   or the clearance changes.
 2. **Obstacles.** A LIDAR reading is an obstacle when its world point
    lands on the free space. Only every `lidar_downsample`-th reading
    within `desired_fov_deg` straight ahead and closer than
@@ -585,32 +682,6 @@ race line, no trustworthy pose, or farther than `max_cross_track_m` from the
 line. `max_cross_track_m` defaults wider here (1.5 m), since overtaking
 leaves the line.
 
-### Differences from ubm
-
-**Bug fixes:**
-
-- The LIDAR field of view is honoured. ubm's filter compared with `||`,
-  so it let every reading through.
-- `lidar_downsample` is at least 1. At 0, ubm's scan loop never ended.
-- `path_fov_deg` limits both sides. ubm's check had no absolute value, so
-  it only rejected paths swerving toward negative offsets.
-
-**Improvements:**
-
-- **Slope matching.** A path starts along the vehicle's current slope, so
-  replanning doesn't kink the path the vehicle is on. ubm's paths started
-  flat and ended with zero curvature.
-- **Braking.** The reach-based speed cap is new. ubm only slowed to a
-  fixed fraction, and only once even its shortest path was blocked.
-- **Fallback path.** ubm fell back to the cheapest path overall, even
-  one running straight into the obstacle.
-- **Target point.** The target is the first point at least the lookahead
-  distance along the path; ubm's was one point short.
-- **Speed.** The curvature slowdown doesn't compound from tick to tick.
-
-**Not ported:** the external detector switch, map B, the basic
-(all-LIDAR-points) planner, and lap statistics.
-
 ### Drawing
 
 The drawing shows:
@@ -625,10 +696,9 @@ avoiding.
 
 ## MPC
 
-`mpc.rs` is a port of ubm's MPC path follower
-(`mpc_path_follower_node.cpp` and `mpc_casadi.cpp`). It follows the race
-line with a model predictive controller over a kinematic bicycle and steers
-around the opponent that `UbmDetector` reports. Its parameters live in
+`mpc.rs` follows the race line with a model predictive controller over a
+kinematic bicycle and steers around the opponent that `UbmDetector`
+reports. Its parameters live in
 `config/autonomous_control/mpc.toml`. The optimal-control problem is in
 `shared/mpc.rs`.
 
@@ -638,20 +708,19 @@ optional: without them, those terms are simply left out.
 
 ### The problem
 
-- **Model.** ubm's kinematic bicycle, referenced at the middle of the
+- **Model.** A kinematic bicycle, referenced at the middle of the
   wheelbase, stepped over a fixed arc length `step_m` rather than a fixed
   time. The slip angle is `β = atan(tan δ / 2)`, the vehicle travels along
   `θ + β`, and the heading changes by `step · tan δ · cos β / L`.
   The path doesn't depend on the speed, which only enters the cost.
 - **Variables.** One steering and one speed per step: `horizon − 1` pairs.
-  ubm also made the states variables and the dynamics equality constraints,
-  solved by CasADi with IPOPT. Here the states are simulated forward from
-  the controls (single shooting), which leaves only box constraints, so
-  PANOC solves it (`optimization_engine`, as `planning::min_curvature` does).
-  The gradient is a hand-written reverse pass through that simulation.
+  The states aren't variables: they're simulated forward from the controls
+  (single shooting), which leaves only box constraints, so PANOC solves it
+  (`optimization_engine`, as `planning::min_curvature` does). The gradient
+  is a hand-written reverse pass through that simulation.
 - **Targets.** One point every `step_m` along the race line from the
   vehicle's projection, with `scale_speed ·` the line's profile speed.
-- **Cost.** Each term is averaged over the horizon, as in ubm, so a weight
+- **Cost.** Each term is averaged over the horizon, so a weight
   keeps its meaning when the horizon changes:
   - `distance_weight`: squared distance of each predicted position from its
     target.
@@ -663,21 +732,19 @@ optional: without them, those terms are simply left out.
     `walls_margin_m` from the nearest wall. The distance comes from the
     map's distance transform, interpolated bilinearly so it has a gradient.
   - `opponent_distance_weight`: the opponent is predicted at constant
-    velocity to the time the vehicle reaches each step (`Σ step / (v + 0.01)`,
-    as in ubm). Each predicted position costs `exp(−4 d / opponent_radius_m)`
+    velocity to the time the vehicle reaches each step (`Σ step / (v + 0.01)`).
+    Each predicted position costs `exp(−4 d / opponent_radius_m)`
     with `use_gaussian = 1`, or `1 / d²` with `use_gaussian = 0`.
 - **Constraints.** The first steering is the one last commanded, clamped
-  to 90% of the limit as in ubm. Every other steering stays within the
+  to 90% of the limit. Every other steering stays within the
   vehicle's `max_steering_angle_rad`. Each speed stays between
   `min_speed_gain` and `max_speed_gain` times its target's, and never above
   the vehicle's `max_speed_mps`.
 - **Solver.** At most `solver_max_iterations` PANOC iterations and
   `solver_max_ms`. If it runs out before converging, it follows its best
-  iterate, as ubm did with `opti.debug()`, and the panel says so.
+  iterate, and the panel says so. A solve typically takes 0.05–0.5 ms.
 
 ### Each tick
-
-Ported from ubm's `control_loop`:
 
 1. **Locate.** Where the vehicle is along the last prediction, as a
    fractional index between its two nearest states.
@@ -705,42 +772,6 @@ prediction while it's missed for up to `opponent_timeout_s` after the last
 detection. Only the ego vehicle uses it, because the detector only looks at
 the ego's LIDAR.
 
-### Differences from ubm
-
-**Bug fixes:**
-
-- The speed's upper bound is `max_speed_gain ·` the target speed. ubm
-  multiplied by its maximum speed (10) instead, so `max_speed_gain` did
-  nothing.
-- The steering is bounded by the vehicle's limit. ubm used a hard-coded
-  0.8 rad and never read `max_steer`.
-- Every weight can be tuned live. ubm read the weights through pointers,
-  but they were baked into the CasADi graph when the problem was built.
-- The walls term is always applied. ubm only added it with an opponent.
-- The map is looked up in its own frame. ubm flipped y.
-- The controls are never read past the end of the horizon. ubm's
-  interpolation could index one past it.
-
-**Improvements:**
-
-- **Solver.** PANOC with a hand-written gradient in place of CasADi and
-  IPOPT: typically 0.05–0.5 ms per solve.
-- **Warm start.** A shifted solution is padded with its last control.
-  ubm padded with straight ahead at 1 m/s.
-- **Walls term.** A distance field of the selected map replaces ubm's
-  precomputed `ExtendedMapFunction.casadi`.
-- **Opponent hold.** The detector's prediction is used for
-  `opponent_timeout_s` after the last detection. ubm dropped the opponent
-  at the first missed scan.
-- **Opponent re-solve.** With an opponent, it solves again on every tick.
-  ubm waited until the vehicle had moved along its prediction, so a car
-  standing still (e.g. on the grid) ignored an opponent that appeared.
-
-**Not ported:** ubm's unused parameters (`border_weight`,
-`race_line_d_weight`, `low_speed_weight`, `total_time_weight`,
-`high_theta_dot_weight`, `look_ahead_*`, `controls_index`), the
-`set_max_speed` topic, and lap statistics.
-
 ### Drawing
 
 The drawing shows:
@@ -763,6 +794,8 @@ reported as the algorithm's stats (`report_stats`), shown in purple in
 - **Publish at least once per second.** The handler treats anything older than
   `VESC_COMMAND_TIMEOUT` (1 s) as stale and stops the vehicle. Publishing at
   tens of Hz is typical.
+- **Reach per-vehicle topics through the `Instance`,** never by a fixed
+  name: the same code drives opponents, whose topics have a prefix.
 - **Steering sign:** a *negative* `servo_position_rad` steers **left**, a
   positive one steers **right**. The world frame has y pointing down, so a
   positive heading change is clockwise on screen. See the doc comment on
@@ -783,12 +816,15 @@ reported as the algorithm's stats (`report_stats`), shown in purple in
 
 | File | Role |
 |---|---|
-| `build.rs` | Generates the module list and `autonomous_control::all()` |
-| `src/autonomous_control.rs` | `AutonomousControlsHandler`, module docs |
+| `build.rs` | Generates the module list, `autonomous_control::all()` and `autonomous_control::build()` |
+| `src/autonomous_control.rs` | `AutonomousControlsHandler`, `Instance`, module docs |
 | `src/autonomous_control/*.rs` | One algorithm per file |
-| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), ubm's PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`), the MPC's optimal-control problem (`mpc.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
+| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), the PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`), the MPC's optimal-control problem (`mpc.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
 | `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
-| `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` |
-| `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `load_config`/`save_parameters` |
-| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter`, `POST /api/autonomous_parameters_save` |
+| `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` and `vehicle_geometry` |
+| `src/actuators/vesc/driver.rs` | The same on the real car |
+| `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `report_message`/`report_stats`; `load_config`/`save_parameters` |
+| `src/topics/vehicle_topics.rs` | `VehicleTopics`: the per-vehicle topic names, for the ego vehicle and for opponents |
+| `src/opponents.rs` | `OpponentsManager`, which adds and removes opponents |
+| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter`, `POST /api/autonomous_parameters_save`, `POST /api/autonomous_parameters_load` |
 | `src/bin/web_gui/main.rs` | Adds the handler and every algorithm from `all()` |
