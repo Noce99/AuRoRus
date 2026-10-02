@@ -195,8 +195,7 @@ fn holds_a_map(folder: &Path) -> bool {
 }
 
 /// A fresh seed for one generation run, for callers that don't have an
-/// explicit one to use (`web_gui`'s generate popup, `generate_map` without
-/// `--seed`).
+/// explicit one to use (`web_gui`'s generate popup).
 ///
 /// Derived from the wall clock at *nanosecond* resolution and mixed with a
 /// per-process counter, so two runs started in the same second - two quick

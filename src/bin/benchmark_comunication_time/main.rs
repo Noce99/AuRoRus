@@ -3,8 +3,8 @@
 //!
 //! One [`reader_writer::WriterExecutor`] publishes a payload at a fixed rate; several
 //! [`reader_writer::ReaderExecutor`]s each independently poll for the latest payload,
-//! spread across 5 fixed rate tiers. See `README.md` for the full design rationale
-//! and measured numbers.
+//! spread across 5 fixed rate tiers. See `documentation/core_framework.md` for the
+//! full design rationale and measured numbers.
 
 // `cli`, `progress` and `verifier` are byte-identical between the two
 // benchmarks, so they live once in `src/bin/bench_common/` and are pulled in

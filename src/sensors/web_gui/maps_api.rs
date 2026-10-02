@@ -181,10 +181,10 @@ struct GenerateParams {
 
 impl GenerateParams {
     /// The values [`GenerationConfig::default`] would use, for
-    /// pre-filling the generate popup - with a freshly rolled seed (the
-    /// same [`random_seed`] `generate_map`'s CLI defaults to), rather than
-    /// the fixed `0` [`GenerationConfig::default`] itself falls back to,
-    /// which is meant for library callers that always pass an explicit one.
+    /// pre-filling the generate popup - with a freshly rolled seed (see
+    /// [`random_seed`]), rather than the fixed `0`
+    /// [`GenerationConfig::default`] itself falls back to, which is meant
+    /// for library callers that always pass an explicit one.
     fn defaults() -> Self {
         let d = GenerationConfig::default();
         Self {

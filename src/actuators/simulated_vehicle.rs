@@ -216,7 +216,7 @@ pub struct SimulatedVehicleConfig {
 
 impl Default for SimulatedVehicleConfig {
     /// RC-car-scale geometry and actuator limits for a small (roughly
-    /// 1/10-scale) RC racecar, matching the kind of track `generate_map`
+    /// 1/10-scale) RC racecar, matching the kind of track the map generator
     /// produces, from the checked-in `config/actuators/simulated_vehicle.toml`.
     /// `dynamic_bicycle`'s mass/inertia/cornering-stiffness values are
     /// placeholder estimates for that same scale of vehicle, not measured -

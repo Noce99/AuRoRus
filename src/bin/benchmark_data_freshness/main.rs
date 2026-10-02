@@ -6,7 +6,7 @@
 //! the writer's timestamp) the payload was at the moment they read it. Unlike
 //! `benchmark_comunication_time`, which measures read/write call latency, this
 //! measures end-to-end data staleness: how far behind the writer's clock a reader's
-//! view of the world can lag. See `README.md` for the full design rationale.
+//! view of the world can lag. See `documentation/core_framework.md`.
 
 // `cli`, `progress` and `verifier` are byte-identical between the two
 // benchmarks, so they live once in `src/bin/bench_common/` and are pulled in
