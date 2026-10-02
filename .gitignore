@@ -1,5 +1,5 @@
 /target
-/maps
+/maps/*
 /plan
 /debugs
 other_repos/
@@ -9,3 +9,9 @@ other_repos/
 # src/calibration.rs.
 /CAR_NAME
 /config/calibration/history/
+
+# Important Maps
+!/maps/Atlanta 2025
+!/maps/Vienna 2026 Final Bridge
+!/maps/Vienna 2026 Final Ground
+!/maps/Vienna 2026 Quali
