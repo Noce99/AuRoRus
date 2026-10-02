@@ -839,7 +839,9 @@ impl SimulatedVehicle {
 
 /// `file_config` with the model the ego vehicle currently runs (`ego`, as it
 /// publishes it on [`VEHICLE_MODEL_STATUS_TOPIC_NAME`]) and `limits` - and
-/// that model - for an opponent (see [`SimulatedVehicle::opponent`]).
+/// that model - for an opponent (see [`SimulatedVehicle::opponent`]). But the
+/// steering angle, which stays `file_config`'s: it's the car's, not a limit an
+/// opponent picks.
 pub fn opponent_model(
     mut file_config: SimulatedVehicleConfig,
     ego: &VehicleModelStatus,
@@ -851,7 +853,10 @@ pub fn opponent_model(
         .map(|parameter| (parameter.name.clone(), parameter.value))
         .collect();
     apply_wanted(ego.kind, &mut file_config, &wanted);
-    file_config.limits = limits;
+    file_config.limits = ActuatorLimits {
+        max_steering_angle_rad: file_config.limits.max_steering_angle_rad,
+        ..limits
+    };
     (default_model(ego.kind, &file_config), file_config)
 }
 
@@ -1593,6 +1598,27 @@ mod tests {
         assert_eq!(config.dynamic_bicycle, ego_config.dynamic_bicycle);
         assert_eq!(config.limits, limits);
         assert_eq!(limits_of(&model), limits);
+    }
+
+    #[test]
+    fn an_opponent_steers_as_far_as_the_car_whatever_its_limits_say() {
+        let ego_config = SimulatedVehicleConfig::default();
+        let ego = model_status(VehicleModelKind::Bicycle, &ego_config);
+        // What the web GUI's form sends: every limit but the steering angle.
+        let limits = ActuatorLimits {
+            max_steering_angle_rad: 0.0,
+            max_speed_mps: 1.5,
+            ..ego_config.limits
+        };
+
+        let (model, config) = opponent_model(ego_config.clone(), &ego, limits);
+
+        let expected = ActuatorLimits {
+            max_speed_mps: 1.5,
+            ..ego_config.limits
+        };
+        assert_eq!(config.limits, expected);
+        assert_eq!(limits_of(&model), expected);
     }
 
     #[test]

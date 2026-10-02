@@ -67,9 +67,11 @@ pub fn validate<'a>(
 }
 
 /// Whether every one of `limits` is within its tunable range (see
-/// [`ActuatorLimits::tunable_parameters`]) - else why not.
+/// [`ActuatorLimits::tunable_parameters_but_steering_angle`]) - else why not.
+/// The steering angle is the car's, not the opponent's to pick (see
+/// [`opponent_model`]).
 fn limits_within_range(limits: &ActuatorLimits) -> Result<(), String> {
-    let mut parameters = ActuatorLimits::tunable_parameters();
+    let mut parameters = ActuatorLimits::tunable_parameters_but_steering_angle();
     crate::config::refresh_parameter_values(&mut parameters, limits);
     for parameter in parameters {
         if parameter.kind.sanitize(parameter.value) != Some(parameter.value) {
@@ -427,6 +429,23 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn a_spec_without_a_steering_angle_is_accepted() {
+        // What the web GUI's form sends: every limit but the steering angle,
+        // which is the car's.
+        let mut limits = serde_json::to_value(SimulatedVehicleConfig::default().limits).unwrap();
+        limits
+            .as_object_mut()
+            .unwrap()
+            .remove("max_steering_angle_rad");
+        let spec = OpponentSpec {
+            limits: serde_json::from_value(limits).unwrap(),
+            ..spec("gap_follower", None)
+        };
+        assert_eq!(spec.limits.max_steering_angle_rad, 0.0);
+        assert!(validate(&spec, &algorithms(), &[]).is_ok());
     }
 
     #[test]
