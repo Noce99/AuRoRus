@@ -1,10 +1,8 @@
-//! The pure steps of ubm's `detector_py` (`detector_py.py`,
-//! `kalman_filter.py`) used by [`super::UbmDetector`]: finding the stretch
-//! of a scan that's shorter than the map predicts ([`find_plateaus`]),
-//! rejecting one on a wall ([`near_wall`]), smoothing it over time
-//! ([`Kalman`]) - plus a rectangle fit around its points ([`fit_rectangle`],
-//! the closeness-criterion L-shape fit of ubm's `detector_cpp`), which
-//! `detector_py` doesn't have.
+//! The pure steps used by [`super::UbmDetector`]: finding the stretch of a
+//! scan that's shorter than the map predicts ([`find_plateaus`]), rejecting
+//! one on a wall ([`near_wall`]), smoothing it over time ([`Kalman`]) - plus
+//! a rectangle fit around its points ([`fit_rectangle`], a
+//! closeness-criterion L-shape fit).
 
 use crate::topics::BoundingBox;
 
@@ -25,8 +23,8 @@ pub(crate) struct PlateauLimits {
     /// `0` picks the threshold from the scan itself.
     pub(crate) gradient_threshold: f64,
     /// Narrowest a stretch may be, in meters across: its rays times
-    /// `ray_step_rad` times its median real range. (ubm counted rays, which
-    /// ties the threshold to one lidar's resolution.)
+    /// `ray_step_rad` times its median real range. (Counting rays instead
+    /// would tie the threshold to one lidar's resolution.)
     pub(crate) min_width_m: f64,
     /// Angle between two consecutive rays of the scan.
     pub(crate) ray_step_rad: f64,
@@ -47,16 +45,16 @@ const EDGE_MIN_REAL_STEP_M: f64 = 0.15;
 /// opponent nearest the ego vehicle, e.g. for its MPC.
 pub(crate) const SELECTION_CLOSEST: u8 = 1;
 
-/// `detect_object_in_difference`: every stretch where `real` is shorter
+/// Every stretch where `real` is shorter
 /// than `expected` (both one range per ray, same length) by a consistent
 /// amount, best first - so a caller rejecting one (e.g. on a wall) falls
-/// back on the next rather than on nothing (ubm returned only the best).
+/// back on the next rather than on nothing.
 ///
 /// The positive difference is median-filtered, then split at an object's
 /// edges: every jump in it larger than the gradient threshold, either from a
 /// level below that threshold (next to nothing in front of the map) or back,
 /// or between two levels above it where the (median-filtered) real scan
-/// moves by at least [`EDGE_MIN_REAL_STEP_M`] too (ubm split at every jump).
+/// moves by at least [`EDGE_MIN_REAL_STEP_M`] too.
 /// Of the stretches between them at least `min_width_m` wide, whose real
 /// ranges spread less than `max_std_m` and which are on average at least
 /// `min_mean_difference_m` shorter than expected, the ones scoring lowest - wide, flat and far in
@@ -78,8 +76,8 @@ pub(crate) fn find_plateaus(
     // How much the real scan itself moves between two rays: a jump in the
     // difference between two levels of something in front of the map is
     // only an object's edge if the real scan moves too - not if it's only
-    // the map jumping *behind* the object (a wall's corner), which ubm took
-    // for an edge, cutting the object in pieces often too narrow to count.
+    // the map jumping *behind* the object (a wall's corner), which taken
+    // for an edge would cut the object in pieces often too narrow to count.
     let smoothed_real = median_filter(&real[..n], limits.median_kernel_size);
     let real_step: Vec<f64> = smoothed_real
         .windows(2)
@@ -150,8 +148,8 @@ pub(crate) fn find_plateaus(
 }
 
 /// `values` median-filtered over a window of `kernel_size` (at least 1),
-/// reflecting them at either end - scipy's `median_filter` with its default
-/// `mode="reflect"`, as `detector_py` calls it.
+/// reflecting them at either end - like scipy's `median_filter` with its
+/// default `mode="reflect"`.
 pub(crate) fn median_filter(values: &[f64], kernel_size: usize) -> Vec<f64> {
     let n = values.len() as isize;
     let kernel_size = kernel_size.max(1) as isize;
@@ -227,8 +225,8 @@ pub(crate) fn near_wall(
 }
 
 /// One axis of `KalmanFilter2D`: position and velocity under a constant
-/// velocity model, measured in position only. `detector_py`'s 4-state
-/// filter keeps x and y apart in every matrix (they start, move and get
+/// velocity model, measured in position only. A 4-state filter over x and
+/// y would keep them apart in every matrix (they start, move and get
 /// measured independently, with the same noises), so two of these are
 /// exactly it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -288,11 +286,9 @@ impl Kalman {
 }
 
 /// The oriented rectangle around `points` whose sides they hug closest -
-/// the closeness-criterion search of `detector_cpp`'s
-/// `obs_point_clouds_2_obs_array` (Zhang et al., "Efficient L-Shape
-/// Fitting for Vehicle Detection Using Laser Scanners"), trying every whole
-/// degree in `[0, 90)`. Unlike `detector_cpp`, which keeps one side and
-/// makes a square of it, both sides are kept. `min_distance_m` caps how
+/// the closeness-criterion search of Zhang et al., "Efficient L-Shape
+/// Fitting for Vehicle Detection Using Laser Scanners", trying every whole
+/// degree in `[0, 90)`. Both sides are kept. `min_distance_m` caps how
 /// much a single point lying on a side can weigh. `None` for fewer than two
 /// points.
 pub(crate) fn fit_rectangle(points: &[[f64; 2]], min_distance_m: f64) -> Option<BoundingBox> {
@@ -374,7 +370,7 @@ fn bounds(values: &[f64]) -> (f64, f64) {
 mod tests {
     use super::*;
 
-    /// The best stretch, as ubm's `detect_object_in_difference` returned it.
+    /// The best stretch.
     fn find_plateau(expected: &[f64], real: &[f64], limits: &PlateauLimits) -> Option<Plateau> {
         find_plateaus(expected, real, limits).into_iter().next()
     }
@@ -426,7 +422,7 @@ mod tests {
         let mut real = expected.clone();
         real[10..25].fill(4.0);
         real[60..75].fill(1.0);
-        // ubm's score favors the larger difference: the far one.
+        // The score favors the larger difference: the far one.
         let best = find_plateau(&expected, &real, &limits()).unwrap();
         assert_eq!(best.median_range_m, 4.0, "{best:?}");
         let closest = PlateauLimits {
@@ -459,7 +455,7 @@ mod tests {
     #[test]
     fn a_car_is_found_however_few_rays_it_takes() {
         // A car's rear, 0.25 m wide: 4 rays of the simulated lidar from
-        // 4.5 m on - ubm's 5-ray minimum lost it there.
+        // 4.5 m on - a 5-ray minimum would lose it there.
         for distance_m in [1.0, 2.0, 3.0, 4.5, 5.0, 6.0, 7.0] {
             let (expected, real) = object_ahead(distance_m, 0.25, 10.0);
             let plateau = find_plateau(&expected, &real, &limits());
@@ -474,8 +470,8 @@ mod tests {
     #[test]
     fn a_corner_behind_an_object_does_not_cut_it_in_two() {
         // A car's rear 1.4 m ahead, over a wall whose range jumps from 7 m to
-        // 10 m right behind its middle: split on the difference, as ubm
-        // did, it made two stretches narrower than min_width_m.
+        // 10 m right behind its middle: split on the difference alone, it
+        // would make two stretches narrower than min_width_m.
         let (mut expected, real) = object_ahead(1.4, 0.25, 10.0);
         expected[..180].fill(7.0);
         let plateau = find_plateau(&expected, &real, &limits()).expect("the car");
@@ -528,7 +524,7 @@ mod tests {
 
     #[test]
     fn too_narrow_an_object_is_not_one() {
-        // 0.08 m across at 1 m: 7 rays, plenty for ubm's 5-ray minimum.
+        // 0.08 m across at 1 m: 7 rays, plenty for a 5-ray minimum.
         let (expected, real) = object_ahead(1.0, 0.08, 10.0);
         assert_eq!(find_plateau(&expected, &real, &limits()), None);
         let wide_enough = PlateauLimits {

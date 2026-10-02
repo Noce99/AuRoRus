@@ -1,15 +1,14 @@
-//! The optimal-control problem behind [`mpc`](crate::autonomous_control):
-//! ubm's `MPCEuclidianDistance` (`mpc_casadi.cpp`), solved with PANOC
-//! instead of CasADi/IPOPT.
+//! The optimal-control problem behind [`mpc`](crate::autonomous_control),
+//! solved with PANOC.
 //!
-//! ubm's multiple shooting (states as variables, the dynamics as equality
-//! constraints) becomes single shooting here: the states are simulated
-//! forward from the controls, so the only decision variables are the
+//! It's single shooting, not multiple shooting (states as variables, the
+//! dynamics as equality constraints): the states are simulated forward
+//! from the controls, so the only decision variables are the
 //! `horizon - 1` controls `(steering, speed)` and the only constraints are
 //! boxes on them - exactly what PANOC handles. The gradient is the reverse
 //! pass through that simulation.
 //!
-//! The model is ubm's kinematic bicycle stepped over a fixed *arc length*
+//! The model is a kinematic bicycle stepped over a fixed *arc length*
 //! (not a fixed time): the path doesn't depend on the speed, which only
 //! enters the cost - and the time at which the vehicle reaches each step,
 //! against which an opponent is predicted.
@@ -31,7 +30,7 @@ const LBFGS_MEMORY: usize = 10;
 pub(crate) const MIN_HORIZON: usize = 4;
 
 /// Weight of each term of the cost - each one already averaged over the
-/// horizon, as ubm does, so a weight doesn't change meaning with it.
+/// horizon, so a weight doesn't change meaning with it.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct Weights {
     /// Squared distance of each predicted position from its target point.
@@ -52,13 +51,13 @@ pub(crate) struct Weights {
 }
 
 /// Added to the speed when turning a step's length into time, so a
-/// standstill doesn't take forever - ubm's.
+/// standstill doesn't take forever.
 const TIME_SPEED_EPSILON_MPS: f64 = 0.01;
 
 /// Keeps the Gaussian opponent cost's distance differentiable where it's 0.
 const DISTANCE_EPSILON_M2: f64 = 1e-6;
 
-/// Keeps the inverse-square opponent cost finite where the distance is 0 - ubm's.
+/// Keeps the inverse-square opponent cost finite where the distance is 0.
 const INVERSE_SQUARE_EPSILON_M2: f64 = 1e-4;
 
 /// Distance to the nearest wall across a map, in meters - interpolated
@@ -133,8 +132,7 @@ impl DistanceField {
 }
 
 /// The walls term: every predicted position closer than `margin_m` to a
-/// wall costs the square of how much closer. (ubm's was a precomputed
-/// CasADi interpolant of its own, looked up with y flipped.)
+/// wall costs the square of how much closer.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Walls {
     pub(crate) field: Arc<DistanceField>,
@@ -144,7 +142,7 @@ pub(crate) struct Walls {
 /// The opponent term: the opponent is predicted at constant velocity to
 /// the time the vehicle reaches each step, and each predicted position
 /// costs `exp(-4 distance / radius_m)` if `gaussian`, else
-/// `1 / distance²` - ubm's.
+/// `1 / distance²`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Opponent {
     pub(crate) position: [f64; 2],
@@ -222,7 +220,7 @@ impl Mpc {
         2 * (self.horizon() - 1)
     }
 
-    /// One step of ubm's bicycle model with steering `delta` from heading
+    /// One step of the bicycle model with steering `delta` from heading
     /// `theta`: slip angle `beta = atan(tan(delta) / 2)`, travel along
     /// `theta + beta`, heading change `step tan(delta) cos(beta) / wheelbase`.
     fn step(&self, theta: f64, delta: f64) -> Step {
@@ -442,7 +440,7 @@ pub(crate) struct Solution {
     pub(crate) states: Vec<State>,
     pub(crate) cost: f64,
     /// Whether PANOC converged - if not, the solution is its best iterate
-    /// when it ran out of iterations or time, as ubm used `opti.debug()`.
+    /// when it ran out of iterations or time.
     pub(crate) converged: bool,
     pub(crate) iterations: usize,
 }
@@ -856,7 +854,7 @@ mod tests {
             assert!(steering.abs() <= 0.3 + 1e-12, "{steering}");
             assert!((1.0 - 1e-12..=2.5 + 1e-12).contains(&speed), "{speed}");
         }
-        // max_gain, not ubm's MAX_SPEED, caps the speed under max_speed_mps.
+        // max_gain caps the speed under max_speed_mps.
         let bounds = Bounds::new(&mpc, 0.0, 0.3, 0.5, 1.5, 10.0);
         assert!(bounds.upper.iter().skip(1).step_by(2).all(|&v| v == 3.0));
         // Never an empty range, even with min_gain above max_gain.

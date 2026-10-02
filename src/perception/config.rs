@@ -33,7 +33,7 @@ pub struct UbmDetectorConfig {
     pub prediction_count: usize,
     pub prediction_dt_s: f64,
     pub min_2_points_dist_m: f64,
-    /// Which object wins when there are several: `0` = ubm's best score,
+    /// Which object wins when there are several: `0` = the best score,
     /// `1` = the closest.
     pub selection: u8,
 }
@@ -92,7 +92,7 @@ pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
             .unit("m")
             .description("Bounding box fit: points closer than this to a side count as this close."),
         AlgorithmParameter::int("selection", 0, 1, 1)
-            .description("Which object wins when there are several: 0 = ubm's best score, 1 = the closest."),
+            .description("Which object wins when there are several: 0 = the best score, 1 = the closest."),
     ]
 }
 

@@ -719,7 +719,7 @@ function renderLocalization(status, stale) {
 }
 
 // ---------------------------------------------------------------------
-// Detector panel - shows what `UbmDetector` (ubm's detector_py) found in the
+// Detector panel - shows what `UbmDetector` found in the
 // ego vehicle's latest scan and why it isn't detecting, from `/api/detector`
 // (the `detector_status` and `detected_opponent` topics), and tunes it
 // through `detector_parameters`. The opponent and its bounding box are

@@ -1,4 +1,4 @@
-//! [`UbmDetector`]: ubm's `detector_py` as an [`Executor`] - on every new
+//! [`UbmDetector`]: the map-difference opponent detector - on every new
 //! ego lidar scan, compares it with the scan the map alone would give from
 //! the ego vehicle's pose and publishes the opponent that makes up the
 //! difference on [`DETECTED_OPPONENT_TOPIC_NAME`], tuned live through
@@ -168,7 +168,7 @@ fn detect(
     (Some(Detection { measured, points }), expected_hits)
 }
 
-/// The two axes of `detector_py`'s Kalman filter.
+/// The two axes of the detector's Kalman filter.
 #[derive(Debug, Clone, Copy, Default)]
 struct Tracker {
     x: Kalman,
