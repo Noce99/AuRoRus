@@ -6,12 +6,13 @@
 
 use super::config::{UbmDetectorConfig, tunable_parameters};
 use super::map_difference::{Kalman, PlateauLimits, find_plateaus, fit_rectangle, near_wall};
-use crate::autonomous_control::shared::race_line::{Pose, pose};
-use crate::sensors::cast_ray;
+use crate::environment::cast_ray;
+use crate::geometry::Pose;
+use crate::localization::pose_source::pose;
 use crate::topics::{
     AlgorithmParameter, Color, DETECTED_OPPONENT_TOPIC_NAME, DETECTOR_PARAMETERS_TOPIC_NAME,
     DETECTOR_STATUS_TOPIC_NAME, DetectedOpponent, DetectorParameters, DetectorStatus, Drawing,
-    LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape, VehicleTopics,
+    DrawingExt, LidarScan, MAP_TOPIC_NAME, SelectedMap, Shape, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;

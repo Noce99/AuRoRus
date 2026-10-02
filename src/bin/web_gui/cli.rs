@@ -29,7 +29,7 @@ pub struct Config {
     /// `--sim`: simulate, even on a car.
     pub sim: bool,
     /// `--car NAME`: the car to run as, instead of the one `CAR_NAME` names
-    /// (see [`aurorus::hardware::read_car_name`]).
+    /// (see [`aurorus::calibration::read_car_name`]).
     pub car: Option<String>,
 }
 
@@ -83,7 +83,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          \x20                    otherwise: PATH itself (overwritten if it already exists)\n  \
          --debug_frequency HZ  debug recording rate, in Hz (default: {DEFAULT_DEBUG_FREQUENCY_HZ})\n  \
          --sim                 simulate, even on a car - without it, a machine whose CAR_NAME\n  \
-         \x20                    file names a car (config/hardware/<car>.toml) runs on it: its\n  \
+         \x20                    file names a car (config/calibration/<car>.toml) runs on it: its\n  \
          \x20                    Hokuyo lidar and VESC, and no simulated opponents\n  \
          --car NAME            the car to run as, instead of the one CAR_NAME names\n  \
          -h, --help            print this message",
@@ -146,7 +146,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
                 let name = args
                     .next()
                     .unwrap_or_else(|| fail(format!("Missing value for {flag}")));
-                if let Err(err) = aurorus::hardware::valid_name(&name) {
+                if let Err(err) = aurorus::calibration::valid_name(&name) {
                     fail(err);
                 }
                 car = Some(name);

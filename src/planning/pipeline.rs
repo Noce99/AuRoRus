@@ -4,15 +4,15 @@
 //! [`PlanningObjective::MinTime`] - the minimum-time line from there.
 
 use super::config::{PlanningConfig, PlanningVehicle};
-use super::geometry::{
-    Point2, loop_length, max_abs_curvature, orient_from, resample_even_spacing, smooth,
-};
 use super::min_curvature::{self, Iteration};
 use super::min_time;
 use super::speed_profile::{lap_time, speeds};
 use super::track::TrackGrid;
 use super::{PlanError, centerline};
 use crate::environment::{Map, SpeedPoint};
+use crate::geometry::{
+    Point2, loop_length, max_abs_curvature, orient_from, resample_even_spacing, smooth,
+};
 use crate::topics::PlanningObjective;
 
 /// What [`plan`] tells its caller along the way.

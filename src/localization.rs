@@ -7,6 +7,7 @@
 //! together the best pose available, for drawing.
 
 mod dead_reckoning;
+pub(crate) mod pose_source;
 mod slam;
 mod vehicle_pose;
 

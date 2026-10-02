@@ -22,16 +22,15 @@ use crate::autonomous_control::shared::mpc::{
     Bounds, Cache, DistanceField, MIN_HORIZON, Mpc as MpcProblem, Opponent, Solution,
     SolverSettings, State as MpcState, Target, Walls, Weights, solve,
 };
-use crate::autonomous_control::shared::race_line::{
-    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed,
-};
 use crate::autonomous_control::{
-    Instance, ParameterTuner, load_config, report_message, report_stats,
+    AutonomousControlExt, Instance, ParameterTuner, load_config, report_message, report_stats,
 };
+use crate::geometry::{Line, Nearest, Pose};
+use crate::localization::pose_source::{POSE_GROUND_TRUTH, pose, speed};
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color,
-    DETECTED_OPPONENT_TOPIC_NAME, DetectedOpponent, Drawing, MAP_TOPIC_NAME, SelectedMap,
-    SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
+    DETECTED_OPPONENT_TOPIC_NAME, DetectedOpponent, Drawing, DrawingExt, MAP_TOPIC_NAME,
+    SelectedMap, SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -67,8 +66,8 @@ const FIRST_STEERING_MARGIN: f64 = 0.9;
 pub struct MpcConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
-    /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
-    /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
+    /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
+    /// or [`POSE_GROUND_TRUTH`](crate::localization::pose_source::POSE_GROUND_TRUTH).
     pub pose_source: u8,
     /// Steps in the prediction, the vehicle's own pose included.
     pub horizon: usize,

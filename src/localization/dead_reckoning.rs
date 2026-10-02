@@ -2,15 +2,15 @@
 //! [`IMU_TOPIC_NAME`] into a pose on [`ODOMETRY_TOPIC_NAME`], with a
 //! covariance that grows as the assumed measurement noise accumulates.
 //! Hardware-agnostic - the same code runs on
-//! [`crate::sensors::SimulatedImu`]'s readings and, on the real car, on the
+//! [`crate::simulation::SimulatedImu`]'s readings and, on the real car, on the
 //! VESC driver's. Optionally draws where it thinks the vehicle is - a
 //! translucent vehicle over the true one, plus the trail it dead-reckoned to
 //! get there - on its own drawing topic (see [`crate::topics::Drawing`]), to
 //! compare its drift against the truth.
 
 use crate::topics::{
-    Color, Drawing, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry, Placement,
-    PlacementTopics, Shape, StartState, VehicleGeometry, VehicleStatus, VehicleTopics,
+    Color, Drawing, DrawingExt, IMU_TOPIC_NAME, ImuReading, ODOMETRY_TOPIC_NAME, Odometry,
+    Placement, PlacementTopics, Shape, StartState, VehicleGeometry, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -73,7 +73,7 @@ const DRAWING_PERIOD: Duration = Duration::from_millis(50);
 
 /// Translucent, so the true vehicle stays visible underneath.
 const DRAWN_COLOR: Color = Color::PURPLE.with_alpha(150);
-/// Above [`crate::actuators::SimulatedVehicle`]'s own drawing (`z_index`
+/// Above [`crate::simulation::SimulatedVehicle`]'s own drawing (`z_index`
 /// 10), which would otherwise hide the estimate whenever it's close to the
 /// truth.
 const DRAWN_Z_INDEX: i32 = 11;
@@ -85,7 +85,7 @@ const DRAWN_Z_INDEX: i32 = 11;
 /// [`Odometry`] once per new reading. Resets to the `odom` origin - zero
 /// covariance - whenever [`START_STATE_TOPIC_NAME`] changes or
 /// [`PLACE_AT_START_TOPIC_NAME`] is bumped, the same events
-/// [`crate::actuators::SimulatedVehicle`] places the vehicle on - its trail
+/// [`crate::simulation::SimulatedVehicle`] places the vehicle on - its trail
 /// starting from wherever that placed it (see [`Placement`]).
 pub struct DeadReckoning {
     id: u16,
@@ -493,7 +493,7 @@ mod tests {
     fn a_half_turn_of_the_kinematic_bicycle_tracks_its_cg() {
         // Fed the CG's exact vx and yaw rate, dead reckoning must follow the
         // CG - not the rear axle, which ends 2 * lr off after a half turn.
-        use crate::environment::simulator::vehicle::{
+        use crate::simulation::vehicle_models::{
             BicycleParams, BicycleState, step as bicycle_step,
         };
         let params = BicycleParams {

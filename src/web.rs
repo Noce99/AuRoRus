@@ -9,8 +9,12 @@
 //! lap telemetry bottom panel under it ([`LAP_PANEL_JS`]), and the CSS that
 //! frames them ([`BASE_CSS`]) live here once and are served by both, ahead
 //! of each binary's own `app.js` and `style.css`.
+//!
+//! `web_gui`'s own server - the [`gui::WebGui`] executor and its API - lives
+//! in [`gui`]; the other web UIs are binaries of their own under `src/bin/`.
 
 pub mod draw;
+pub mod gui;
 
 use std::error::Error;
 use std::io::{self, ErrorKind, Write};

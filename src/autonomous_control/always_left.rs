@@ -3,7 +3,7 @@
 //! shape every algorithm in this folder follows (see
 //! [`crate::autonomous_control`]).
 
-use crate::autonomous_control::Instance;
+use crate::autonomous_control::{AutonomousControlExt, Instance};
 use crate::topics::{ActuatorLimits, AutonomousAlgorithmInfo, VescCommand};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;

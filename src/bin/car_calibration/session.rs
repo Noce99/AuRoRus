@@ -5,8 +5,7 @@
 use crate::analysis::{self, RampResult, ScanHalf, StraightResult};
 use crate::bench::{Bench, FloorTest, ImuCapture, MAX_ERPM, MotorRequest, RAMP_ERPM};
 use aurorus::RwLockTopic;
-use aurorus::hardware::SteeringPoint;
-use aurorus::hardware::{self, CarCalibration, ImuMounting};
+use aurorus::calibration::{self, CarCalibration, ImuMounting, SteeringPoint};
 use aurorus::topics::LidarScan;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -117,9 +116,9 @@ impl Session {
     /// Starts calibrating the car `name`: from its file if it has one, else
     /// from the template. Forgets every step done so far.
     pub fn choose_car(&mut self, name: &str) -> Result<(), String> {
-        hardware::valid_name(name)?;
-        let original = if hardware::car_path(&self.config_root, name).exists() {
-            Some(hardware::load_car(&self.config_root, name)?)
+        calibration::valid_name(name)?;
+        let original = if calibration::car_path(&self.config_root, name).exists() {
+            Some(calibration::load_car(&self.config_root, name)?)
         } else {
             None
         };
@@ -568,11 +567,11 @@ impl Session {
         }
         let root = self.config_root.clone();
         let draft = self.draft()?;
-        draft.calibrated_at = hardware::now_local_string();
+        draft.calibrated_at = calibration::now_local_string();
         let car = draft.clone();
-        let path = hardware::save_car(&root, &car)?;
+        let path = calibration::save_car(&root, &car)?;
         if write_car_name {
-            let car_name = hardware::car_name_path(&root);
+            let car_name = calibration::car_name_path(&root);
             std::fs::write(&car_name, format!("{}\n", car.name)).map_err(|err| {
                 format!("saved {path:?}, but failed to write {car_name:?}: {err}")
             })?;
@@ -664,8 +663,8 @@ impl Session {
                 "changes": changes,
                 "saved_to": self.saved_to,
             },
-            "car_name_file": hardware::read_car_name(&self.config_root).ok().flatten(),
-            "known_cars": hardware::car_names(&self.config_root),
+            "car_name_file": calibration::read_car_name(&self.config_root).ok().flatten(),
+            "known_cars": calibration::car_names(&self.config_root),
             "done": self.done,
             "vesc": {
                 "connected": bench.connected,

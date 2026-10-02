@@ -2,7 +2,7 @@
 //! `info.json`, plus `race_lines/centerline.csv` when the centerline is
 //! known - the planned race lines next to it are catalogued by
 //! [`crate::environment::race_lines`]), independent of how that folder was produced - by
-//! [`crate::environment::simulator::generate`] (a
+//! [`crate::environment::generator::generate`] (a
 //! [`crate::environment::MapSource::Random`] map) or by
 //! [`crate::localization::Slam`] (a [`crate::environment::MapSource::Real`]
 //! map, with no centerline). See [`Map::load`].

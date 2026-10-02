@@ -1,4 +1,4 @@
-# The starting point of a new car's first calibration (see src/hardware.rs,
+# The starting point of a new car's first calibration (see src/calibration.rs,
 # CarCalibration::template): a roughly 1/10-scale RC car. car_calibration
 # replaces every value it measures. Positive y and angles are the car's
 # right everywhere.

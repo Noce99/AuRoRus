@@ -37,10 +37,10 @@
 //! progress can be reported - and the planning cancelled - in between.
 
 use super::PlanError;
-use super::geometry::{Point2, curvature_jacobian, loop_length, resample_even_spacing};
 use super::min_curvature::Offsets;
 use super::speed_profile::{SpeedLimits, speeds};
 use super::track::TrackGrid;
+use crate::geometry::{Point2, curvature_jacobian, loop_length, resample_even_spacing};
 use optimization_engine::alm::{
     AlmCache, AlmFactory, AlmOptimizer, AlmProblem, NO_JACOBIAN_MAPPING, NO_MAPPING,
 };
@@ -548,8 +548,8 @@ impl Model<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::geometry::tests::circle;
-    use crate::planning::geometry::{curvatures, left_normal, tangents};
+    use crate::geometry::closed_loop::tests::circle;
+    use crate::geometry::{curvatures, left_normal, tangents};
     use crate::planning::track::tests::ring_map;
 
     fn limits() -> SpeedLimits {

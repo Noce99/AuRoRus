@@ -3,11 +3,11 @@
 //! parameters tuned live through [`PLANNING_PARAMETERS_TOPIC_NAME`].
 
 use super::config::{PlanningConfig, PlanningVehicle, tunable_parameters};
-use super::geometry::Point2;
 use super::pipeline::{PlannedLines, Progress, plan};
 use crate::environment::{CENTERLINE_FILE_NAME, Map, RaceLineMethod, race_lines, write_line};
+use crate::geometry::Point2;
 use crate::topics::{
-    ActuatorLimits, Color, Drawing, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME,
+    ActuatorLimits, Color, Drawing, DrawingExt, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME,
     PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome,
     PlanningParameters, PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
     VEHICLE_GEOMETRY_TOPIC_NAME, VEHICLE_LIMITS_TOPIC_NAME, VehicleGeometry,
@@ -18,7 +18,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// Paint order of the progress drawing: above the map (and the race line
-/// [`crate::sensors::MapServer`] draws with it), below the vehicle.
+/// [`crate::environment::MapServer`] draws with it), below the vehicle.
 const PROGRESS_Z_INDEX: i32 = -90;
 
 /// Plans a race line for the map on [`MAP_TOPIC_NAME`] whenever

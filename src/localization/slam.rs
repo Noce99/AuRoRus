@@ -30,11 +30,11 @@ mod scan_matcher;
 
 use crate::environment;
 use crate::topics::{
-    Color, Drawing, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME,
-    Odometry, Placement, PlacementTopics, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME,
-    SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap,
-    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState, VehicleGeometry,
-    VehicleTopics,
+    Color, Drawing, DrawingExt, LIDAR_SCAN_TOPIC_NAME, LidarScan, MAP_TOPIC_NAME,
+    ODOMETRY_TOPIC_NAME, Odometry, Placement, PlacementTopics, SLAM_COMMAND_TOPIC_NAME,
+    SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape,
+    SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState,
+    VehicleGeometry, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use localizer::{Localizer, LocalizerParams};
@@ -217,7 +217,7 @@ const LOCALIZED_COLOR: Color = Color::BLUE.with_alpha(190);
 const LOOP_EDGE_COLOR: Color = Color::AMBER;
 /// Radius of the circle marking where a loop was closed, in meters.
 const LOOP_MARKER_RADIUS_M: f64 = 0.75;
-/// Above [`crate::sensors::MapServer`]'s map (`-100`), below everything
+/// Above [`crate::environment::MapServer`]'s map (`-100`), below everything
 /// else - the raster would otherwise hide the lidar hits and vehicles.
 const DRAWN_Z_INDEX: i32 = -50;
 

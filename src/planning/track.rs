@@ -5,8 +5,8 @@
 //! of a point ([`TrackGrid::free_distance`]).
 
 use super::PlanError;
-use super::geometry::Point2;
 use crate::environment::Map;
+use crate::geometry::Point2;
 use std::collections::VecDeque;
 
 /// Squared distance standing in for "infinitely far" in

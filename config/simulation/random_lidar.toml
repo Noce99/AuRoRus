@@ -1,0 +1,18 @@
+# Configuration for `aurorus::simulation::RandomLidar`, a synthetic LIDAR
+# sensor that publishes random scans for exercising downstream algorithms
+# without real hardware.
+
+# Rate at which RandomLidar publishes a new scan, in Hz.
+rate_hz = 50.0
+# How many points RandomLidar puts in every scan.
+num_points = 360
+# RandomLidar's reported minimum distance, in meters.
+min_distance_m = 0.15
+# RandomLidar's reported maximum distance, in meters.
+max_distance_m = 12.0
+# RandomLidar's reported field of view: a full rotation, in radians
+# (2*pi = 6.283185307179586).
+fov_rad = 6.283185307179586
+# Range of intensity values RandomLidar reports per point.
+intensity_min = 0.0
+intensity_max = 255.0

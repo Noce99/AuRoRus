@@ -9,7 +9,7 @@
 //! steered to as is.
 
 use crate::Captain;
-use crate::autonomous_control::shared::race_line::Pose;
+use crate::geometry::Pose;
 use crate::topics::{Color, LidarScan, Shape, VehicleStatus, VehicleTopics};
 use std::ops::Range;
 

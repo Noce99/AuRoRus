@@ -24,11 +24,11 @@
 //! returning an executor whose [`Executor::name`] is `instance.name`, which:
 //! - loads its config with [`load_config`]`(&instance.config_name)`;
 //! - claims its topics in [`Executor::claim_writing_topics`] via
-//!   [`Captain::claim_autonomous_control`] with [`Instance::algorithm_topics`],
+//!   [`AutonomousControlExt::claim_autonomous_control`] with [`Instance::algorithm_topics`],
 //!   describing itself with an [`crate::topics::AutonomousAlgorithmInfo`] for
 //!   the picker - including what it [requires](crate::topics::AlgorithmRequirements);
 //! - publishes its commands in [`Executor::run`] on
-//!   [`Captain::autonomous_control`] - more often than
+//!   [`AutonomousControlExt::autonomous_control`] - more often than
 //!   [`crate::topics::VESC_COMMAND_TIMEOUT`], or the vehicle stops;
 //! - reads every topic of the vehicle it drives through
 //!   [`Instance::vehicle`] (e.g. the actuator limits on
@@ -36,7 +36,7 @@
 //!   also drives opponents (see [`Instance::opponent`]), each through its own
 //!   topics;
 //! - if it's expensive to run, can idle while
-//!   [`Captain::is_selected_algorithm`] says it isn't selected - but only
+//!   [`AutonomousControlExt::is_selected_algorithm`] says it isn't selected - but only
 //!   when [`Instance::is_opponent`] is `false`: an opponent is never
 //!   "selected", it always drives;
 //! - optionally, lets its parameters be tuned live - see [`ParameterTuner`];
@@ -46,8 +46,9 @@
 //! See `always_left.rs` for the smallest possible example, and
 //! `gap_follower.rs` for one with tunable parameters.
 //!
-//! Code several algorithms share goes in [`shared`] - a directory, since
-//! every `.rs` file directly in `src/autonomous_control/` is an algorithm.
+//! Code several algorithms share goes in [`shared`] - `shared.rs` and the
+//! `shared/` directory, the only `.rs` file directly in
+//! `src/autonomous_control/` that isn't an algorithm.
 
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
@@ -57,16 +58,94 @@ use crate::topics::{
     AutonomousAlgorithmStatus, AutonomousParameters, AvailableAlgorithm, VESC_COMMAND_TIMEOUT,
     VehicleTopics, VescCommand,
 };
-use crate::{Captain, Executor, Stamped, Ticker};
+use crate::{Captain, Executor, RwLockTopic, Stamped, Ticker};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 include!(concat!(env!("OUT_DIR"), "/autonomous_algorithms.rs"));
 
 pub(crate) mod shared;
+
+/// What a [`Captain`] can do with an autonomous algorithm's topics - bring
+/// it into scope to call these on the captain an algorithm is handed.
+pub trait AutonomousControlExt {
+    /// Claims an autonomous algorithm instance's own `topics` for `executor_id`: its command
+    /// topic, seeded with a stationary, centered command, plus its [`AutonomousAlgorithmInfo`]
+    /// topic, written with `info` right away. For the ego vehicle (see
+    /// [`crate::topics::VehicleTopics::algorithm`]) these are
+    /// [`AUTONOMOUS_CONTROL_TOPIC_PREFIX`] and [`AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX`] followed
+    /// by the algorithm's name, e.g. `autonomous_control/always_left` - what makes an executor an
+    /// autonomous algorithm that [`AutonomousControlsHandler`] can pick - see the
+    /// [module docs](self). Call it from [`Executor::claim_writing_topics`], then get the command
+    /// topic back in [`Executor::run`] via [`autonomous_control`](Self::autonomous_control).
+    fn claim_autonomous_control(
+        &self,
+        executor_id: u16,
+        topics: &AlgorithmTopics,
+        info: AutonomousAlgorithmInfo,
+    ) -> Arc<RwLockTopic<VescCommand>>;
+
+    /// An algorithm instance's command topic, previously claimed via
+    /// [`claim_autonomous_control`](Self::claim_autonomous_control). Terminates the program, like
+    /// [`Captain::topic`], if it wasn't.
+    fn autonomous_control(&self, topics: &AlgorithmTopics) -> Arc<RwLockTopic<VescCommand>>;
+
+    /// An algorithm instance's [`AutonomousAlgorithmInfo`] topic, previously claimed via
+    /// [`claim_autonomous_control`](Self::claim_autonomous_control) - for rewriting its parameters'
+    /// values (see [`ParameterTuner`]). Terminates the program, like [`Captain::topic`], if it
+    /// wasn't.
+    fn autonomous_control_info(
+        &self,
+        topics: &AlgorithmTopics,
+    ) -> Arc<RwLockTopic<AutonomousAlgorithmInfo>>;
+
+    /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
+    /// selected to drive, and not paused - for a computationally heavy algorithm to idle while it
+    /// isn't. `false` if nothing publishes a selection at all.
+    fn is_selected_algorithm(&self, name: &str) -> bool;
+}
+
+impl AutonomousControlExt for Captain {
+    fn claim_autonomous_control(
+        &self,
+        executor_id: u16,
+        topics: &AlgorithmTopics,
+        info: AutonomousAlgorithmInfo,
+    ) -> Arc<RwLockTopic<VescCommand>> {
+        let info_topic = self.claim_writer::<AutonomousAlgorithmInfo>(
+            &topics.info,
+            executor_id,
+            AutonomousAlgorithmInfo::default,
+        );
+        info_topic
+            .write(executor_id, info)
+            .expect("claim_writer just made this executor the info topic's writer");
+        self.claim_writer::<VescCommand>(&topics.command, executor_id, VescCommand::default)
+    }
+
+    fn autonomous_control(&self, topics: &AlgorithmTopics) -> Arc<RwLockTopic<VescCommand>> {
+        self.topic::<VescCommand>(&topics.command)
+    }
+
+    fn autonomous_control_info(
+        &self,
+        topics: &AlgorithmTopics,
+    ) -> Arc<RwLockTopic<AutonomousAlgorithmInfo>> {
+        self.topic::<AutonomousAlgorithmInfo>(&topics.info)
+    }
+
+    fn is_selected_algorithm(&self, name: &str) -> bool {
+        self.try_topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
+            .is_some_and(|topic| {
+                let selection = topic.read();
+                selection.running && selection.name.as_deref() == Some(name)
+            })
+    }
+}
 
 /// Which vehicle one running copy of an algorithm drives, and under what
 /// name - what every algorithm file's `new` is built from (see the
@@ -213,7 +292,7 @@ pub struct ParameterTuner {
 
 impl ParameterTuner {
     /// A tuner for `instance`, running as `executor_id`, which must have
-    /// claimed its topics via [`Captain::claim_autonomous_control`].
+    /// claimed its topics via [`AutonomousControlExt::claim_autonomous_control`].
     pub fn new(executor_id: u16, instance: &Instance) -> Self {
         Self {
             executor_id,

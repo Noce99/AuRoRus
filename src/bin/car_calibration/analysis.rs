@@ -6,7 +6,7 @@
 //! an accelerometer reads the reaction to gravity, pointing up: -1 g along
 //! the car's z.
 
-use aurorus::hardware::{CarCalibration, ImuAxis, ImuMounting, SteeringPoint, SteeringTable};
+use aurorus::calibration::{CarCalibration, ImuAxis, ImuMounting, SteeringPoint, SteeringTable};
 use aurorus::topics::LidarScan;
 
 /// The VESC's tachometer steps per electrical turn of the motor (verified on

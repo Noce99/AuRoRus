@@ -4,7 +4,7 @@
 //! so it can be tested without the car.
 
 use super::protocol::Imu;
-use crate::hardware::CarCalibration;
+use crate::calibration::CarCalibration;
 use crate::topics::{
     ActuatorLimits, AlgorithmParameter, ImuReading, VescCommand, VescParameters,
     VescParametersStatus,
@@ -55,7 +55,7 @@ pub struct VescConfig {
 }
 
 /// [`ActuatorLimits`] but the steering angle, which is the car's
-/// ([`crate::hardware::SteeringTable::max_angle_rad`]) - see
+/// ([`crate::calibration::SteeringTable::max_angle_rad`]) - see
 /// [`VescConfig::actuator_limits`].
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -233,7 +233,7 @@ pub struct Setpoint {
 
 impl Setpoint {
     /// This setpoint moved towards `command` over `dt_s`, as fast as
-    /// `limits` allow - the same limits [`crate::actuators::SimulatedVehicle`]
+    /// `limits` allow - the same limits [`crate::simulation::SimulatedVehicle`]
     /// applies, so the car responds like the simulated one.
     pub fn toward(self, command: VescCommand, limits: &ActuatorLimits, dt_s: f64) -> Self {
         let max_angle = limits.max_steering_angle_rad;
@@ -333,7 +333,7 @@ pub fn imu_reading(car: &CarCalibration, erpm: f64, imu: &Imu) -> ImuReading {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardware::{ImuAxis, ImuMounting};
+    use crate::calibration::{ImuAxis, ImuMounting};
 
     fn config() -> VescConfig {
         VescConfig::default()
@@ -361,8 +361,8 @@ mod tests {
         assert_eq!(config.port, "/dev/sensors/vesc");
         config.validate(&car()).unwrap();
         let root = Path::new(crate::config::DEFAULT_CONFIG_ROOT);
-        for name in crate::hardware::car_names(root) {
-            let car = crate::hardware::load_car(root, &name).unwrap();
+        for name in crate::calibration::car_names(root) {
+            let car = crate::calibration::load_car(root, &name).unwrap();
             config.validate(&car).unwrap();
         }
     }

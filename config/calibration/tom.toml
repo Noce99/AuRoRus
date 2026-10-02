@@ -1,0 +1,69 @@
+# The hardware calibration of the car "tom", written by car_calibration -
+# see src/calibration.rs for what each value means. Older ones are in
+# config/calibration/history/tom/ (gitignored).
+
+schema_version = 1
+name = "tom"
+calibrated_at = "2026-10-01 09:16:58"
+
+[geometry]
+wheelbase_m = 0.33
+rear_axle_to_cg_m = 0.16
+track_width_m = 0.25
+body_length_m = 0.47
+body_width_m = 0.29
+mass_kg = 3.5
+
+[[steering.points]]
+servo = 0.0
+angle_rad = -0.41359437865463017
+
+[[steering.points]]
+servo = 0.10999999999999999
+angle_rad = -0.3678282863484679
+
+[[steering.points]]
+servo = 0.22
+angle_rad = -0.2596427241869284
+
+[[steering.points]]
+servo = 0.33
+angle_rad = -0.13854783925726
+
+[[steering.points]]
+servo = 0.44
+angle_rad = 0.0
+
+[[steering.points]]
+servo = 0.5800000000000001
+angle_rad = 0.16851197877401136
+
+[[steering.points]]
+servo = 0.72
+angle_rad = 0.3156478991488464
+
+[[steering.points]]
+servo = 0.8600000000000001
+angle_rad = 0.4341276949534884
+
+[[steering.points]]
+servo = 1.0
+angle_rad = 0.494003428444261
+
+[motor]
+speed_to_erpm_gain = 4719.0
+speed_compensation = 1.133
+min_speed_mps = 0.44
+
+[battery]
+cells = 4
+
+[imu]
+x = "-y"
+y = "-x"
+z = "-z"
+
+[lidar]
+upside_down = true
+x_from_rear_axle_m = 0.29
+y_m = 0.0

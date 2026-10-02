@@ -20,7 +20,6 @@
 
 mod centerline;
 mod config;
-mod geometry;
 mod min_curvature;
 mod min_time;
 mod pipeline;

@@ -1,7 +1,7 @@
 # Car calibration
 
-Status: **v1 complete** (2026-10-01): the car file (`src/hardware.rs`,
-`config/hardware/<car>.toml`, `config/car_template.toml`), `CAR_NAME`,
+Status: **v1 complete** (2026-10-01): the car file (`src/calibration.rs`,
+`config/calibration/<car>.toml`, `config/car_template.toml`), `CAR_NAME`,
 `web_gui --sim`/`--car`, the `vehicle_geometry` topic everything reads (the
 simulation simulates the named car, else the template), and every
 `car_calibration` step below, floor tests included. The car `tom` is
@@ -42,7 +42,7 @@ never restarts it, and the big STOP button stops it at once. Code:
 ```
 config/
 ├── car_template.toml             # tracked: the starting point of a new car
-└── hardware/
+└── calibration/
     ├── tom.toml                  # tracked: the latest accepted calibration of "tom"
     ├── <other_car>.toml          # tracked: one file per calibrated car
     └── history/                  # gitignored: every older calibration, never edited
@@ -196,7 +196,7 @@ points) rather than an offset and a gain.
   `config/localization/dead_reckoning.toml`.
 - **Lidar yaw offset:** square to a wall at a taped distance, which also
   cross-checks the lidar's x.
-- **WASD limits:** `human_max_*` in `config/sensors/web_gui.toml` should
+- **WASD limits:** `human_max_*` in `config/web/gui.toml` should
   derive from the calibrated limits.
 - **A check drive** before saving (e.g. a figure 8, dead reckoning vs
   SLAM).

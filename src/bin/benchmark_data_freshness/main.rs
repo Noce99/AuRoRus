@@ -4,25 +4,18 @@
 //! rate; several [`reader_writer::ReaderExecutor`]s each independently poll for the
 //! latest payload, spread across 5 fixed rate tiers, and record how old (relative to
 //! the writer's timestamp) the payload was at the moment they read it. Unlike
-//! `benchmark_comunication_time`, which measures read/write call latency, this
+//! `benchmark_communication_time`, which measures read/write call latency, this
 //! measures end-to-end data staleness: how far behind the writer's clock a reader's
 //! view of the world can lag. See `documentation/core_framework.md`.
 
-// `cli`, `progress` and `verifier` are byte-identical between the two
-// benchmarks, so they live once in `src/bin/bench_common/` and are pulled in
-// here by path. A plain `mod` can't reach outside this binary's own
-// directory, and these are binary-only helpers that have no business in the
-// library's public API.
-#[path = "../bench_common/cli.rs"]
-mod cli;
-#[path = "../bench_common/progress.rs"]
-mod progress;
+// Helpers shared with the other topic benchmark - see `bench_common`.
+#[path = "../bench_common/mod.rs"]
+mod bench_common;
 mod reader_writer;
 mod report;
-#[path = "../bench_common/verifier.rs"]
-mod verifier;
 
 use aurorus::{Executor, Runner};
+use bench_common::{cli, progress, verifier};
 use reader_writer::{ReaderExecutor, TOPIC_NAME, TimestampedPayload, WriterExecutor};
 use report::{AgeReport, ExpectedAge};
 use std::sync::{Arc, Mutex};

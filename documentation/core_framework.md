@@ -2,7 +2,7 @@
 
 How the executor/topic framework under [src/core/](../src/core/) works, why a
 plain `RwLock` is enough for it, and what the two communication benchmarks
-(`benchmark_comunication_time` and `benchmark_data_freshness`) measure.
+(`benchmark_communication_time` and `benchmark_data_freshness`) measure.
 
 Everything else in the crate - sensors, localization, planning, the driving
 algorithms, the web GUI - is built from these pieces: each is an `Executor`
@@ -161,7 +161,7 @@ typical writer period.
 rate tier.** Each writer/reader executor times its own operations into a
 private `Vec<u64>` of per-op nanosecond durations - no cross-thread counters
 on the hot path at all. The writer folds its samples into its own
-[`Report`](../src/bin/benchmark_comunication_time/report.rs) (mean, standard
+[`Report`](../src/bin/benchmark_communication_time/report.rs) (mean, standard
 deviation, max) once it stops, handed back to `main` through an
 `Arc<Mutex<Option<Report>>>`. Each reader instead extends an
 `Arc<Mutex<Vec<u64>>>` sample sink shared with every other reader at the
@@ -197,8 +197,8 @@ Two independent thresholds, not one:
 
 ## The communication-time benchmark
 
-`benchmark_comunication_time`
-([src/bin/benchmark_comunication_time/](../src/bin/benchmark_comunication_time/))
+`benchmark_communication_time`
+([src/bin/benchmark_communication_time/](../src/bin/benchmark_communication_time/))
 measures how long the `write` and `read` calls themselves take:
 
 - One `WriterExecutor` publishes a payload of `--topic_size` `f32` values
@@ -215,7 +215,7 @@ measures how long the `write` and `read` calls themselves take:
 ### Layout
 
 ```
-src/bin/benchmark_comunication_time/
+src/bin/benchmark_communication_time/
   main.rs            wires the executors together, prints the report
   reader_writer.rs   Payload, WriterExecutor, ReaderExecutor
   report.rs          timing stats (possibly merged across readers) + format_block
@@ -228,14 +228,14 @@ src/bin/bench_common/   shared with benchmark_data_freshness
 ### Running it
 
 ```sh
-cargo run --release --bin benchmark_comunication_time                                    # every default
-cargo run --release --bin benchmark_comunication_time -- --duration 30                    # run for 30 seconds instead
-cargo run --release --bin benchmark_comunication_time -- --topic_size 4000 --readers_num 20
-cargo run --release --bin benchmark_comunication_time -- --help                           # usage
+cargo run --release --bin benchmark_communication_time                                    # every default
+cargo run --release --bin benchmark_communication_time -- --duration 30                    # run for 30 seconds instead
+cargo run --release --bin benchmark_communication_time -- --topic_size 4000 --readers_num 20
+cargo run --release --bin benchmark_communication_time -- --help                           # usage
 ```
 
 It requires no external services or hardware - everything is simulated in
-[reader_writer.rs](../src/bin/benchmark_comunication_time/reader_writer.rs).
+[reader_writer.rs](../src/bin/benchmark_communication_time/reader_writer.rs).
 
 | Flag                    | What                                                                    | Default |
 |-------------------------|-------------------------------------------------------------------------|---------|
@@ -250,7 +250,7 @@ alone also accepts `0`, for a writer-only run) prints a usage message to
 stderr and exits with status 1.
 
 Other constants are edited directly in
-[main.rs](../src/bin/benchmark_comunication_time/main.rs) rather than exposed
+[main.rs](../src/bin/benchmark_communication_time/main.rs) rather than exposed
 as flags: `TIER_RATES_HZ` (the 5 fixed reader rates) and `BAR_WIDTH` (the
 progress bar's width in characters).
 
@@ -324,7 +324,7 @@ READERS:
 ```
 
 Each block
-([`Report::format_block`](../src/bin/benchmark_comunication_time/report.rs))
+([`Report::format_block`](../src/bin/benchmark_communication_time/report.rs))
 reports:
 
 - **operations vs. expected** - actual count, and in parentheses
@@ -372,7 +372,7 @@ payload.
 has the same shape and the same four flags - one writer, readers spread
 across the same 5 rate tiers - but measures something different. The writer
 publishes a *timestamped* payload, and each reader records how old that
-payload was at the moment it read it. Where `benchmark_comunication_time`
+payload was at the moment it read it. Where `benchmark_communication_time`
 measures the latency of the `read`/`write` calls, this measures end-to-end
 staleness: how far behind the writer's clock a reader's view of the world
 can lag.

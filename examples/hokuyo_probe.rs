@@ -95,7 +95,7 @@ fn main() {
         .unwrap_or_else(|_| HokuyoLidarConfig::default());
 
     let mut runner = Runner::new();
-    let mounting = match aurorus::hardware::load_this_car(Path::new("config")) {
+    let mounting = match aurorus::calibration::load_this_car(Path::new("config")) {
         Ok(Some(car)) => LidarMounting::of(&car),
         Ok(None) => LidarMounting::default(),
         Err(err) => panic!("{err}"),

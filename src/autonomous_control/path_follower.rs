@@ -10,14 +10,15 @@
 //! and why is reported in the autonomous algorithms panel (see
 //! [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
-use crate::autonomous_control::shared::race_line::{
-    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi,
-};
 use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd};
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
+use crate::autonomous_control::{
+    AutonomousControlExt, Instance, ParameterTuner, load_config, report_message,
+};
+use crate::geometry::{Line, Nearest, Pose, wrap_to_pi};
+use crate::localization::pose_source::{POSE_GROUND_TRUTH, pose, speed};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
-    Shape, VehicleGeometry, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt,
+    SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -60,8 +61,8 @@ const STANLEY_MIN_SPEED_MPS: f64 = 0.5;
 pub struct PathFollowerConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
-    /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
-    /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
+    /// Where the pose and speed come from: [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
+    /// or [`POSE_GROUND_TRUTH`](crate::localization::pose_source::POSE_GROUND_TRUTH).
     pub pose_source: u8,
     /// Steering law: [`CONTROLLER_PD`], [`CONTROLLER_P_ENHANCED`] or [`CONTROLLER_STANLEY`].
     pub controller: u8,
@@ -649,11 +650,27 @@ mod tests {
             ..config(0)
         };
         let nearest = line.nearest(radius_m, 0.0, None, 0.0);
-        let action = feedforward(&config, &line, &nearest, 0.0, 0.4, WHEELBASE_M, &mut Vec::new());
+        let action = feedforward(
+            &config,
+            &line,
+            &nearest,
+            0.0,
+            0.4,
+            WHEELBASE_M,
+            &mut Vec::new(),
+        );
         let expected = config.beta_ff_gain * (WHEELBASE_M / radius_m).atan();
         assert!((action - expected).abs() < 1e-3, "{action} vs {expected}");
         // Clamped so the sum stays within the limit.
-        let clamped = feedforward(&config, &line, &nearest, 0.39, 0.4, WHEELBASE_M, &mut Vec::new());
+        let clamped = feedforward(
+            &config,
+            &line,
+            &nearest,
+            0.39,
+            0.4,
+            WHEELBASE_M,
+            &mut Vec::new(),
+        );
         assert!((clamped - 0.01).abs() < 1e-12, "{clamped}");
     }
 
@@ -670,7 +687,15 @@ mod tests {
         let nearest = line.nearest(5.0, 0.0, None, 0.0);
         let mut learned = Vec::new();
         assert_eq!(
-            feedforward(&config, &line, &nearest, 0.2, 0.4, WHEELBASE_M, &mut learned),
+            feedforward(
+                &config,
+                &line,
+                &nearest,
+                0.2,
+                0.4,
+                WHEELBASE_M,
+                &mut learned
+            ),
             0.1
         );
         assert_eq!(learned.len(), line.points.len());

@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UbmDetectorConfig {
     pub poll_interval_ms: u64,
-    /// [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
-    /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
+    /// [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
+    /// or [`POSE_GROUND_TRUTH`](crate::localization::pose_source::POSE_GROUND_TRUTH).
     pub pose_source: u8,
     pub max_detection_range_m: f64,
     pub median_filter_kernel_size: usize,

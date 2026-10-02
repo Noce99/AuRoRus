@@ -1,5 +1,5 @@
 //! [`Raster`]: a binary occupancy bitmap, independent of how it was
-//! produced - by [`crate::environment::simulator::raster::rasterize`] or
+//! produced - by [`crate::environment::generator::raster::rasterize`] or
 //! loaded from disk via [`crate::environment::tiff::read`].
 
 /// A binary occupancy raster: one `bool` per pixel, `true` meaning white,

@@ -2,9 +2,9 @@
 //! web page to use from a phone or laptop next to the car - its size and
 //! weight, how its IMU and lidar are mounted, its steering's servo range and
 //! its motor's ERPM per meter/second, minimum speed and speed compensation.
-//! Saving writes `config/hardware/<car>.toml` (moving the one it replaces
+//! Saving writes `config/calibration/<car>.toml` (moving the one it replaces
 //! into its history), which every other binary then drives with - see
-//! `aurorus::hardware` and `documentation/car_calibration.md`.
+//! `aurorus::calibration` and `documentation/car_calibration.md`.
 //!
 //! The motor only turns while a hold-to-run button is held (see [`bench`]).
 //! It holds the VESC's port exclusively, so it can't run alongside
@@ -48,7 +48,7 @@ fn main() {
     let car = match config.car {
         Some(name) => Some(name),
         None => {
-            aurorus::hardware::read_car_name(&config.config_dir).unwrap_or_else(|err| exit(err))
+            aurorus::calibration::read_car_name(&config.config_dir).unwrap_or_else(|err| exit(err))
         }
     };
     if let Some(name) = car

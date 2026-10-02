@@ -13,15 +13,16 @@
 use crate::autonomous_control::shared::frenet::{
     FreeGrid, FrenetParams, Plan, Planner, stopping_speed,
 };
-use crate::autonomous_control::shared::race_line::{
-    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, speed, wrap_to_pi,
-};
 use crate::autonomous_control::shared::reactive::fov_window;
 use crate::autonomous_control::shared::steering::{SteeringGains, p_enhanced, pd};
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
+use crate::autonomous_control::{
+    AutonomousControlExt, Instance, ParameterTuner, load_config, report_message,
+};
+use crate::geometry::{Line, Nearest, Pose, wrap_to_pi};
+use crate::localization::pose_source::{POSE_GROUND_TRUTH, pose, speed};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
-    MAP_TOPIC_NAME, SelectedMap, SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt,
+    LidarScan, MAP_TOPIC_NAME, SelectedMap, SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -53,7 +54,7 @@ const CONTROLLER_P_ENHANCED: u8 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FrenetOvertakingConfig {
     pub rate_hz: f32,
-    /// [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
+    /// [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
     /// or [`POSE_GROUND_TRUTH`].
     pub pose_source: u8,
     /// [`CONTROLLER_PD`] or [`CONTROLLER_P_ENHANCED`].

@@ -4,7 +4,7 @@
 //! [`apply_parameters`]) and saving the values in effect back into a TOML
 //! file without disturbing the rest of it (see [`save_toml_values`]) - used
 //! by both [`crate::autonomous_control::ParameterTuner`] (one flat file per
-//! algorithm) and [`crate::actuators::SimulatedVehicle`] (one `[<kind>]`
+//! algorithm) and [`crate::simulation::SimulatedVehicle`] (one `[<kind>]`
 //! table per vehicle model, in a single shared file).
 
 use crate::topics::AlgorithmParameter;

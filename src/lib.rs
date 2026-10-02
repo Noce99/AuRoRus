@@ -16,12 +16,13 @@
 //! [`Runner`] owns every topic and every executor, and starts them all running in
 //! parallel once everything is registered.
 //!
-//! See the `benchmark_comunication_time` binary for a complete example: one executor
+//! See the `benchmark_communication_time` binary for a complete example: one executor
 //! publishes a payload at a fixed rate, and several more each independently read the
 //! latest payload at their own rate.
 
 mod core;
 
+pub use core::debug_format;
 pub use core::{
     Captain, DEBUG_GROUP, DEFAULT_DEBUG_FREQUENCY_HZ, DebugRecorder, DebugState, DebugStatus,
     Executor, Runner, RwLockTopic, Stamped, StopHandle, SwitchExecutorError, Ticker, TopicError,
@@ -29,18 +30,17 @@ pub use core::{
 };
 
 pub mod actuators;
-pub mod algorithms;
 pub mod autonomous_control;
 pub mod benchmark;
+pub mod calibration;
 pub mod config;
-pub mod debug_format;
 pub mod environment;
-pub mod hardware;
+pub(crate) mod geometry;
 pub mod localization;
-pub mod opponents;
 pub mod perception;
 pub mod planning;
 pub mod sensors;
+pub mod simulation;
 pub mod telemetry;
 pub mod topics;
 pub mod web;

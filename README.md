@@ -55,8 +55,8 @@ Each one prints its full list of options with `--help`.
 | [`replay_web_gui`](#replay_web_gui) | Play back a recorded debug session | <http://localhost:1998> |
 | [`benchmark_viewer`](#benchmark_viewer) | Compare and replay recorded benchmark runs | <http://localhost:1997> |
 | [`car_calibration`](#car_calibration) | Guided calibration of a car's hardware | <http://localhost:1996> |
-| [`benchmark_comunication_time`](#benchmark_comunication_time-and-benchmark_data_freshness) | Measure topic read/write latency | - |
-| [`benchmark_data_freshness`](#benchmark_comunication_time-and-benchmark_data_freshness) | Measure how stale the data readers see is | - |
+| [`benchmark_communication_time`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure topic read/write latency | - |
+| [`benchmark_data_freshness`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure how stale the data readers see is | - |
 
 The web pages are served on every network interface, so they can also be
 opened from another device, e.g. a phone or laptop next to the car, at
@@ -106,7 +106,7 @@ replay several of them together on the map.
 
 A guided calibration of a real car, served as a web page: its size and
 weight, how its IMU and LIDAR are mounted, its steering range and its motor's
-speed gain. Saving writes `config/hardware/<car>.toml`, which every other
+speed gain. Saving writes `config/calibration/<car>.toml`, which every other
 executable then uses. It needs the car's VESC and can't run at the same time
 as `web_gui`. See [Car calibration](documentation/car_calibration.md).
 
@@ -114,7 +114,7 @@ as `web_gui`. See [Car calibration](documentation/car_calibration.md).
 ./target/release/car_calibration --car tom
 ```
 
-### `benchmark_comunication_time` and `benchmark_data_freshness`
+### `benchmark_communication_time` and `benchmark_data_freshness`
 
 Two terminal benchmarks of the executor/topic framework everything is built
 on, with one writer and several readers at different rates. The first
@@ -123,7 +123,7 @@ is when a reader sees it. Both are explained in
 [Core framework](documentation/core_framework.md).
 
 ```sh
-./target/release/benchmark_comunication_time --duration 30
+./target/release/benchmark_communication_time --duration 30
 ```
 
 ### Hardware probes
@@ -153,7 +153,7 @@ as the executables run and are specific to one machine.
 | `debugs/` | `.debug` session files recorded by `web_gui`, played back by `replay_web_gui` |
 | `benchmarks/` | Benchmark runs recorded by `web_gui`, read by `benchmark_viewer` |
 | `CAR_NAME` | One line naming the car this machine drives; without it, `web_gui` simulates |
-| `config/hardware/history/` | Each car's older calibrations, kept when `car_calibration` saves a new one |
+| `config/calibration/history/` | Each car's older calibrations, kept when `car_calibration` saves a new one |
 | `other_repos/` | Local clones of third-party projects kept for reference |
 
 Everything else under `config/` is tracked: one TOML file per component,
@@ -167,7 +167,7 @@ loaded at startup.
 | [Autonomous algorithms](documentation/autonomous_algorithms.md) | How driving algorithms are structured, selected and tuned live, and how to add one |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
-| [Vehicle models](src/environment/simulator/vehicle/README.md) | The simulator's vehicle dynamics models |
+| [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |
 | [Car calibration](documentation/car_calibration.md) | Calibrating a real car and the car file it produces |
 | [Joystick](documentation/joystick.md) | Driving the car with a gamepad |
 

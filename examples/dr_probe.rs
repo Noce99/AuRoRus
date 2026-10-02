@@ -1,8 +1,9 @@
 //! Temporary probe: drives the simulated vehicle around and logs how far
 //! dead reckoning's world-frame estimate is from the truth.
-use aurorus::actuators::{SimulatedVehicle, SimulatedVehicleConfig, default_model};
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig};
-use aurorus::sensors::{SimulatedImu, SimulatedImuConfig};
+use aurorus::simulation::{
+    SimulatedImu, SimulatedImuConfig, SimulatedVehicle, SimulatedVehicleConfig, default_model,
+};
 use aurorus::topics::*;
 use aurorus::{Captain, Executor, Runner};
 use std::any::Any;

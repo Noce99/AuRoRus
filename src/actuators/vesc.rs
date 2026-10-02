@@ -2,7 +2,7 @@
 //! the firmware's packet protocol ([`protocol`]), a port reading the VESC's
 //! state, moving its steering servo and driving its motor ([`VescPort`]),
 //! how the car is driven ([`VescConfig`]) and the [`Vesc`] executor driving
-//! the car with them and its calibration ([`crate::hardware::CarCalibration`]).
+//! the car with them and its calibration ([`crate::calibration::CarCalibration`]).
 
 mod control;
 #[cfg(unix)]

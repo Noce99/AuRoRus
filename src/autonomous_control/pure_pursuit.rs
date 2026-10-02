@@ -10,14 +10,15 @@
 //! is held stopped, and why is reported in the autonomous algorithms panel
 //! (see [`report_message`]). See `documentation/autonomous_algorithms.md`.
 
-use crate::autonomous_control::shared::race_line::{
-    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi,
+use crate::autonomous_control::{
+    AutonomousControlExt, Instance, ParameterTuner, load_config, report_message,
 };
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
 use crate::environment::SpeedPoint;
+use crate::geometry::{Line, Nearest, Pose, wrap_to_pi};
+use crate::localization::pose_source::{POSE_GROUND_TRUTH, pose};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, SelectedRaceLine,
-    Shape, VehicleGeometry, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt,
+    SelectedRaceLine, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -47,8 +48,8 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
 pub struct PurePursuitConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
-    /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
-    /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
+    /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
+    /// or [`POSE_GROUND_TRUTH`](crate::localization::pose_source::POSE_GROUND_TRUTH).
     pub pose_source: u8,
     /// Lower clamp of the lookahead distance, in meters.
     pub lookahead_min_m: f64,

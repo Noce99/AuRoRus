@@ -31,7 +31,7 @@ flowchart LR
 - **The vehicle's size is never an algorithm parameter.** Its wheelbase
   `L`, rear-axle-to-CG distance `lr` and width `w` come from the
   `vehicle_geometry` topic, which whatever drives the vehicle publishes -
-  the Vesc from the car's calibration (`config/hardware/<car>.toml`), the
+  the Vesc from the car's calibration (`config/calibration/<car>.toml`), the
   simulator from the car it simulates (see `car_calibration.md`). An
   algorithm only keeps its own margins, e.g. `width_margin_m`.
 
@@ -119,9 +119,9 @@ its prefix, `opponent/<n>/`. An algorithm never spells a per-vehicle topic's
 name out: it asks its `Instance` (`instance.vehicle.vehicle_limits()`,
 `instance.algorithm_topics()`, ...).
 
-The types live in `src/topics/autonomous_control.rs`,
-`src/topics/vesc_command.rs`, `src/topics/vehicle_limits.rs`,
-`src/topics/vehicle_geometry.rs` and `src/topics/vehicle_topics.rs`.
+The types live in `src/topics/autonomy/autonomous_control.rs`,
+`src/topics/vesc/command.rs`, `src/topics/vehicle/limits.rs`,
+`src/topics/vehicle/geometry.rs` and `src/topics/vehicle/topics.rs`.
 
 ## Adding an algorithm
 
@@ -162,7 +162,10 @@ parts to change marked:
 ```rust
 //! What this algorithm does.
 
-use crate::autonomous_control::Instance;
+// `AutonomousControlExt` is what gives `Captain` its `claim_autonomous_control`,
+// `autonomous_control` and `is_selected_algorithm` (and `topics::DrawingExt`
+// its `claim_drawing` and `drawing`).
+use crate::autonomous_control::{AutonomousControlExt, Instance};
 use crate::topics::{ActuatorLimits, AutonomousAlgorithmInfo, VescCommand};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -352,7 +355,7 @@ sequenceDiagram
 ## Opponents
 
 `web_gui`'s **Opponents** panel adds other vehicles to the simulation
-(`src/opponents.rs`). Each one is a group of executors on its own topics,
+(`src/simulation/opponents.rs`). Each one is a group of executors on its own topics,
 behind the prefix `opponent/<n>/`:
 
 - a simulated vehicle, with a copy of the ego's model and its own limits;
@@ -556,8 +559,8 @@ the longest reading's direction.
 - The nearest-point search is windowed after the first tick, as in
   `pure_pursuit`.
 - The pose comes from `pose_source` (0 = localization, 1 = ground truth).
-  The code for this is shared with `pure_pursuit` in
-  `src/autonomous_control/shared/race_line.rs`.
+  The pose sources are in `src/localization/pose_source.rs`, and the race
+  line geometry both share is in `src/geometry/line.rs`.
 
 **The vehicle is held stopped**, with the reason in the panel, in any of
 these cases:
@@ -819,12 +822,14 @@ reported as the algorithm's stats (`report_stats`), shown in purple in
 | `build.rs` | Generates the module list, `autonomous_control::all()` and `autonomous_control::build()` |
 | `src/autonomous_control.rs` | `AutonomousControlsHandler`, `Instance`, module docs |
 | `src/autonomous_control/*.rs` | One algorithm per file |
-| `src/autonomous_control/shared/` | Code several algorithms share: pose sources and race line geometry (`race_line.rs`), reactive building blocks (`reactive.rs`), the PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`), the MPC's optimal-control problem (`mpc.rs`). A directory, because every `.rs` file directly in `src/autonomous_control/` becomes an algorithm |
-| `src/core/captain.rs` | `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` |
-| `src/actuators/simulated_vehicle.rs` | Human vs. autonomous `select_command`, publishes `vehicle_limits` and `vehicle_geometry` |
+| `src/autonomous_control/shared/` | Code several algorithms share: reactive building blocks (`reactive.rs`), the PD and P-enhanced steering laws (`steering.rs`), the Frenet overtaking planner (`frenet.rs`), the MPC's optimal-control problem (`mpc.rs`). Its root, `shared.rs`, is the one `.rs` file directly in `src/autonomous_control/` that `build.rs` doesn't turn into an algorithm |
+| `src/autonomous_control.rs` | `AutonomousControlExt`: `claim_autonomous_control`, `autonomous_control`, `is_selected_algorithm` on the `Captain` |
+| `src/localization/pose_source.rs`, `src/geometry/` | The pose sources, and the pose and race line geometry (`Pose`, `Line`) algorithms share with telemetry and perception |
+| `src/actuators/command.rs` | Human vs. autonomous `select_command` |
+| `src/simulation/vehicle.rs` | Acts on the selected command in simulation; publishes `vehicle_limits` and `vehicle_geometry` |
 | `src/actuators/vesc/driver.rs` | The same on the real car |
 | `src/autonomous_control.rs` | `ParameterTuner`, which applies live parameter changes; `report_message`/`report_stats`; `load_config`/`save_parameters` |
-| `src/topics/vehicle_topics.rs` | `VehicleTopics`: the per-vehicle topic names, for the ego vehicle and for opponents |
-| `src/opponents.rs` | `OpponentsManager`, which adds and removes opponents |
-| `src/sensors/web_gui/live_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter`, `POST /api/autonomous_parameters_save`, `POST /api/autonomous_parameters_load` |
+| `src/topics/vehicle/topics.rs` | `VehicleTopics`: the per-vehicle topic names, for the ego vehicle and for opponents |
+| `src/simulation/opponents.rs` | `OpponentsManager`, which adds and removes opponents |
+| `src/web/gui/autonomous_api.rs` | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection`, `POST /api/autonomous_parameter`, `POST /api/autonomous_parameters_save`, `POST /api/autonomous_parameters_load` |
 | `src/bin/web_gui/main.rs` | Adds the handler and every algorithm from `all()` |

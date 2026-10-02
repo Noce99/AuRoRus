@@ -88,7 +88,7 @@ pub struct PlanningVehicle {
 impl Default for PlanningVehicle {
     /// The template car's (`config/car_template.toml`).
     fn default() -> Self {
-        let car = crate::hardware::CarCalibration::template("template");
+        let car = crate::calibration::CarCalibration::template("template");
         let geometry = car.vehicle_geometry();
         Self {
             body_width_m: geometry.body_width_m,

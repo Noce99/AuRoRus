@@ -27,4 +27,4 @@ min_distance_m = 0.1
 max_distance_m = 30.0
 
 # Whether it is mounted upside down, and where on the car, is the car's
-# calibration: config/hardware/<car>.toml's [lidar].
+# calibration: config/calibration/<car>.toml's [lidar].

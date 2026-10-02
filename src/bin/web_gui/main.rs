@@ -1,19 +1,18 @@
-use aurorus::actuators::{
-    SimulatedVehicle, SimulatedVehicleConfig, Vesc, VescConfig, default_model,
-};
+use aurorus::actuators::{Vesc, VescConfig};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
-use aurorus::hardware::CarCalibration;
+use aurorus::calibration::CarCalibration;
+use aurorus::environment::{MapServer, MapServerConfig};
 use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
-use aurorus::opponents::OpponentsManager;
 use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
-use aurorus::sensors::{
-    BenchmarkSetup, HokuyoLidar, HokuyoLidarConfig, Joystick, JoystickConfig, LidarMounting,
-    MapServer, MapServerConfig, SimulatedImu, SimulatedImuConfig, SimulatedLidar,
-    SimulatedLidarConfig, WebGui, WebGuiConfig,
+use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig, Joystick, JoystickConfig, LidarMounting};
+use aurorus::simulation::{
+    OpponentsManager, SimulatedImu, SimulatedImuConfig, SimulatedLidar, SimulatedLidarConfig,
+    SimulatedVehicle, SimulatedVehicleConfig, default_model,
 };
 use aurorus::telemetry::{LapTelemetryConfig, LapTelemetryRecorder, TelemetryPoseSource};
 use aurorus::topics::VehicleModelKind;
+use aurorus::web::gui::{BenchmarkSetup, WebGui, WebGuiConfig};
 use aurorus::{DEBUG_GROUP, DebugRecorder, Executor, Runner};
 
 mod cli;
@@ -29,11 +28,11 @@ fn car(config: &cli::Config) -> Option<CarCalibration> {
     let name = match &config.car {
         Some(name) => Some(name.clone()),
         None => {
-            aurorus::hardware::read_car_name(&config.config_dir).unwrap_or_else(|err| exit(err))
+            aurorus::calibration::read_car_name(&config.config_dir).unwrap_or_else(|err| exit(err))
         }
     }?;
     Some(
-        aurorus::hardware::load_car(&config.config_dir, &name)
+        aurorus::calibration::load_car(&config.config_dir, &name)
             .unwrap_or_else(|err| exit(format!("car {name:?}: {err}"))),
     )
 }
@@ -56,13 +55,13 @@ fn main() {
         .clone()
         .unwrap_or_else(|| CarCalibration::template("template"));
 
-    let web_gui_config = aurorus::config::load(&config.config_dir.join("sensors/web_gui.toml"))
+    let web_gui_config = aurorus::config::load(&config.config_dir.join("web/gui.toml"))
         .unwrap_or_else(|_| WebGuiConfig::default());
     let map_server_config =
-        aurorus::config::load(&config.config_dir.join("sensors/map_server.toml"))
+        aurorus::config::load(&config.config_dir.join("environment/map_server.toml"))
             .unwrap_or_else(|_| MapServerConfig::default());
     let simulated_lidar_config =
-        aurorus::config::load(&config.config_dir.join("sensors/simulated_lidar.toml"))
+        aurorus::config::load(&config.config_dir.join("simulation/lidar.toml"))
             .unwrap_or_else(|_| SimulatedLidarConfig::default())
             .for_car(&simulated_car);
     let hokuyo_lidar_config =
@@ -71,7 +70,7 @@ fn main() {
     let joystick_config = aurorus::config::load(&config.config_dir.join("sensors/joystick.toml"))
         .unwrap_or_else(|_| JoystickConfig::default());
     let simulated_imu_config =
-        aurorus::config::load(&config.config_dir.join("sensors/simulated_imu.toml"))
+        aurorus::config::load(&config.config_dir.join("simulation/imu.toml"))
             .unwrap_or_else(|_| SimulatedImuConfig::default());
     let dead_reckoning_config =
         aurorus::config::load(&config.config_dir.join("localization/dead_reckoning.toml"))
@@ -80,10 +79,9 @@ fn main() {
         .unwrap_or_else(|_| SlamConfig::default());
     let vesc_config = aurorus::config::load(&config.config_dir.join("actuators/vesc.toml"))
         .unwrap_or_else(|_| VescConfig::default());
-    let vehicle_config =
-        aurorus::config::load(&config.config_dir.join("actuators/simulated_vehicle.toml"))
-            .unwrap_or_else(|_| SimulatedVehicleConfig::default())
-            .for_car(&simulated_car);
+    let vehicle_config = aurorus::config::load(&config.config_dir.join("simulation/vehicle.toml"))
+        .unwrap_or_else(|_| SimulatedVehicleConfig::default())
+        .for_car(&simulated_car);
     let planning_config = aurorus::config::load(&config.config_dir.join("planning/race_line.toml"))
         .unwrap_or_else(|_| PlanningConfig::default());
     let detector_config =

@@ -1,13 +1,12 @@
 //! This file implement the Gap Follower algorithm as presented in the
 //! f1tenth documentation: https://f1tenth-coursekit.readthedocs.io/en/latest/lectures/ModuleB/lecture05.html
 
-use crate::autonomous_control::{Instance, ParameterTuner, load_config};
+use crate::autonomous_control::{AutonomousControlExt, Instance, ParameterTuner, load_config};
 use crate::topics::{
-    AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, Shape, VescCommand,
+    AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt, Shape, VescCommand,
 };
 // use crate::topics::{VEHICLE_LIMITS_TOPIC_NAME, ActuatorLimits};
-use crate::topics::LidarScan;
-use crate::topics::VehicleStatus;
+use crate::topics::{LidarScan, VehicleStatus};
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
 use std::time::Duration;

@@ -6,6 +6,6 @@ other_repos/
 /benchmarks
 
 # The car this machine drives, and every car's older calibrations - see
-# src/hardware.rs.
+# src/calibration.rs.
 /CAR_NAME
-/config/hardware/history/
+/config/calibration/history/

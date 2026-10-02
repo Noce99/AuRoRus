@@ -6,8 +6,8 @@
 //! a skeleton would grow.
 
 use super::PlanError;
-use super::geometry::{Point2, loop_length};
 use super::track::TrackGrid;
+use crate::geometry::{Point2, loop_length};
 use std::collections::HashMap;
 
 /// The track's centerline: the longest closed curve where the distance to

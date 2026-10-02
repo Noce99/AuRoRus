@@ -1,15 +1,15 @@
 //! [`HokuyoLidar`]: the real car's LIDAR, a Hokuyo UTM-30LX-EW (or any Hokuyo
 //! speaking SCIP 2.0 over Ethernet), streamed onto the same
-//! [`LidarScan`] topic [`super::SimulatedLidar`] fills in simulation. Also
+//! [`LidarScan`] topic [`crate::simulation::SimulatedLidar`] fills in simulation. Also
 //! draws every hit on its own drawing topic (see [`crate::topics::Drawing`]),
 //! from wherever the vehicle is, as well as anything running knows (see
 //! [`VehiclePose`]).
 
 mod scip;
 
-use crate::hardware::CarCalibration;
+use crate::calibration::CarCalibration;
 use crate::localization::{VehiclePose, WorldPose};
-use crate::topics::{Color, Drawing, LidarScan, Shape, VehicleTopics};
+use crate::topics::{Color, Drawing, DrawingExt, LidarScan, Shape, VehicleTopics};
 use crate::{Captain, Executor};
 use scip::{Layout, Parameters, Readings};
 use std::any::Any;
@@ -54,7 +54,7 @@ pub struct HokuyoLidarConfig {
 }
 
 /// How the sensor is mounted on its car - see
-/// [`crate::hardware::LidarMounting`].
+/// [`crate::calibration::LidarMounting`].
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Mounting {
     /// Whether to publish the readings in reverse order - for a sensor
@@ -351,7 +351,7 @@ fn is_timeout(err: &std::io::Error) -> bool {
 /// `readings` as a [`LidarScan`]: in meters, laid out as `layout` asked
 /// for. Anything the sensor flags as an error (outside its own range) or
 /// that's outside the configured one reads as "nothing hit" - the maximum
-/// distance with no intensity, as [`super::SimulatedLidar`] reports a miss.
+/// distance with no intensity, as [`crate::simulation::SimulatedLidar`] reports a miss.
 /// Reversed if [`Mounting::upside_down`] - exactly a mirror image, since
 /// `layout` is centered on the front.
 fn to_scan(

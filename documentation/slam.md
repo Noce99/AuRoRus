@@ -263,7 +263,7 @@ drifts), try these:
 cargo run --release --bin web_gui   # release: the matcher is heavy in debug
 ```
 
-`noise_scale` in `config/sensors/simulated_imu.toml` must be above `0` (it is
+`noise_scale` in `config/simulation/imu.toml` must be above `0` (it is
 by default) so odometry drifts. Otherwise there's nothing for SLAM to
 correct. Open the
 **Mapping** panel, press **Play** and drive. DeadReckoning's purple vehicle

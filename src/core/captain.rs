@@ -3,10 +3,6 @@
 
 use crate::core::log::LogColor;
 use crate::core::topic::{RwLockTopic, WriteMeta};
-use crate::topics::{
-    AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AlgorithmTopics, AutonomousAlgorithmInfo,
-    AutonomousAlgorithmSelection, DRAW_TOPIC_PREFIX, Drawing, VescCommand,
-};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
@@ -318,7 +314,7 @@ impl Captain {
 
     /// Like [`topic`](Self::topic), but returns `None` instead of terminating the program when no
     /// topic is registered under `name`, or when it was registered with a type other than `T` -
-    /// for a caller discovering topics by name (e.g. every [`DRAW_TOPIC_PREFIX`] topic) that
+    /// for a caller discovering topics by name (e.g. every topic sharing a prefix) that
     /// can't be sure a topic with a matching name also has the expected type, and would rather
     /// skip it than take the whole process down.
     pub fn try_topic<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static>(
@@ -327,89 +323,6 @@ impl Captain {
     ) -> Option<Arc<RwLockTopic<T>>> {
         let erased = self.topics.read().unwrap().get(name).cloned()?;
         erased.downcast::<RwLockTopic<T>>().ok()
-    }
-
-    /// The name of `executor_id`'s drawing topic: [`DRAW_TOPIC_PREFIX`] followed by the
-    /// executor's name, e.g. `draw/SimulatedVehicle`.
-    fn drawing_topic_name(&self, executor_id: u16) -> String {
-        format!("{DRAW_TOPIC_PREFIX}{}", self.name_of(executor_id))
-    }
-
-    /// Claims `executor_id`'s own [`Drawing`] topic - what it publishes to have anything shown
-    /// on a map view (see [`crate::topics::Drawing`]) - seeded with an empty drawing. Call it
-    /// from [`crate::Executor::claim_writing_topics`] like any other
-    /// [`claim_writer`](Self::claim_writer), then get the handle back in
-    /// [`crate::Executor::run`] via [`drawing`](Self::drawing).
-    pub fn claim_drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
-        self.claim_writer::<Drawing>(
-            &self.drawing_topic_name(executor_id),
-            executor_id,
-            Drawing::default,
-        )
-    }
-
-    /// `executor_id`'s own [`Drawing`] topic, previously claimed via
-    /// [`claim_drawing`](Self::claim_drawing). Terminates the program, like
-    /// [`topic`](Self::topic), if it wasn't.
-    pub fn drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
-        self.topic::<Drawing>(&self.drawing_topic_name(executor_id))
-    }
-
-    /// Claims an autonomous algorithm instance's own `topics` for `executor_id`: its command
-    /// topic, seeded with a stationary, centered command, plus its [`AutonomousAlgorithmInfo`]
-    /// topic, written with `info` right away. For the ego vehicle (see
-    /// [`crate::topics::VehicleTopics::algorithm`]) these are
-    /// [`crate::topics::AUTONOMOUS_CONTROL_TOPIC_PREFIX`] and
-    /// [`crate::topics::AUTONOMOUS_CONTROL_INFO_TOPIC_PREFIX`] followed by
-    /// the algorithm's name, e.g. `autonomous_control/always_left` - what makes an executor an
-    /// autonomous algorithm that [`crate::autonomous_control::AutonomousControlsHandler`] can pick -
-    /// see [`crate::autonomous_control`]. Call it from [`crate::Executor::claim_writing_topics`],
-    /// then get the command topic back in [`crate::Executor::run`] via
-    /// [`autonomous_control`](Self::autonomous_control).
-    pub fn claim_autonomous_control(
-        &self,
-        executor_id: u16,
-        topics: &AlgorithmTopics,
-        info: AutonomousAlgorithmInfo,
-    ) -> Arc<RwLockTopic<VescCommand>> {
-        let info_topic = self.claim_writer::<AutonomousAlgorithmInfo>(
-            &topics.info,
-            executor_id,
-            AutonomousAlgorithmInfo::default,
-        );
-        info_topic
-            .write(executor_id, info)
-            .expect("claim_writer just made this executor the info topic's writer");
-        self.claim_writer::<VescCommand>(&topics.command, executor_id, VescCommand::default)
-    }
-
-    /// An algorithm instance's command topic, previously claimed via
-    /// [`claim_autonomous_control`](Self::claim_autonomous_control). Terminates the program, like
-    /// [`topic`](Self::topic), if it wasn't.
-    pub fn autonomous_control(&self, topics: &AlgorithmTopics) -> Arc<RwLockTopic<VescCommand>> {
-        self.topic::<VescCommand>(&topics.command)
-    }
-
-    /// An algorithm instance's [`AutonomousAlgorithmInfo`] topic, previously claimed via
-    /// [`claim_autonomous_control`](Self::claim_autonomous_control) - for rewriting its parameters'
-    /// values (see [`crate::autonomous_control::ParameterTuner`]). Terminates the program, like
-    /// [`topic`](Self::topic), if it wasn't.
-    pub fn autonomous_control_info(
-        &self,
-        topics: &AlgorithmTopics,
-    ) -> Arc<RwLockTopic<AutonomousAlgorithmInfo>> {
-        self.topic::<AutonomousAlgorithmInfo>(&topics.info)
-    }
-
-    /// Whether the autonomous algorithm called `name` (its executor's name) is the one currently
-    /// selected to drive, and not paused - for a computationally heavy algorithm to idle while it
-    /// isn't. `false` if nothing publishes a selection at all.
-    pub fn is_selected_algorithm(&self, name: &str) -> bool {
-        self.try_topic::<AutonomousAlgorithmSelection>(AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME)
-            .is_some_and(|topic| {
-                let selection = topic.read();
-                selection.running && selection.name.as_deref() == Some(name)
-            })
     }
 
     /// Looks up `name`, or registers it - seeded by calling `initial` - the first
@@ -629,32 +542,18 @@ mod tests {
     }
 
     #[test]
-    fn claim_drawing_registers_a_topic_named_after_the_executor() {
-        let captain = Captain::new();
-        captain.set_name(3, "SimulatedLidar".to_string());
-
-        captain.claim_drawing(3);
-
-        let topic = captain
-            .try_topic::<Drawing>("draw/SimulatedLidar")
-            .expect("drawing topic should be registered");
-        assert_eq!(topic.writer(), Some(3));
-        assert!(Arc::ptr_eq(&topic, &captain.drawing(3)));
-    }
-
-    #[test]
     fn unregistering_removes_only_the_given_writers_topics() {
         let captain = Captain::new();
         captain.set_name(1, "Gone".to_string());
         captain.set_name(2, "Kept".to_string());
         captain.claim_writer::<u32>("gone", 1, || 0);
-        captain.claim_drawing(1);
+        captain.claim_writer::<String>("also_gone", 1, String::new);
         captain.claim_writer::<u32>("kept", 2, || 0);
 
         captain.unregister_topics_written_by(&[1]);
 
         assert!(captain.try_topic::<u32>("gone").is_none());
-        assert!(captain.try_topic::<Drawing>("draw/Gone").is_none());
+        assert!(captain.try_topic::<String>("also_gone").is_none());
         assert!(captain.try_topic::<u32>("kept").is_some());
         let names: Vec<String> = captain
             .debug_topics_snapshot()

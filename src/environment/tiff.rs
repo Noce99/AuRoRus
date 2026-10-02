@@ -165,8 +165,8 @@ fn luma(r: u8, g: u8, b: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::environment::simulator::raster::{ImageTransform, rasterize};
-    use crate::environment::simulator::smoothing::Point2;
+    use crate::environment::generator::raster::{ImageTransform, rasterize};
+    use crate::geometry::Point2;
 
     #[test]
     fn written_file_starts_with_tiff_magic() {

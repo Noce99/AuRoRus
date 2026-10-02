@@ -2,7 +2,7 @@
 # controller - driving its motor and steering servo, and reading its IMU.
 # Used by `web_gui` on a car (see CAR_NAME). How the car itself steers, its
 # ERPM per meter/second, its IMU's axes and its battery's cells are its
-# calibration, config/hardware/<car>.toml - this file is only how it's
+# calibration, config/calibration/<car>.toml - this file is only how it's
 # driven.
 
 # The VESC's serial port (/etc/udev/rules.d/99-vesc.rules names it).

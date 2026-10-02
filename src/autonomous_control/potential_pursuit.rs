@@ -12,15 +12,16 @@
 use super::potential_field::{
     PotentialFieldConfig, command, drawing_stale_after, field_drawing, field_parameters,
 };
-use crate::autonomous_control::shared::race_line::{
-    Line, Nearest, POSE_GROUND_TRUTH, Pose, pose, wrap_to_pi,
-};
 use crate::autonomous_control::shared::reactive::{Field, potential_field};
-use crate::autonomous_control::{Instance, ParameterTuner, load_config, report_message};
+use crate::autonomous_control::{
+    AutonomousControlExt, Instance, ParameterTuner, load_config, report_message,
+};
 use crate::environment::SpeedPoint;
+use crate::geometry::{Line, Nearest, Pose, wrap_to_pi};
+use crate::localization::pose_source::{POSE_GROUND_TRUTH, pose};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan,
-    SelectedRaceLine, Shape, VehicleGeometry, VehicleTopics, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt,
+    LidarScan, SelectedRaceLine, Shape, VehicleGeometry, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;
@@ -48,8 +49,8 @@ pub fn new(instance: Instance) -> Box<dyn Executor> {
 pub struct PotentialPursuitConfig {
     /// Rate at which a new control is published, in Hz.
     pub rate_hz: f32,
-    /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::autonomous_control::shared::race_line::POSE_LOCALIZATION)
-    /// or [`POSE_GROUND_TRUTH`](crate::autonomous_control::shared::race_line::POSE_GROUND_TRUTH).
+    /// Where the pose comes from: [`POSE_LOCALIZATION`](crate::localization::pose_source::POSE_LOCALIZATION)
+    /// or [`POSE_GROUND_TRUTH`](crate::localization::pose_source::POSE_GROUND_TRUTH).
     pub pose_source: u8,
     /// Shortest lookahead distance, in meters.
     pub min_look_ahead_m: f64,
@@ -314,9 +315,11 @@ fn control(
         wrap_to_pi((target.y - pose.y_m).atan2(target.x - pose.x_m) - pose.heading_rad) as f32;
 
     let weight = config.max_distance_weight.clamp(0.0, 1.0);
-    let field = potential_field(scan, &config.potential_field().field(body_width_m), |longest_rad| {
-        (1.0 - weight) * pursuit_rad + weight * longest_rad
-    })
+    let field = potential_field(
+        scan,
+        &config.potential_field().field(body_width_m),
+        |longest_rad| (1.0 - weight) * pursuit_rad + weight * longest_rad,
+    )
     .ok_or(Lost::NoScan)?;
     Ok(Control {
         nearest,

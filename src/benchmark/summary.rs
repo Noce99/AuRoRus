@@ -127,7 +127,7 @@ pub struct VehicleRecord {
     /// The actuator limits it ran with.
     pub limits: BTreeMap<String, f64>,
     /// The simulated car's size - `None` in runs from before it was a
-    /// car's (see [`crate::hardware::CarCalibration`]), whose `parameters`
+    /// car's (see [`crate::calibration::CarCalibration`]), whose `parameters`
     /// held the model's own axle distances instead.
     #[serde(default)]
     pub geometry: Option<crate::topics::VehicleGeometry>,

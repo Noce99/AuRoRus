@@ -1,9 +1,11 @@
 //! Framework internals: the captain/executor/topic/runner/log pieces described
 //! in the crate-level docs. Kept separate from the domain content in
-//! [`crate::sensors`], [`crate::algorithms`], and [`crate::topics`].
+//! [`crate::sensors`], [`crate::autonomous_control`], [`crate::topics`] and
+//! the rest of the crate.
 
 mod captain;
 mod debug_executor;
+pub mod debug_format;
 mod executor;
 mod log;
 mod rate;

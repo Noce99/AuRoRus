@@ -11,8 +11,7 @@ use aurorus::benchmark::layout::{
     MAP_DIR_NAME, RACE_LINE_FILE_NAME, SUMMARY_FILE_NAME, TRAJECTORY_FILE_NAME,
 };
 use aurorus::benchmark::{BenchmarkSummary, read_trajectory, scan_all};
-use aurorus::environment::race_line;
-use aurorus::environment::{CENTERLINE_FILE_NAME, Map, RACE_LINES_DIR_NAME, read_info};
+use aurorus::environment::{CENTERLINE_FILE_NAME, Map, RACE_LINES_DIR_NAME, race_line, read_info};
 use aurorus::web::{error_response, header, json_response, not_found};
 use std::path::{Component, Path, PathBuf};
 use tiny_http::{Response, ResponseBox};

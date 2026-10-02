@@ -9,10 +9,10 @@
 use crate::autonomous_control::shared::reactive::{
     fov_window, ray, ray_step_rad, scan_origin, speed_proportional_steering, world_point,
 };
-use crate::autonomous_control::{Instance, ParameterTuner, load_config};
+use crate::autonomous_control::{AutonomousControlExt, Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, LidarScan, Shape,
-    VehicleGeometry, VescCommand,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Color, Drawing, DrawingExt,
+    LidarScan, Shape, VehicleGeometry, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};
 use std::any::Any;

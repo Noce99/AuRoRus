@@ -6,7 +6,7 @@
 //! race line driven.
 //!
 //! `web_gui`'s Benchmark panel writes them (see
-//! `crate::sensors::web_gui`); everything here is independent of it, so a
+//! `crate::web::gui`); everything here is independent of it, so a
 //! viewer can [`scan`] and read them back without running anything.
 
 pub mod hash;

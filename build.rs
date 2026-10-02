@@ -1,7 +1,7 @@
 //! Generates the list of autonomous algorithms (see `src/autonomous_control.rs`)
-//! from whatever `.rs` files `src/autonomous_control/` holds, so adding an
-//! algorithm is only a matter of adding its file - nothing else has to name
-//! it.
+//! from whatever `.rs` files `src/autonomous_control/` holds - all but
+//! `shared.rs`, the helpers several of them share - so adding an algorithm
+//! is only a matter of adding its file - nothing else has to name it.
 //!
 //! Writes `$OUT_DIR/autonomous_algorithms.rs`: one `mod` per file, an
 //! `all()` building one executor per file for the ego vehicle, named after
@@ -12,6 +12,10 @@ use std::path::Path;
 use std::{env, fs};
 
 const ALGORITHMS_DIR: &str = "src/autonomous_control";
+
+/// The one file in [`ALGORITHMS_DIR`] that isn't an algorithm: the root of
+/// the `shared` module, holding what several algorithms share.
+const SHARED_MODULE: &str = "shared";
 
 fn main() {
     // A directory makes Cargo rescan everything under it, so adding,
@@ -27,6 +31,7 @@ fn main() {
             entries
                 .filter_map(|entry| entry.ok().map(|entry| entry.path()))
                 .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "rs"))
+                .filter(|path| path.file_stem().is_some_and(|stem| stem != SHARED_MODULE))
                 .map(|path| {
                     let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
                     assert!(

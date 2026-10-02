@@ -78,7 +78,7 @@ impl Default for JoystickConfig {
 /// steering lock and a full trigger [`JoystickConfig::max_speed_mps`], both
 /// capped by the vehicle's [`ActuatorLimits`]. Like WASD, it keeps publishing
 /// a stationary, centered command while nothing is held, which hands control
-/// back (see [`crate::actuators::SimulatedVehicle`]).
+/// back (see [`crate::simulation::SimulatedVehicle`]).
 ///
 /// Starts whether or not the pad is there: losing it (or not finding it) is
 /// logged, publishes that stationary command - so its last setpoint never

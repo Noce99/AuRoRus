@@ -10,9 +10,9 @@ use crate::autonomous_control::shared::reactive::{
     Field, FieldConfig, field_shapes, fov_window, potential_field, scan_origin,
     speed_proportional_steering, speed_steer_and_fov,
 };
-use crate::autonomous_control::{Instance, ParameterTuner, load_config};
+use crate::autonomous_control::{AutonomousControlExt, Instance, ParameterTuner, load_config};
 use crate::topics::{
-    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, LidarScan,
+    ActuatorLimits, AlgorithmParameter, AutonomousAlgorithmInfo, Drawing, DrawingExt, LidarScan,
     VehicleGeometry, VehicleTopics, VescCommand,
 };
 use crate::{Captain, Executor, Ticker};

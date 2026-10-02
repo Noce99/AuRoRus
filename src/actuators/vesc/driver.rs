@@ -1,13 +1,13 @@
 //! [`Vesc`]: drives the real car through its VESC - the counterpart of
-//! [`crate::actuators::SimulatedVehicle`] when `web_gui` runs on a car.
+//! [`crate::simulation::SimulatedVehicle`] when `web_gui` runs on a car.
 
 use super::VescPort;
 use super::control::{
     Motor, Setpoint, VescConfig, battery_charge, imu_reading, low_battery, motor, servo_position,
 };
 use super::protocol::Fault;
-use crate::actuators::simulated_vehicle::select_command_within;
-use crate::hardware::CarCalibration;
+use crate::actuators::command::select_command_within;
+use crate::calibration::CarCalibration;
 use crate::topics::{
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, ActuatorStatus,
     HUMAN_VESC_COMMAND_TOPIC_NAME, IMU_TOPIC_NAME, ImuReading, JOYSTICK_VESC_COMMAND_TOPIC_NAME,
@@ -32,10 +32,10 @@ const BATTERY_SMOOTHING_S: f64 = 3.0;
 
 /// The real car's actuators: every [`VescConfig::rate_hz`], sends the VESC the
 /// command to act on - a human's (the joystick's, then WASD's) over the
-/// autonomous one, as [`crate::actuators::SimulatedVehicle`] picks it, stale after
+/// autonomous one, as [`crate::simulation::SimulatedVehicle`] picks it, stale after
 /// [`VescConfig::command_timeout_s`] - moved towards within
 /// [`VescConfig::actuator_limits`] and steered through the car's
-/// [`crate::hardware::SteeringTable`], and publishes what the VESC reads: its IMU and
+/// [`crate::calibration::SteeringTable`], and publishes what the VESC reads: its IMU and
 /// wheel speed on [`IMU_TOPIC_NAME`] (for dead reckoning), and its own state
 /// on [`VESC_STATUS_TOPIC_NAME`]. Publishes the limits on
 /// [`VehicleTopics::vehicle_limits`], and the car's size on

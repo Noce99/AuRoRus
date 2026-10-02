@@ -13,7 +13,7 @@
 //! are exactly the constraints [`super::min_time`] optimizes under, so a
 //! profile from here is a feasible starting point for it.
 
-use super::geometry::{Point2, curvatures};
+use crate::geometry::{Point2, curvatures};
 
 /// Every limit [`speeds`] respects.
 #[derive(Debug, Clone, Copy)]
@@ -135,7 +135,7 @@ pub fn lap_time(points: &[Point2], speeds: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::geometry::tests::circle;
+    use crate::geometry::closed_loop::tests::circle;
 
     fn limits() -> SpeedLimits {
         SpeedLimits {
@@ -257,7 +257,7 @@ mod tests {
     fn a_lap_takes_its_length_over_its_speed() {
         let points = circle(2.0, 300);
         let speeds = vec![2.0; 300];
-        let expected = super::super::geometry::loop_length(&points) / 2.0;
+        let expected = crate::geometry::loop_length(&points) / 2.0;
         assert!((lap_time(&points, &speeds) - expected).abs() < 1e-9);
     }
 }

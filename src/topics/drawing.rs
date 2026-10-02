@@ -3,7 +3,7 @@
 //!
 //! Drawings are the only thing a map view (e.g. `web_gui`) renders on its
 //! canvas. Every executor that wants something on the map claims its own
-//! drawing topic via [`crate::Captain::claim_drawing`] - named
+//! drawing topic via [`DrawingExt::claim_drawing`] - named
 //! [`DRAW_TOPIC_PREFIX`] followed by the executor's name, e.g.
 //! `draw/SimulatedVehicle` - and publishes a fresh [`Drawing`] whenever what
 //! it wants shown changes. A viewer finds every such topic by its prefix, so
@@ -16,12 +16,48 @@
 //! shown until the user says otherwise, so an executor can keep a busy
 //! debugging overlay off unless someone asks for it.
 
+use crate::{Captain, RwLockTopic};
 use std::sync::Arc;
 use std::time::Duration;
 
 /// Prefix every drawing topic's name starts with - see
-/// [`crate::Captain::claim_drawing`].
+/// [`DrawingExt::claim_drawing`].
 pub const DRAW_TOPIC_PREFIX: &str = "draw/";
+
+/// The name of `executor_id`'s drawing topic: [`DRAW_TOPIC_PREFIX`] followed by the
+/// executor's name, e.g. `draw/SimulatedVehicle`.
+fn drawing_topic_name(captain: &Captain, executor_id: u16) -> String {
+    format!("{DRAW_TOPIC_PREFIX}{}", captain.name_of(executor_id))
+}
+
+/// What a [`Captain`] can do with drawing topics - bring it into scope to
+/// call these on the captain an executor is handed.
+pub trait DrawingExt {
+    /// Claims `executor_id`'s own [`Drawing`] topic - what it publishes to have anything shown
+    /// on a map view - seeded with an empty drawing. Call it from
+    /// [`crate::Executor::claim_writing_topics`] like any other [`Captain::claim_writer`], then
+    /// get the handle back in [`crate::Executor::run`] via [`drawing`](Self::drawing).
+    fn claim_drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>>;
+
+    /// `executor_id`'s own [`Drawing`] topic, previously claimed via
+    /// [`claim_drawing`](Self::claim_drawing). Terminates the program, like
+    /// [`Captain::topic`], if it wasn't.
+    fn drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>>;
+}
+
+impl DrawingExt for Captain {
+    fn claim_drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
+        self.claim_writer::<Drawing>(
+            &drawing_topic_name(self, executor_id),
+            executor_id,
+            Drawing::default,
+        )
+    }
+
+    fn drawing(&self, executor_id: u16) -> Arc<RwLockTopic<Drawing>> {
+        self.topic::<Drawing>(&drawing_topic_name(self, executor_id))
+    }
+}
 
 /// Everything one executor currently wants drawn, replacing whatever it
 /// published before. Coordinates are in the same world frame (meters) as
@@ -254,6 +290,20 @@ pub enum Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claim_drawing_registers_a_topic_named_after_the_executor() {
+        let captain = Captain::new();
+        captain.set_name(3, "SimulatedLidar".to_string());
+
+        captain.claim_drawing(3);
+
+        let topic = captain
+            .try_topic::<Drawing>("draw/SimulatedLidar")
+            .expect("drawing topic should be registered");
+        assert_eq!(topic.writer(), Some(3));
+        assert!(Arc::ptr_eq(&topic, &captain.drawing(3)));
+    }
 
     /// Drawings are recorded by the debug recorder like any other topic, so
     /// every shape kind has to survive a bincode round trip.

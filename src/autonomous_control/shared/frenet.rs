@@ -18,7 +18,7 @@
 //!   path does (only leaving the shrunk free space), else gets farthest
 //!   before its first one.
 
-use crate::autonomous_control::shared::race_line::{Line, wrap_to_pi};
+use crate::geometry::{Line, wrap_to_pi};
 use crate::planning::track::squared_distance_transform;
 use crate::topics::SelectedMap;
 

@@ -1,6 +1,6 @@
 //! Debug recording: [`DebugRecorder`], the handle that starts/stops a recording and
 //! reports how it's going, and the [`DebugExecutor`] it runs to record every topic
-//! somebody is writing into a `.debug` file - see [`crate::debug_format`] for the
+//! somebody is writing into a `.debug` file - see [`crate::core::debug_format`] for the
 //! file layout.
 //!
 //! A recording runs as its own group of executors ([`DEBUG_GROUP`], see
@@ -9,9 +9,9 @@
 //! ([`Captain::request_restart`]).
 
 use crate::core::captain::Captain;
+use crate::core::debug_format::DebugFileWriter;
 use crate::core::executor::Executor;
 use crate::core::rate::Ticker;
-use crate::debug_format::DebugFileWriter;
 use std::any::Any;
 use std::collections::HashMap;
 use std::io;

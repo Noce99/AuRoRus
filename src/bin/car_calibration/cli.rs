@@ -24,7 +24,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
     let usage = format!(
         "Usage: {program} [OPTIONS]\n\n\
          A guided calibration of the car's hardware - its size, IMU and lidar mounting,\n\
-         steering and motor - served as a web page. Writes config/hardware/<car>.toml\n\
+         steering and motor - served as a web page. Writes config/calibration/<car>.toml\n\
          only when you save.\n\n\
          Options:\n  \
          --car NAME         the car to calibrate (default: the one CAR_NAME names, else asked)\n  \
@@ -58,7 +58,7 @@ pub fn parse_config(mut args: impl Iterator<Item = String>) -> Config {
             "--bind-addr" => bind_addr = value(),
             "--car" => {
                 let name = value();
-                if let Err(err) = aurorus::hardware::valid_name(&name) {
+                if let Err(err) = aurorus::calibration::valid_name(&name) {
                     fail(err);
                 }
                 car = Some(name);

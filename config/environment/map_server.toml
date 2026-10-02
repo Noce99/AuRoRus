@@ -1,0 +1,4 @@
+# Configuration for `aurorus::environment::MapServer`.
+
+# How often MapServer checks map_selection for a change, in milliseconds.
+poll_interval_ms = 200

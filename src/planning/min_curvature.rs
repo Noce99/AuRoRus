@@ -32,11 +32,11 @@
 //! curvature one.
 
 use super::PlanError;
-use super::geometry::{
+use super::track::TrackGrid;
+use crate::geometry::{
     Point2, curvature_jacobian, curvatures, left_normal, max_abs_curvature, resample_even_spacing,
     tangents,
 };
-use super::track::TrackGrid;
 use optimization_engine::constraints::Rectangle;
 use optimization_engine::core::ExitStatus;
 use optimization_engine::panoc::{PANOCCache, PANOCOptimizer};
@@ -410,7 +410,7 @@ fn solve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::geometry::tests::circle;
+    use crate::geometry::closed_loop::tests::circle;
     use crate::planning::track::tests::ring_map;
 
     fn config() -> MinCurvatureConfig {
