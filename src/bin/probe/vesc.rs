@@ -1,15 +1,15 @@
-//! Read-only probe for the VESC: prints its firmware, then ten times a
-//! second its state and IMU readings, and how long each question took.
+//! `probe vesc`, read-only probe for the VESC: prints its firmware, then ten
+//! times a second its state and IMU readings, and how long each question took.
 //! Sends nothing that can drive the motor or the servo.
 //!
-//! `cargo run --release --example vesc_probe [SECONDS] [PORT]` (default 10
-//! seconds, `/dev/sensors/vesc`).
+//! `probe vesc [SECONDS] [PORT]` (default 10 seconds, `/dev/sensors/vesc`).
 use aurorus::actuators::vesc::VescPort;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-fn main() {
-    let mut args = std::env::args().skip(1);
+pub const USAGE: &str = "vesc [SECONDS] [PORT]";
+
+pub fn run(mut args: std::vec::IntoIter<String>) {
     let seconds: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(10.0);
     let path = args
         .next()

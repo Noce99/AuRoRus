@@ -1,8 +1,8 @@
-//! Probe for the real LIDAR: runs [`HokuyoLidar`] alone and, every half
-//! second, prints the scan rate and what it sees ahead, left, right and
+//! `probe hokuyo`, probe for the real LIDAR: runs [`HokuyoLidar`] alone and,
+//! every half second, prints the scan rate and what it sees ahead, left, right and
 //! closest - e.g. to check the mounting by holding a hand on one side.
 //!
-//! `cargo run --release --example hokuyo_probe [SECONDS]` (default 10), with
+//! `probe hokuyo [SECONDS]` (default 10), with
 //! `config/sensors/hokuyo_lidar.toml` and the mounting of the car `CAR_NAME`
 //! names (unmounted without one).
 use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig, LidarMounting};
@@ -86,11 +86,10 @@ fn print_scan(scan: &LidarScan, rate_hz: f64) {
     );
 }
 
-fn main() {
-    let seconds: f64 = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10.0);
+pub const USAGE: &str = "hokuyo [SECONDS]";
+
+pub fn run(mut args: std::vec::IntoIter<String>) {
+    let seconds: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(10.0);
     let config = aurorus::config::load(Path::new("config/sensors/hokuyo_lidar.toml"))
         .unwrap_or_else(|_| HokuyoLidarConfig::default());
 

@@ -37,6 +37,10 @@ never restarts it, and the big STOP button stops it at once. Code:
 `src/bin/car_calibration/` - `analysis.rs` (the maths, tested), `bench.rs`
 (the VESC thread), `session.rs` (the draft and the API).
 
+If a step fails and it isn't clear whether the hardware or the page is at
+fault, the [`probe`](../README.md#probe) binary tests each piece on its own:
+`probe vesc` (read-only), `probe hokuyo`, `probe servo` and `probe motor`.
+
 ## Storage
 
 ```

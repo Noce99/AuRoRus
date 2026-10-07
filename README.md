@@ -61,6 +61,7 @@ Each one prints its full list of options with `--help`.
 | [`replay_web_gui`](#replay_web_gui) | Play back a recorded debug session | <http://localhost:1998> |
 | [`benchmark_viewer`](#benchmark_viewer) | Compare and replay recorded benchmark runs | <http://localhost:1997> |
 | [`car_calibration`](#car_calibration) | Guided calibration of a car's hardware | <http://localhost:1996> |
+| [`probe`](#probe) | Test one piece of the car's hardware on its own | - |
 | [`benchmark_communication_time`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure topic read/write latency | - |
 | [`benchmark_data_freshness`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure how stale the data readers see is | - |
 
@@ -135,12 +136,25 @@ is when a reader sees it. Both are explained in
 ./target/release/benchmark_communication_time --duration 30
 ```
 
-### Hardware probes
+### `probe`
 
-A few small bring-up tools for the real car live in [examples/](examples/)
-(`vesc_probe`, `servo_probe`, `motor_probe`, `hokuyo_probe`). They are built
-with `cargo build --release --examples` into `target/release/examples/`; each
-file's header explains its usage.
+Small bring-up tools for the real car, each testing one piece of hardware on
+its own, without the rest of the stack: useful when `web_gui` or
+`car_calibration` misbehave and it isn't clear which part is at fault. Like
+`car_calibration`, the VESC probes can't run at the same time as `web_gui`.
+`probe` alone lists them.
+
+| Subcommand | What it does |
+|---|---|
+| `probe vesc [SECONDS] [PORT]` | Read-only: prints the VESC's firmware, then its state and IMU ten times a second |
+| `probe hokuyo [SECONDS]` | Prints the LIDAR's scan rate and what it sees ahead, left, right and closest, e.g. to check the mounting |
+| `probe servo POSITION\|center [PORT]` | Moves the steering servo to one position (`0.15..=0.85`) and exits. Never spins the motor |
+| `probe motor ERPM SECONDS [PORT]` | Wheels off the ground: spins the motor at a low ERPM (at most 3000, for at most 15 s), then brakes. Never moves the servo. Ctrl+C brakes early |
+
+```sh
+./target/release/probe vesc
+./target/release/probe servo center
+```
 
 ## Maps
 

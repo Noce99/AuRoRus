@@ -1,10 +1,10 @@
-//! Motor probe, for the bench with the wheels off the ground: ramps the
-//! motor up to one low ERPM, holds it for a few seconds, then brakes and
+//! `probe motor`, motor probe, for the bench with the wheels off the ground:
+//! ramps the motor up to one low ERPM, holds it for a few seconds, then brakes and
 //! releases it - printing the tachometer so wheel turns counted by eye give
 //! the speed-to-ERPM gain, and which sign drives forward. Never moves the
 //! steering servo.
 //!
-//! `cargo run --release --example motor_probe ERPM SECONDS [PORT]` - |ERPM|
+//! `probe motor ERPM SECONDS [PORT]` - |ERPM|
 //! at most [`MAX_ERPM`], SECONDS at most [`MAX_SECONDS`], the port
 //! defaulting to `/dev/sensors/vesc`. Ctrl+C brakes early.
 use aurorus::actuators::vesc::VescPort;
@@ -29,21 +29,22 @@ const BRAKE_FOR: Duration = Duration::from_secs(2);
 /// Below this, in ERPM, the motor counts as stopped.
 const STOPPED_ERPM: f64 = 100.0;
 
-fn main() {
-    let mut args = std::env::args().skip(1);
+pub const USAGE: &str = "motor ERPM SECONDS [PORT]";
+
+pub fn run(mut args: std::vec::IntoIter<String>) {
     let fail = |message: String| -> ! {
         eprintln!("{message}");
         std::process::exit(1);
     };
-    let usage = "usage: motor_probe ERPM SECONDS [PORT]";
+    let usage = format!("usage: probe {USAGE}");
     let erpm: i32 = args
         .next()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| fail(usage.into()));
+        .unwrap_or_else(|| fail(usage.clone()));
     let seconds: f64 = args
         .next()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| fail(usage.into()));
+        .unwrap_or_else(|| fail(usage));
     if erpm == 0 || erpm.abs() > MAX_ERPM {
         fail(format!(
             "ERPM must be nonzero and within +-{MAX_ERPM}, got {erpm}"

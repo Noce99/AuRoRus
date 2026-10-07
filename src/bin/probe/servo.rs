@@ -1,8 +1,8 @@
-//! Steering servo probe: moves the VESC's servo output to one position and
-//! exits, the servo holding it - for finding the centre and the end stops one
-//! step at a time. Never sends a motor command, so the wheels can't spin.
+//! `probe servo`, steering servo probe: moves the VESC's servo output to one
+//! position and exits, the servo holding it - for finding the centre and the
+//! end stops one step at a time. Never sends a motor command, so the wheels can't spin.
 //!
-//! `cargo run --release --example servo_probe POSITION [PORT]`: POSITION is
+//! `probe servo POSITION [PORT]`: POSITION is
 //! in `0..=1` (0.5 is the pulse width's middle), or `center`; the port
 //! defaults to `/dev/sensors/vesc`.
 use aurorus::actuators::vesc::VescPort;
@@ -13,8 +13,9 @@ use std::time::Duration;
 /// steering linkage into its end stops before they're known.
 const WINDOW: std::ops::RangeInclusive<f64> = 0.15..=0.85;
 
-fn main() {
-    let mut args = std::env::args().skip(1);
+pub const USAGE: &str = "servo POSITION|center [PORT]";
+
+pub fn run(mut args: std::vec::IntoIter<String>) {
     let fail = |message: String| -> ! {
         eprintln!("{message}");
         std::process::exit(1);
@@ -24,7 +25,7 @@ fn main() {
         Some(value) => value
             .parse::<f64>()
             .unwrap_or_else(|_| fail(format!("not a position: {value:?}"))),
-        None => fail("usage: servo_probe POSITION|center [PORT]".into()),
+        None => fail(format!("usage: probe {USAGE}")),
     };
     if !WINDOW.contains(&position) {
         fail(format!(
