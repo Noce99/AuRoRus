@@ -9,6 +9,13 @@
   <em><code>philly</code> and its trophy for second place in the Master Cup of the 27th RoboRacer Autonomous Racing Competition, ICRA 2026, Vienna</em>
 </p>
 
+<p align="center">
+  <img src="documentation/images/animations/path_follower_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Path Follower racing on the Vienna 2026 qualifying map, with its lateral error plotted below" width="49%">
+  <img src="documentation/images/animations/path_follower_vs_mpc_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Path Follower and the MPC racing on the Vienna 2026 qualifying map, with their lateral errors plotted below" width="49%">
+  <br>
+  <em>Left: the Path Follower racing in simulation on the Vienna 2026 qualifying map. Right: the Path Follower against the MPC on the same map.</em>
+</p>
+
 It covers the whole pipeline in one crate (`aurorus`): a vehicle and LIDAR
 simulator with a random track generator, SLAM mapping and localization,
 race-line planning, opponent detection, a set of autonomous driving
