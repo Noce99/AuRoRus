@@ -237,7 +237,7 @@ Special thanks also to [@AlbYoda](https://github.com/AlbYoda), who implemented t
 
 Many thanks to everyone else who has been part of the UniBo driverless team, especially [@TorioCrema](https://github.com/TorioCrema), [@FedericoCalzoni](https://github.com/FedericoCalzoni), [@beatricebottari](https://github.com/beatricebottari), [@LucaTedeschini](https://github.com/LucaTedeschini), [@ncridlig](https://github.com/ncridlig) and [@StefanoColamonaco](https://github.com/StefanoColamonaco).
 
-A final special thanks goes to [@gerkone](https://github.com/gerkone). In the second half of 2020, we worked together with [@EnricoTrombetti](https://github.com/EnricoTrombetti) and [@AldoCanfora](https://github.com/AldoCanfora) on a project for a Complex Systems course shared between physicists and computer scientists (all of us were physicists except @gerkone). Shortly afterwards, @gerkone founded the UniBo autonomous driving team, which I have enjoyed being part of ever since.
+A final special thanks goes to [@gerkone](https://github.com/gerkone). In the second half of 2020, we worked together with [@EnricoTrombetti](https://github.com/EnricoTrombetti) and [@AldoCanfora](https://github.com/AldoCanfora) on a project for a Complex Systems course shared between physicists and computer scientists (all of us were physicists except [@gerkone](https://github.com/gerkone)). Shortly afterwards, [@gerkone](https://github.com/gerkone) founded the UniBo autonomous driving team, which I have enjoyed being part of ever since.
 
 ## License
 
