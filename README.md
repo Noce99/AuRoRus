@@ -10,15 +10,15 @@
 </p>
 
 <p align="center">
-  <img src="documentation/images/animations/path_follower_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Path Follower racing on the Vienna 2026 qualifying map, with its lateral error plotted below">
+  <img src="documentation/images/animations/frenet_overtaking_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Frenet overtaking racing on the Vienna 2026 qualifying map, with its lateral error plotted below">
   <br>
-  <em>The Path Follower racing in simulation on the Vienna 2026 qualifying map</em>
+  <em>The Frenet overtaking racing in simulation on the Vienna 2026 qualifying map</em>
 </p>
 
 <p align="center">
-  <img src="documentation/images/animations/path_follower_vs_mpc_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Path Follower and the MPC racing on the Vienna 2026 qualifying map, with their lateral errors plotted below">
+  <img src="documentation/images/animations/frenet_overtaking_vs_mpc_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Frenet overtaking and the MPC racing on the Vienna 2026 qualifying map, with their lateral errors plotted below">
   <br>
-  <em>The Path Follower against the MPC in simulation on the same map</em>
+  <em>The Frenet overtaking against the MPC in simulation on the same map</em>
 </p>
 
 It covers the whole pipeline in one crate (`aurorus`): a vehicle and LIDAR
