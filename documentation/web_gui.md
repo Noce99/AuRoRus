@@ -280,6 +280,8 @@ LIDAR scan with the scan the map alone would give.
 - The opponent found and its bounding box are drawn on the map by the
   detector itself.
 
+See [Detector](detector.md) for how it works.
+
 ### Planning
 
 ![Planning panel](images/web_gui/planning.jpg)

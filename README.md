@@ -174,6 +174,7 @@ loaded at startup.
 | [Tutorials](tutorial/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
+| [Detector](documentation/detector.md) | Finding and tracking an opponent by comparing the LIDAR scan with the map |
 | [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |
 | [Car calibration](documentation/car_calibration.md) | Calibrating a real car and the car file it produces |
 | [Joystick](documentation/joystick.md) | Driving the car with a gamepad |
@@ -183,3 +184,25 @@ The API documentation is generated from the code:
 ```sh
 cargo doc --no-deps --open
 ```
+
+## Credits
+The whole project was vibe coded by me ([@Noce99](https://github.com/Noce99)), using as a reference the (non-public) ROS2 repository of the University of Bologna's 1:10 scale autonomous driving team. I have led the team since 2024: at the RoboRacer Autonomous Racing Competition at IEEE ICRA 2025 in Atlanta it took first place with one car, `philly`, running the Frenet overtaking ([watch the final](https://youtube.com/shorts/cEtLJ8aXSXk)), and at ICRA 2026 in Vienna it took second and third place with two cars: `philly` with the Frenet overtaking and `tom` with the MPC.
+
+<table>
+  <tr>
+    <td align="center"><img src="documentation/images/credits/atlanta_2025.jpg" alt="The UniBo team with the trophy, the winner's cheque and the car at ICRA 2025 in Atlanta" height="400"></td>
+    <td align="center"><img src="documentation/images/credits/vienna_2026.jpg" alt="The UniBo team holding the car at ICRA 2026 in Vienna" height="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Atlanta, ICRA 2025: first place in the RoboRacer competition</em></td>
+    <td align="center"><em>Vienna, ICRA 2026: second and third place</em></td>
+  </tr>
+</table>
+
+I would like to thank [@SamueleCrimi](https://github.com/SamueleCrimi) and [@Scheggetta](https://github.com/Scheggetta) for their amazing work in the UniBo autonomous driving team, especially for the first implementations of the [Frenet overtaking](documentation/autonomous_algorithms.md#frenet-overtaking) and the [Path Follower](documentation/autonomous_algorithms.md#path-follower). Both algorithms have been ported to this repository.
+
+Special thanks also to [@AlbYoda](https://github.com/AlbYoda), who implemented the [detector](documentation/detector.md) (ported to this repository) and is now working on a faster, Acados-based MPC (not yet ported), and to [@FelixFrog](https://github.com/FelixFrog), who implemented the map switch that let us use the bridge at Vienna 2026 (not yet ported) and is now working on a new MPPI implementation.
+
+Many thanks to everyone else who has been part of the UniBo driverless team, especially [@TorioCrema](https://github.com/TorioCrema), [@FedericoCalzoni](https://github.com/FedericoCalzoni), [@beatricebottari](https://github.com/beatricebottari), [@LucaTedeschini](https://github.com/LucaTedeschini), [@ncridlig](https://github.com/ncridlig) and [@StefanoColamonaco](https://github.com/StefanoColamonaco).
+
+A final special thanks goes to [@gerkone](https://github.com/gerkone). In the second half of 2020, we worked together with [@EnricoTrombetti](https://github.com/EnricoTrombetti) and [@AldoCanfora](https://github.com/AldoCanfora) on a project for a Complex Systems course shared between physicists and computer scientists (all of us were physicists except @gerkone). Shortly afterwards, @gerkone founded the UniBo autonomous driving team, which I have enjoyed being part of ever since.

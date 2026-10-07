@@ -580,6 +580,11 @@ It uses the same pose sources (`pose_source`), which also supply the speed
 `v` (odometry's, or `vehicle_status`'s). Its parameters live in
 `config/autonomous_control/path_follower.toml`.
 
+It's a port of the UniBo team's ROS2 Path Follower, first implemented by
+[@SamueleCrimi](https://github.com/SamueleCrimi) and
+[@Scheggetta](https://github.com/Scheggetta). Its steering laws are also
+the ones [Frenet overtaking](#frenet-overtaking) follows the line with.
+
 Each tick it does the following:
 
 1. **Nearest point.** It finds the nearest point on the line, with the
@@ -627,6 +632,12 @@ instead. Its parameters live in
 `config/autonomous_control/frenet_overtaking.toml`. The planner is in
 `shared/frenet.rs`, and the steering laws are in `shared/steering.rs`,
 which it shares with `path_follower`.
+
+It's a port of the UniBo team's ROS2 Frenet overtaking, first implemented by
+[@SamueleCrimi](https://github.com/SamueleCrimi) and
+[@Scheggetta](https://github.com/Scheggetta). The original won the
+RoboRacer competition at ICRA 2025 in Atlanta and took second place at
+ICRA 2026 in Vienna, both times on the car `philly`.
 
 It needs the vehicle's pose (`pose_source`), a race line, its LIDAR scan,
 and the selected map.
@@ -700,10 +711,14 @@ avoiding.
 ## MPC
 
 `mpc.rs` follows the race line with a model predictive controller over a
-kinematic bicycle and steers around the opponent that `UbmDetector`
+kinematic bicycle and steers around the opponent that [`UbmDetector`](detector.md)
 reports. Its parameters live in
 `config/autonomous_control/mpc.toml`. The optimal-control problem is in
 `shared/mpc.rs`.
+
+The UniBo team's ROS2 MPC took third place at the RoboRacer competition at
+ICRA 2026 in Vienna, on the car `tom`. The MPC here follows the same idea
+but isn't a line-by-line port: it's solved with PANOC rather than CasADi.
 
 It needs the vehicle's pose (`pose_source`) and a race line. The selected
 map (for the walls term) and the detector (for the opponent term) are
