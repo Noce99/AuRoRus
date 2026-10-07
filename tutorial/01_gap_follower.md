@@ -620,8 +620,8 @@ changed, so the new algorithm is picked up without doing anything else.
 Then:
 
 1. Open <http://localhost:1999>.
-2. Select a map. A fresh clone has none: generate a random track from the
-   GUI first.
+2. Select a map, for example `Atlanta_2025`, one of the race tracks the
+   repository ships, or generate a random track from the GUI.
 3. In the **Autonomous Algos** panel, pick **My gap follower** and press
    **Start**. The car drives.
 4. **Pause** stops it. Holding a WASD key takes over while the key is held.

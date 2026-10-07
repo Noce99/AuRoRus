@@ -3,6 +3,12 @@
 **Au**tonomous **Ro**boracer **Rus**t - an autonomous driving stack for
 [RoboRacer](https://roboracer.ai/) (formerly F1TENTH) cars, written in Rust.
 
+<p align="center">
+  <img src="documentation/images/credits/philly_with_vienna_prize.jpg" alt="The car philly next to its second-place trophy from the RoboRacer competition at ICRA 2026 in Vienna" width="600">
+  <br>
+  <em><code>philly</code> and its trophy for second place in the Master Cup of the 27th RoboRacer Autonomous Racing Competition, ICRA 2026, Vienna</em>
+</p>
+
 It covers the whole pipeline in one crate (`aurorus`): a vehicle and LIDAR
 simulator with a random track generator, SLAM mapping and localization,
 race-line planning, opponent detection, a set of autonomous driving
@@ -138,11 +144,23 @@ file's header explains its usage.
 
 ## Maps
 
-Maps live in `maps/`, one folder per map. A fresh clone has none: create one
-from `web_gui` - generate a random track, import an image, or map a real track
-with SLAM.
+Maps live in `maps/`, one folder per map. The repository ships the tracks
+of the RoboRacer races the UniBo team took part in (see [Credits](#credits)):
 
-<!-- TODO: describe the maps shipped with the repository once they are added. -->
+| Map | Track |
+|---|---|
+| `Atlanta_2025` | ICRA 2025, Atlanta |
+| `Vienna_2026_Quali` | ICRA 2026, Vienna: the qualifying track |
+| `Vienna_2026_Final_Ground` | ICRA 2026, Vienna: the final track, at ground level |
+| `Vienna_2026_Final_Bridge` | ICRA 2026, Vienna: the same final track, on the bridge level |
+
+The Vienna final track crossed over itself on a bridge, so it comes as two
+maps of the same area, one per level.
+
+Only each map's image and `info.json` are tracked. Race lines are not: plan
+one from `web_gui`'s Planning panel (see [Planning](documentation/planning.md)).
+Any other map you create from `web_gui` - generate a random track, import an
+image, or map a real track with SLAM - stays local.
 
 ## Files not in the repository
 
@@ -152,7 +170,7 @@ as the executables run and are specific to one machine.
 | Path | What it holds |
 |---|---|
 | `target/` | Cargo's build output, including the executables in `target/release/` |
-| `maps/` | The maps: generated, imported, or built with SLAM (see [Maps](#maps)) |
+| `maps/` | Every map but the race tracks above, and every map's race lines (see [Maps](#maps)) |
 | `debugs/` | `.debug` session files recorded by `web_gui`, played back by `replay_web_gui` |
 | `benchmarks/` | Benchmark runs recorded by `web_gui`, read by `benchmark_viewer` |
 | `CAR_NAME` | One line naming the car this machine drives; without it, `web_gui` simulates |
