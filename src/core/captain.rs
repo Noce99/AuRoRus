@@ -110,11 +110,9 @@ fn next_epoch() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_micros() as u64;
-    let previous = LAST_EPOCH
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
-            Some(now_us.max(last + 1))
-        })
-        .expect("the update closure always returns Some");
+    let previous = LAST_EPOCH.update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+        now_us.max(last + 1)
+    });
     now_us.max(previous + 1)
 }
 
