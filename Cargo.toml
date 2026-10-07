@@ -2,6 +2,17 @@
 name = "aurorus"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+authors = ["Enrico Mannocci <enrico.mannocci99@gmail.com>"]
+description = "Autonomous driving stack for RoboRacer (F1TENTH) cars: simulator, SLAM, race-line planning, driving algorithms, car drivers and a web GUI"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Noce99/AuRoRus"
+readme = "README.md"
+keywords = ["roboracer", "f1tenth", "autonomous-driving", "robotics", "slam"]
+categories = ["science::robotics", "simulation"]
+# The README's pictures are served from the repository instead (crates.io
+# resolves its relative links against `repository`), keeping the crate small.
+exclude = ["documentation/images/"]
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["serde"] }

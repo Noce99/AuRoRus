@@ -238,3 +238,16 @@ Special thanks also to [@AlbYoda](https://github.com/AlbYoda), who implemented t
 Many thanks to everyone else who has been part of the UniBo driverless team, especially [@TorioCrema](https://github.com/TorioCrema), [@FedericoCalzoni](https://github.com/FedericoCalzoni), [@beatricebottari](https://github.com/beatricebottari), [@LucaTedeschini](https://github.com/LucaTedeschini), [@ncridlig](https://github.com/ncridlig) and [@StefanoColamonaco](https://github.com/StefanoColamonaco).
 
 A final special thanks goes to [@gerkone](https://github.com/gerkone). In the second half of 2020, we worked together with [@EnricoTrombetti](https://github.com/EnricoTrombetti) and [@AldoCanfora](https://github.com/AldoCanfora) on a project for a Complex Systems course shared between physicists and computer scientists (all of us were physicists except @gerkone). Shortly afterwards, @gerkone founded the UniBo autonomous driving team, which I have enjoyed being part of ever since.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
