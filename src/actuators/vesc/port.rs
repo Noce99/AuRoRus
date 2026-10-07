@@ -136,7 +136,7 @@ fn exclusive(file: &File) -> std::io::Result<()> {
         if libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) != 0 {
             return Err(std::io::Error::last_os_error());
         }
-        if libc::ioctl(fd, libc::TIOCEXCL) != 0 {
+        if libc::ioctl(fd, libc::TIOCEXCL as _) != 0 {
             return Err(std::io::Error::last_os_error());
         }
     }
