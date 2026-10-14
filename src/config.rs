@@ -188,6 +188,29 @@ pub fn load_toml_values(
         .collect()
 }
 
+/// Writes `parameters`' values into the flat config file `path`, leaving
+/// everything else in it - comments, other keys, layout - untouched.
+pub fn save_parameter_values(path: &Path, parameters: &[AlgorithmParameter]) -> Result<(), String> {
+    let values: Vec<(&str, String)> = parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), parameter_toml_value(parameter)))
+        .collect();
+    save_toml_values(path, None, &values)
+}
+
+/// The values the flat config file `path` holds for `parameters`, by name -
+/// e.g. to go back to what [`save_parameter_values`] last wrote.
+pub fn saved_parameter_values(
+    path: &Path,
+    parameters: &[AlgorithmParameter],
+) -> Result<BTreeMap<String, f64>, String> {
+    let names: Vec<&str> = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect();
+    load_toml_values(path, None, &names)
+}
+
 /// `text` (a TOML file) with the value of each top-level (`section: None`)
 /// or `[section]`-scoped `key = value` line named in `values` replaced -
 /// see [`save_toml_values`]. Only flat numeric values are expected - every

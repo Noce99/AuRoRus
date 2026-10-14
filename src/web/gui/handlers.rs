@@ -15,6 +15,7 @@ use super::maps_api;
 use super::opponents_api;
 use super::planning_api;
 use super::race_lines_api;
+use super::simulation_api::{self, IMU, LIDAR};
 use super::slam_api;
 use super::topics_api;
 use super::vehicle_model_api;
@@ -169,6 +170,25 @@ pub fn handle(
         }
         (Method::Post, "/api/detector_parameters_load") => {
             detector_api::load_detector_parameters(captain, writer_id)
+        }
+        (Method::Get, "/api/simulation") => simulation_api::simulation(captain),
+        (Method::Post, "/api/simulated_imu_parameter") => {
+            simulation_api::set_sensor_parameter(&mut request, captain, writer_id, &IMU)
+        }
+        (Method::Post, "/api/simulated_imu_parameters_save") => {
+            simulation_api::save_sensor_parameters(captain, &IMU)
+        }
+        (Method::Post, "/api/simulated_imu_parameters_load") => {
+            simulation_api::load_sensor_parameters(captain, writer_id, &IMU)
+        }
+        (Method::Post, "/api/simulated_lidar_parameter") => {
+            simulation_api::set_sensor_parameter(&mut request, captain, writer_id, &LIDAR)
+        }
+        (Method::Post, "/api/simulated_lidar_parameters_save") => {
+            simulation_api::save_sensor_parameters(captain, &LIDAR)
+        }
+        (Method::Post, "/api/simulated_lidar_parameters_load") => {
+            simulation_api::load_sensor_parameters(captain, writer_id, &LIDAR)
         }
         (Method::Get, "/api/planning") => planning_api::planning(captain),
         (Method::Post, "/api/planning_parameter") => {

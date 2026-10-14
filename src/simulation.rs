@@ -14,8 +14,14 @@ mod random_lidar;
 pub mod vehicle;
 pub mod vehicle_models;
 
-pub use imu::{SimulatedImu, SimulatedImuConfig};
-pub use lidar::{SimulatedLidar, SimulatedLidarConfig};
+pub use imu::{
+    SimulatedImu, SimulatedImuConfig, save_parameters as save_imu_parameters,
+    saved_values as saved_imu_values,
+};
+pub use lidar::{
+    SimulatedLidar, SimulatedLidarConfig, save_parameters as save_lidar_parameters,
+    saved_values as saved_lidar_values,
+};
 pub use opponents::OpponentsManager;
 pub use random_lidar::{RandomLidar, RandomLidarConfig};
 pub use vehicle::{

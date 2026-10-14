@@ -37,6 +37,7 @@ mod maps_api;
 mod opponents_api;
 mod planning_api;
 mod race_lines_api;
+mod simulation_api;
 mod slam_api;
 mod topics_api;
 mod vehicle_model_api;
@@ -50,8 +51,9 @@ use crate::topics::{
     OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests, PLACE_AT_START_TOPIC_NAME,
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
     PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_START_TOPIC_NAME, RaceLineSelection,
-    RaceStart, SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SlamCommand, SlamSaveRequest,
-    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    RaceStart, SIMULATED_IMU_PARAMETERS_TOPIC_NAME, SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME,
+    SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SimulatedSensorParameters, SlamCommand,
+    SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VESC_PARAMETERS_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
     VescParameters,
 };
@@ -235,6 +237,16 @@ impl Executor for WebGui {
             DETECTOR_PARAMETERS_TOPIC_NAME,
             self.id,
             DetectorParameters::default,
+        );
+        captain.claim_writer::<SimulatedSensorParameters>(
+            SIMULATED_IMU_PARAMETERS_TOPIC_NAME,
+            self.id,
+            SimulatedSensorParameters::default,
+        );
+        captain.claim_writer::<SimulatedSensorParameters>(
+            SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME,
+            self.id,
+            SimulatedSensorParameters::default,
         );
         captain.claim_writer::<PlanningRequest>(
             PLANNING_REQUEST_TOPIC_NAME,

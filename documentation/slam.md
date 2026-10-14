@@ -264,7 +264,8 @@ cargo run --release --bin web_gui   # release: the matcher is heavy in debug
 ```
 
 `noise_scale` in `config/simulation/imu.toml` must be above `0` (it is
-by default) so odometry drifts. Otherwise there's nothing for SLAM to
+by default) so odometry drifts. It can also be changed live from the
+**Simulation** panel. Otherwise there's nothing for SLAM to
 correct. Open the
 **Mapping** panel, press **Play** and drive. DeadReckoning's purple vehicle
 drifts away from the true one while SLAM's green one stays on it.

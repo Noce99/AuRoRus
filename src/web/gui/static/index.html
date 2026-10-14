@@ -18,6 +18,7 @@
       <button class="panel-nav-btn selected" data-panel="maps">Maps</button>
       <button class="panel-nav-btn" data-panel="layers">Layers</button>
       <button class="panel-nav-btn" data-panel="vehicle-model" data-simulator-only>Vehicle Model</button>
+      <button class="panel-nav-btn" data-panel="simulation" data-simulator-only>Simulation</button>
       <button class="panel-nav-btn" data-panel="vesc" hidden>VESC</button>
       <button class="panel-nav-btn" data-panel="topics">Topics</button>
       <button class="panel-nav-btn" data-panel="algorithms">Autonomous Algos</button>
@@ -118,6 +119,26 @@
         <button type="button" id="vehicle-limits-save-btn" class="parameter-save-btn" title="Write these limits into the vehicle's config file">Save limits</button>
         <button type="button" id="vehicle-limits-load-btn" class="parameter-load-btn" title="Run with the limits in the vehicle's config file again, dropping unsaved changes">Load from file</button>
         <p id="vehicle-limits-save-status"></p>
+      </div>
+    </section>
+
+    <section id="panel-simulation" class="panel-section" hidden>
+      <h1>Simulation</h1>
+      <h2 class="parameter-group-title">IMU</h2>
+      <p class="parameter-description">Applied from the next reading.</p>
+      <div id="simulated-imu-parameters" class="parameter-list" hidden></div>
+      <div id="simulated-imu-save" class="parameter-save" hidden>
+        <button type="button" id="simulated-imu-save-btn" class="parameter-save-btn" title="Write these values into the simulated IMU's config file">Save parameters</button>
+        <button type="button" id="simulated-imu-load-btn" class="parameter-load-btn" title="Use the values in the simulated IMU's config file again, dropping unsaved changes">Load from file</button>
+        <p id="simulated-imu-save-status"></p>
+      </div>
+      <h2 class="parameter-group-title">Lidar</h2>
+      <p class="parameter-description">Applied from the next scan.</p>
+      <div id="simulated-lidar-parameters" class="parameter-list" hidden></div>
+      <div id="simulated-lidar-save" class="parameter-save" hidden>
+        <button type="button" id="simulated-lidar-save-btn" class="parameter-save-btn" title="Write these values into the simulated lidar's config file">Save parameters</button>
+        <button type="button" id="simulated-lidar-load-btn" class="parameter-load-btn" title="Use the values in the simulated lidar's config file again, dropping unsaved changes">Load from file</button>
+        <p id="simulated-lidar-save-status"></p>
       </div>
     </section>
 

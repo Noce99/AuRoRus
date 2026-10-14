@@ -787,6 +787,35 @@ async function pollDetector() {
 }
 
 // ---------------------------------------------------------------------
+// Simulation panel - tunes the simulated sensors live, through
+// `simulated_imu_parameters` and `simulated_lidar_parameters`, showing the
+// values they run with from `/api/simulation` (their `simulated_*_status`
+// topics).
+// ---------------------------------------------------------------------
+
+const syncSimulatedImuParameters = createParameterPanel({
+  containerEl: document.getElementById("simulated-imu-parameters"),
+  saveEl: document.getElementById("simulated-imu-save"),
+  setUrl: "/api/simulated_imu_parameter",
+  saveUrl: "/api/simulated_imu_parameters_save",
+  loadUrl: "/api/simulated_imu_parameters_load",
+});
+
+const syncSimulatedLidarParameters = createParameterPanel({
+  containerEl: document.getElementById("simulated-lidar-parameters"),
+  saveEl: document.getElementById("simulated-lidar-save"),
+  setUrl: "/api/simulated_lidar_parameter",
+  saveUrl: "/api/simulated_lidar_parameters_save",
+  loadUrl: "/api/simulated_lidar_parameters_load",
+});
+
+async function pollSimulation() {
+  const { imu, lidar } = (await fetchJSON("/api/simulation")).value;
+  syncSimulatedImuParameters("simulated_imu", imu === null ? [] : imu.parameters);
+  syncSimulatedLidarParameters("simulated_lidar", lidar === null ? [] : lidar.parameters);
+}
+
+// ---------------------------------------------------------------------
 // Planning panel - asks the planner for a race line for the selected map
 // through the `planning_request` topic, tunes it through
 // `planning_parameters` (applied right away, so before starting), and
@@ -3249,10 +3278,11 @@ refreshMapList()
   })
   .catch((err) => console.error(err));
 
-/** The panels only a simulated vehicle has: its model, and the opponents
- *  racing it. */
+/** The panels only a simulated vehicle has: its model, its simulated
+ *  sensors, and the opponents racing it. */
 function startSimulatorPanels() {
   startPolling(pollVehicleModel, SELECTION_POLL_MS);
+  startPolling(pollSimulation, SELECTION_POLL_MS);
   startPolling(pollOpponents, SELECTION_POLL_MS);
   populateVehicleModelOptions()
     .then(() => pollVehicleModel())

@@ -4,27 +4,33 @@
 //! Every hit's range is corrupted with gaussian noise. Unless configured
 //! otherwise, it also sees the other vehicles' bodies (see
 //! [`SimulatedLidarConfig::see_vehicles`]). Also draws every hit on its own
-//! drawing topic (see [`crate::topics::Drawing`]).
+//! drawing topic (see [`crate::topics::Drawing`]). Its noise is tuned live
+//! through [`SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME`].
 
 use super::imu::gaussian;
 use crate::calibration::CarCalibration;
 use crate::environment::cast_ray;
 use crate::topics::{
-    Color, Drawing, DrawingExt, LidarScan, MAP_TOPIC_NAME, OPPONENTS_TOPIC_NAME, Opponents,
-    SelectedMap, Shape, VehicleGeometry, VehicleStatus, VehicleTopics,
+    AlgorithmParameter, Color, Drawing, DrawingExt, LidarScan, MAP_TOPIC_NAME,
+    OPPONENTS_TOPIC_NAME, Opponents, SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME,
+    SIMULATED_LIDAR_STATUS_TOPIC_NAME, SelectedMap, Shape, SimulatedSensorParameters,
+    SimulatedSensorStatus, VehicleGeometry, VehicleStatus, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::any::Any;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Every tunable parameter [`SimulatedLidar`] needs - loaded from
 /// `config/simulation/lidar.toml` (see [`Default`]) or from an
 /// arbitrary path via [`crate::config::load`]. Where it's mounted is the
 /// simulated car's instead - see [`Self::for_car`], which a loaded config
-/// needs before it's used.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+/// needs before it's used. Only `range_std_m` is live-tunable, see
+/// [`tunable_parameters`].
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimulatedLidarConfig {
     /// Rate at which [`SimulatedLidar`] publishes a new scan, in Hz.
@@ -77,6 +83,48 @@ impl SimulatedLidarConfig {
     }
 }
 
+/// Every live-tunable parameter, each named after the
+/// [`SimulatedLidarConfig`] field it sets, with its `value` left at `0` -
+/// see [`crate::config::refresh_parameter_values`].
+pub fn tunable_parameters() -> Vec<AlgorithmParameter> {
+    vec![
+        AlgorithmParameter::float("range_std_m", 0.0, 0.5, 0.005)
+            .unit("m")
+            .description(
+                "Standard deviation of the noise on every hit's range - 0 gives a perfect \
+                 sensor. Every simulated lidar uses it, the opponents' too.",
+            ),
+    ]
+}
+
+/// Where the simulated lidar keeps its config: `config/simulation/lidar.toml`,
+/// relative to the working directory - rewritten by [`save_parameters`].
+pub fn config_path() -> PathBuf {
+    Path::new(crate::config::DEFAULT_CONFIG_ROOT)
+        .join("simulation")
+        .join("lidar.toml")
+}
+
+/// Writes `parameters`' values into [`config_path`], keeping the rest of
+/// the file. Returns the file's path.
+pub fn save_parameters(parameters: &[AlgorithmParameter]) -> Result<PathBuf, String> {
+    let path = config_path();
+    crate::config::save_parameter_values(&path, parameters)?;
+    Ok(path)
+}
+
+/// The values [`config_path`] holds for `parameters`, by name, and the
+/// file's path - e.g. to go back to what was last saved.
+pub fn saved_values(
+    parameters: &[AlgorithmParameter],
+) -> Result<(BTreeMap<String, f64>, PathBuf), String> {
+    let path = config_path();
+    Ok((
+        crate::config::saved_parameter_values(&path, parameters)?,
+        path,
+    ))
+}
+
 /// A synthetic LIDAR sensor: claims its vehicle's
 /// [`VehicleTopics::lidar_scan`] and publishes a
 /// [`LidarScan`] built by raycasting [`SimulatedLidarConfig::num_points`]
@@ -85,7 +133,9 @@ impl SimulatedLidarConfig {
 /// [`MAP_TOPIC_NAME`], from its mount (see
 /// [`SimulatedLidarConfig::mount_x_m`]) on the pose published on its
 /// vehicle's [`VehicleTopics::vehicle_status`], at
-/// [`SimulatedLidarConfig::rate_hz`].
+/// [`SimulatedLidarConfig::rate_hz`]. Applies whatever
+/// [`SimulatedSensorParameters`] asks for before the next scan; the ego
+/// vehicle's reports it on [`SIMULATED_LIDAR_STATUS_TOPIC_NAME`].
 pub struct SimulatedLidar {
     id: u16,
     name: String,
@@ -117,6 +167,48 @@ impl SimulatedLidar {
             ..Self::new(name, config)
         }
     }
+
+    /// Applies any new [`SimulatedSensorParameters`] to the config. Returns
+    /// whether the config changed.
+    fn apply_parameters(&mut self, captain: &Captain, seen_write_count: &mut u64) -> bool {
+        // Nothing may publish parameters at all (e.g. a binary without
+        // `web_gui`) - then the config stays as loaded.
+        let Some(requests) =
+            captain.try_topic::<SimulatedSensorParameters>(SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME)
+        else {
+            return false;
+        };
+        let write_count = requests.meta().write_count;
+        if write_count == *seen_write_count {
+            return false;
+        }
+        *seen_write_count = write_count;
+        let wanted = requests.read().into_value().values;
+        apply_parameters(&mut self.config, &wanted)
+    }
+
+    /// The tunable parameters with the values in effect.
+    fn parameters(&self) -> Vec<AlgorithmParameter> {
+        let mut parameters = tunable_parameters();
+        crate::config::refresh_parameter_values(&mut parameters, &self.config);
+        parameters
+    }
+}
+
+/// [`crate::config::apply_parameters`] for `config`, keeping where it's
+/// mounted: that isn't serialized (it's the car's, not the file's), so the
+/// round trip through JSON would zero it.
+fn apply_parameters(config: &mut SimulatedLidarConfig, wanted: &BTreeMap<String, f64>) -> bool {
+    let mut tuned = *config;
+    if !crate::config::apply_parameters(&mut tuned, &tunable_parameters(), wanted) {
+        return false;
+    }
+    *config = SimulatedLidarConfig {
+        mount_x_m: config.mount_x_m,
+        mount_y_m: config.mount_y_m,
+        ..tuned
+    };
+    true
 }
 
 impl Executor for SimulatedLidar {
@@ -137,10 +229,27 @@ impl Executor for SimulatedLidar {
             .mounted_at(config.mount_x_m, config.mount_y_m)
         });
         captain.claim_drawing(self.id);
+        // Every lidar applies the parameters, but there's one status: the
+        // ego vehicle's.
+        if self.vehicle.is_ego() {
+            let parameters = self.parameters();
+            captain.claim_writer::<SimulatedSensorStatus>(
+                SIMULATED_LIDAR_STATUS_TOPIC_NAME,
+                self.id,
+                move || SimulatedSensorStatus {
+                    parameters: parameters.clone(),
+                },
+            );
+        }
     }
 
     fn run(&mut self, captain: &Captain) {
         let lidar_topic = captain.topic::<LidarScan>(&self.vehicle.lidar_scan());
+        let status_topic = self
+            .vehicle
+            .is_ego()
+            .then(|| captain.topic::<SimulatedSensorStatus>(SIMULATED_LIDAR_STATUS_TOPIC_NAME));
+        let mut seen_parameters = 0;
         let vehicle_topic = captain.topic::<VehicleStatus>(&self.vehicle.vehicle_status());
         let map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let drawing_topic = captain.drawing(self.id);
@@ -156,6 +265,18 @@ impl Executor for SimulatedLidar {
         let mut rng = StdRng::seed_from_u64(seed);
 
         while captain.is_running(self.id) {
+            if self.apply_parameters(captain, &mut seen_parameters)
+                && let Some(status_topic) = &status_topic
+            {
+                status_topic
+                    .write(
+                        self.id,
+                        SimulatedSensorStatus {
+                            parameters: self.parameters(),
+                        },
+                    )
+                    .expect("lost writer authorization for the simulated_lidar_status topic");
+            }
             let status = vehicle_topic.read();
             let map = map_topic.read();
             let others = if self.config.see_vehicles {
@@ -357,6 +478,36 @@ fn ray_vehicle_distance_m(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tuning_the_noise_keeps_where_the_lidar_is_mounted() {
+        let mut config = SimulatedLidarConfig {
+            mount_x_m: 0.27,
+            mount_y_m: -0.01,
+            ..SimulatedLidarConfig::default()
+        };
+        let wanted = BTreeMap::from([("range_std_m".to_string(), 0.1)]);
+        assert!(apply_parameters(&mut config, &wanted));
+        assert_eq!(config.range_std_m, 0.1);
+        assert_eq!((config.mount_x_m, config.mount_y_m), (0.27, -0.01));
+    }
+
+    /// Every declared parameter names a numeric config field - this panics
+    /// otherwise - and the shipped defaults sit inside their slider ranges.
+    #[test]
+    fn every_parameter_names_a_config_field_within_its_range() {
+        let mut parameters = tunable_parameters();
+        crate::config::refresh_parameter_values(&mut parameters, &SimulatedLidarConfig::default());
+        for parameter in parameters {
+            assert_eq!(
+                parameter.kind.sanitize(parameter.value),
+                Some(parameter.value),
+                "{} = {} is outside its range",
+                parameter.name,
+                parameter.value
+            );
+        }
+    }
 
     #[test]
     fn ray_offsets_span_the_fov_symmetrically_around_the_forward_direction() {

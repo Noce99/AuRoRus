@@ -188,6 +188,20 @@ it live:
 - **Save parameters** / **Save limits** write the values into the vehicle's
   config file. **Load from file** goes back to the file's values.
 
+### Simulation
+
+Simulation only. Tunes the simulated sensors live:
+
+- **IMU:** `noise_scale` multiplies every noise and bias term of
+  `SimulatedImu` (`config/simulation/imu.toml`). `0` gives a perfect sensor,
+  so dead reckoning doesn't drift. Drift already integrated into odometry
+  stays: clear the SLAM map (or press P) after changing it.
+- **Lidar:** `range_std_m` is the standard deviation of the noise added to
+  every hit's range (`config/simulation/lidar.toml`). Every simulated lidar
+  uses it, the opponents' too.
+- **Save parameters** writes the values into the sensor's config file.
+  **Load from file** goes back to the file's values.
+
 ### Topics
 
 ![Topics panel](images/web_gui/topics.jpg)
@@ -365,8 +379,8 @@ When `web_gui` runs on a car, the page differs in three ways:
 
 - The canvas background is dark red, and the car's name is shown in the
   bottom right corner.
-- **Vehicle Model**, **Opponents** and **Benchmark** are hidden: they only
-  exist in simulation.
+- **Vehicle Model**, **Simulation**, **Opponents** and **Benchmark** are
+  hidden: they only exist in simulation.
 - A **VESC** panel appears. It shows what the motor controller reports
   (battery voltage and estimated charge, speed, commanded speed, steering
   servo, current, temperature, tachometer), and tunes the VESC settings and
@@ -436,6 +450,7 @@ The topics `WebGui` writes:
 | `race_line_selection` | A race line is clicked |
 | `place_at_start` | P is pressed, or the place-vehicle tool is used |
 | `vehicle_model_selection`, `vehicle_model_parameters` | The Vehicle Model panel |
+| `simulated_imu_parameters`, `simulated_lidar_parameters` | The Simulation panel |
 | `vesc_parameters` | The VESC panel |
 | `autonomous_algorithm_selection`, `autonomous_parameters` | The Autonomous Algos panel |
 | `slam_command`, `slam_save` | The Mapping and Localization panels |
@@ -518,7 +533,8 @@ Every panel with sliders works the same way:
 
 1. Moving a slider sends the wanted value with a `POST`.
 2. `WebGui` writes it on the owner's parameters topic.
-3. The owner (an algorithm, the vehicle, the planner, the detector) clamps
+3. The owner (an algorithm, the vehicle, a simulated sensor, the planner,
+   the detector) clamps
    and applies it, and publishes the value now in effect in its status.
 4. The page reads the status back and moves the slider to that value.
 
@@ -559,6 +575,8 @@ Every route is in `src/web/gui/handlers.rs`. Bodies are JSON.
 | `GET /api/vehicle_models`, `GET /api/vehicle_model`, `POST /api/vehicle_model_selection` | The vehicle model |
 | `POST /api/vehicle_model_parameter`, `/api/vehicle_model_parameters_save`, `/api/vehicle_model_parameters_load` | Its parameters |
 | `POST /api/vehicle_limit`, `/api/vehicle_limits_save`, `/api/vehicle_limits_load` | The actuator limits |
+| `GET /api/simulation`, `POST /api/simulated_imu_parameter`, `/api/simulated_imu_parameters_save`, `/api/simulated_imu_parameters_load` | The Simulation panel: the IMU |
+| `POST /api/simulated_lidar_parameter`, `/api/simulated_lidar_parameters_save`, `/api/simulated_lidar_parameters_load` | The Simulation panel: the lidar |
 | `GET /api/vesc`, `GET /api/vesc_parameters`, `POST /api/vesc_parameter`, `/api/vesc_parameters_save`, `/api/vesc_parameters_load` | The VESC panel |
 | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection` | The algorithms and the selection |
 | `POST /api/autonomous_parameter`, `/api/autonomous_parameters_save`, `/api/autonomous_parameters_load` | The selected algorithm's parameters |
@@ -596,7 +614,7 @@ curl "localhost:1999/api/topic?name=vehicle_status"
 | `src/web/gui/live_api.rs` | Config, map selection, WASD, place at start, restart, read-outs |
 | `src/web/gui/maps_api.rs`, `map_edit_api.rs` | Maps on disk: list, generate, import, edit |
 | `src/web/gui/draw_api.rs`, `topics_api.rs` | The drawings, and the generic topic inspector |
-| `src/web/gui/autonomous_api.rs`, `vehicle_model_api.rs`, `vesc_api.rs`, `slam_api.rs`, `detector_api.rs`, `planning_api.rs`, `race_lines_api.rs`, `opponents_api.rs`, `debug_api.rs` | One file per panel |
+| `src/web/gui/autonomous_api.rs`, `vehicle_model_api.rs`, `simulation_api.rs`, `vesc_api.rs`, `slam_api.rs`, `detector_api.rs`, `planning_api.rs`, `race_lines_api.rs`, `opponents_api.rs`, `debug_api.rs` | One file per panel |
 | `src/web/gui/benchmark_api.rs`, `benchmark_orchestrator.rs` | The Benchmark panel, and the thread that drives its runs |
 | `src/web/gui/static/` | The page: `index.html`, `style.css`, `app.js`, `benchmark.js` |
 | `src/web/*.js`, `src/web/base.css` | The frontend shared with `replay_web_gui` |
