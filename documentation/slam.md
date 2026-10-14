@@ -156,7 +156,8 @@ Then SLAM **looks for a loop** (`TryCloseLoop`). It looks for runs of at
 least `loop_match_minimum_chain_size` consecutive old scans within
 `loop_search_maximum_distance_m` that are *not* reachable through the graph
 within that distance, meaning the vehicle is back somewhere it mapped long
-ago. For each run:
+ago. Unlike Karto, an old scan only counts if its heading is within
+`loop_search_maximum_heading_difference_rad` of the new one's. For each run:
 
 1. A **coarse match** in a wide window (`loop_search_space_dimension_m`,
    8 m by default, since the drift may be large). It must score above
@@ -235,8 +236,28 @@ The defaults are slam_toolbox's, except:
   which suits a 1/10 car on small tracks.
 - `max_laser_range_m` is 12 (vs 20): readings beyond it only mark the cells
   they cross as free. The lidars themselves reach 30 m.
+- `correlation_search_space_smear_deviation_m` is 0.05 m (vs 0.1). In narrow
+  corridors such a wide blur moves the best match off the truth, slightly
+  but always the same way: even with perfect odometry and lidar, Atlanta_2025
+  mapped at 0.1 rotated about 10 degrees and drifted over 1 m in a lap, more
+  than one loop closure can undo. At 0.05 that's about 1.5 degrees and 0.3 m.
+- `loop_match_maximum_variance_coarse` is 0.1 m² (vs 3.0). On a straight
+  with smooth walls the coarse loop match can't tell how far along it the
+  vehicle is (along-track variance around 1 m²), yet 3.0 lets it through: the
+  closure lands up to about 1 m off, and optimizing bends the whole map to
+  fit it. At 0.1 that match is skipped, and the loop closes a few scans later
+  where the track has features.
+- `loop_search_maximum_heading_difference_rad` (60 degrees) isn't in
+  slam_toolbox. Where two stretches of track run side by side behind a thin
+  wall, as on Atlanta_2025, the other stretch is within
+  `loop_search_maximum_distance_m`, and the unpenalized 8 m coarse search
+  snaps the scan onto it. Every closure on Atlanta_2025 was such a false one,
+  and each bent the map by meters. Those stretches are driven the other way,
+  or at an angle, so requiring the old scans to face roughly the same way
+  rules them out. A real return to a place is driven the same way, so the
+  check never blocks one.
 
-The loop-closure parameters (`do_loop_closing`, `link_*`, `loop_*`,
+The other loop-closure parameters (`do_loop_closing`, `link_*`, `loop_*`,
 `optimizer_max_iterations`) have slam_toolbox's defaults.
 `do_loop_closing = false` gives the plain chain of sequential matches, which
 is useful for comparing the two.

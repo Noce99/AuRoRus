@@ -40,8 +40,9 @@ correlation_search_space_dimension_m = 0.5
 # Resolution of that search, in meters.
 correlation_search_space_resolution_m = 0.01
 # How much reference points are blurred before matching, in meters - between
-# half and ten times the resolution.
-correlation_search_space_smear_deviation_m = 0.1
+# half and ten times the resolution. slam_toolbox uses 0.1, which drifts
+# several degrees a lap in narrow corridors - see documentation/slam.md.
+correlation_search_space_smear_deviation_m = 0.05
 # Heading searched either side of the prior, in radians (0.349 = 20 degrees).
 coarse_search_angle_offset_rad = 0.349
 # Heading step of the coarse search, in radians (2 degrees).
@@ -90,12 +91,18 @@ link_scan_maximum_distance_m = 1.5
 # Older scans closer than this to the new one are candidates for a loop
 # closure, in meters.
 loop_search_maximum_distance_m = 3.0
+# ... and only if their heading is within this of the new one's, in radians
+# (1.047 = 60 degrees). Not in slam_toolbox: without it, a scan matches the
+# neighboring stretch of track behind a thin wall, driven the other way - see
+# documentation/slam.md.
+loop_search_maximum_heading_difference_rad = 1.047
 # Fewest consecutive scans a chain needs to be matched against (for loop
 # closures and for links to nearby chains).
 loop_match_minimum_chain_size = 10
 # A coarse loop match is only trusted if both its position variances are below
-# this, in square meters.
-loop_match_maximum_variance_coarse = 3.0
+# this, in square meters. slam_toolbox uses 3.0, which accepts matches that
+# can't tell where along a straight the vehicle is - see documentation/slam.md.
+loop_match_maximum_variance_coarse = 0.1
 # Coarse response a loop match must beat to be refined (0 to 1).
 loop_match_minimum_response_coarse = 0.35
 # Fine response a refined loop match must reach to close the loop (0 to 1).

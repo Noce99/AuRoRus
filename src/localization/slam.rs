@@ -121,6 +121,9 @@ pub struct SlamConfig {
     /// Older scans closer than this are candidates for a loop closure, in
     /// meters.
     pub loop_search_maximum_distance_m: f64,
+    /// Older scans are candidates for a loop closure only if their heading
+    /// is closer than this to the new one's, in radians.
+    pub loop_search_maximum_heading_difference_rad: f64,
     /// Fewest consecutive scans a chain needs to be matched against.
     pub loop_match_minimum_chain_size: usize,
     /// A coarse loop match is only trusted if both its position variances
@@ -196,6 +199,8 @@ impl SlamConfig {
             link_match_minimum_response_fine: self.link_match_minimum_response_fine,
             link_scan_maximum_distance_m: self.link_scan_maximum_distance_m,
             loop_search_maximum_distance_m: self.loop_search_maximum_distance_m,
+            loop_search_maximum_heading_difference_rad: self
+                .loop_search_maximum_heading_difference_rad,
             loop_match_minimum_chain_size: self.loop_match_minimum_chain_size,
             loop_match_maximum_variance_coarse: self.loop_match_maximum_variance_coarse,
             loop_match_minimum_response_coarse: self.loop_match_minimum_response_coarse,

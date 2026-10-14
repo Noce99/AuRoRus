@@ -38,6 +38,7 @@ pub struct MapperParams {
     pub link_match_minimum_response_fine: f64,
     pub link_scan_maximum_distance_m: f64,
     pub loop_search_maximum_distance_m: f64,
+    pub loop_search_maximum_heading_difference_rad: f64,
     pub loop_match_minimum_chain_size: usize,
     pub loop_match_maximum_variance_coarse: f64,
     pub loop_match_minimum_response_coarse: f64,
@@ -479,10 +480,12 @@ impl Mapper {
     }
 
     /// The next chain of consecutive scans, from scan `*start` on, within
-    /// `loop_search_maximum_distance_m` of scan `index` but not linked to
-    /// it (through the graph, within that distance) and long enough -
-    /// Karto's `MapperGraph::FindPossibleLoopClosure`. `*start` is left
-    /// where the search stopped, for the next call.
+    /// `loop_search_maximum_distance_m` and
+    /// `loop_search_maximum_heading_difference_rad` of scan `index` but not
+    /// linked to it (through the graph, within that distance) and long
+    /// enough - Karto's `MapperGraph::FindPossibleLoopClosure`, plus the
+    /// heading check. `*start` is left where the search stopped, for the
+    /// next call.
     fn find_possible_loop_closure(&self, index: usize, start: &mut usize) -> Vec<usize> {
         let center = self.scans[index].corrected_pose();
         let max_squared = self.params.loop_search_maximum_distance_m.powi(2) + TOLERANCE;
@@ -497,11 +500,13 @@ impl Mapper {
         let mut chain = Vec::new();
         while *start < self.scans.len() {
             let candidate = *start;
-            if self.scans[candidate]
-                .corrected_pose()
-                .squared_distance(&center)
-                < max_squared
-            {
+            let pose = self.scans[candidate].corrected_pose();
+            // Not in Karto: a scan taken facing another way is most likely
+            // from a neighboring stretch of track behind a wall, which a
+            // wide loop search would happily snap onto.
+            let same_direction = wrap_to_pi(pose.heading_rad - center.heading_rad).abs()
+                < self.params.loop_search_maximum_heading_difference_rad;
+            if same_direction && pose.squared_distance(&center) < max_squared {
                 // A linked scan can't be part of a loop - it's the same
                 // stretch of the path.
                 if near_linked.contains(&candidate) {
@@ -604,6 +609,7 @@ mod tests {
             link_match_minimum_response_fine: 0.1,
             link_scan_maximum_distance_m: 1.5,
             loop_search_maximum_distance_m: 3.0,
+            loop_search_maximum_heading_difference_rad: 1.047,
             loop_match_minimum_chain_size: 10,
             loop_match_maximum_variance_coarse: 3.0,
             loop_match_minimum_response_coarse: 0.35,
@@ -833,6 +839,33 @@ mod tests {
             error_with < 0.5 * error_without,
             "with loop closure {error_with} m, without {error_without} m"
         );
+    }
+
+    /// How long a loop closure candidate chain a scan at (1.5, 0.5) heading
+    /// `heading_rad` finds, after a chain driven along +x through it.
+    fn loop_candidate_chain_len(heading_rad: f64) -> usize {
+        let t0 = Instant::now();
+        let mut mapper = Mapper::new(params());
+        // The old chain, then scans far away to end it, then the new scan.
+        let poses = (0..12)
+            .map(|step| Pose2::new(0.25 * f64::from(step), 0.0, 0.0))
+            .chain((0..3).map(|step| Pose2::new(20.0 + f64::from(step), 0.0, 0.0)))
+            .chain([Pose2::new(1.5, 0.5, heading_rad)]);
+        for (step, pose) in poses.enumerate() {
+            let time = t0 + Duration::from_secs(step as u64);
+            mapper.scans.push(scan_at(pose, pose, time));
+            mapper.graph.add_vertex();
+        }
+        let index = mapper.scans.len() - 1;
+        mapper.find_possible_loop_closure(index, &mut 0).len()
+    }
+
+    #[test]
+    fn scans_facing_another_way_are_no_loop_candidates() {
+        // Driving the same way, the old chain is a candidate...
+        assert_eq!(loop_candidate_chain_len(0.2), 12);
+        // ... driving the other way, as on the far side of a wall, it isn't.
+        assert_eq!(loop_candidate_chain_len(PI), 0);
     }
 
     #[test]
