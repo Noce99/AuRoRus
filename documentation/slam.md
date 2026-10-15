@@ -49,7 +49,9 @@ The diagram shows the simulation. On the real car, `HokuyoLidar` publishes
   long the latest scan took to process, how many loops have been closed, and
   how long the latest optimization took. Also the outcome of the latest
   save (see [Saving the map](#saving-the-map)) and, while localizing, the
-  correction `map_to_odom` (see [Localization](#localization)).
+  correction `map_to_odom` (see [Localization](#localization)). Also the
+  value of every tunable parameter, and the `anchor`: where odometry was last
+  reset in the world, i.e. where SLAM's frame sits on the true map.
 - **`slam_map`:** the occupancy grid, in SLAM's own frame (see
   [Frames](#frames)). Each pixel is one of `SlamMap::FREE` (255),
   `SlamMap::OCCUPIED` (0) or `SlamMap::UNKNOWN` (128), plus the trajectory.
@@ -380,8 +382,9 @@ A topic still holding the value it was registered with (never written) is
 not recorded, as in a debug recording. The file starts with a
 `mapping_session_info` record, JSON rather than bincode so it stays readable
 as fields are added: the car (none in simulation), the selected map (in
-simulation, the true map), and the value of every tunable SLAM parameter
-when recording started, which is the baseline for offline runs.
+simulation, the true map), the value of every tunable SLAM parameter when
+recording started (the baseline for offline runs), and SLAM's `anchor`, to
+place the map in the world.
 
 **One session, one map.** `web_gui` watches `slam_status` (see
 `src/web/gui/mapping_session_api.rs`), so every way mapping starts or ends is
@@ -409,6 +412,38 @@ too, so it can miss a scan that the session holds.
 
 A session takes about 0.4 MB per second of mapping in simulation (most of it
 the scans).
+
+### Rebuilding a session offline
+
+`aurorus::localization::rebuild(&session, &config, progress)` builds a
+session's map again with any `SlamConfig`, after
+`MappingSession::load(path)` has read it (see
+`src/localization/slam/rebuild.rs`). `SlamConfig::with_parameters` applies
+parameter values by name, e.g. the session's own baseline.
+
+- **The same code as live.** The live executor and the rebuild both drive
+  `slam.rs`'s `State` through the same three steps: `push_odometry`,
+  `try_pending` and `add_scan`. The rebuild replays the recorded writes in
+  the order they were written, as if SLAM polled infinitely fast, so it
+  takes every scan. Recorded timestamps become `Instant`s by adding them to
+  the instant the rebuild started, which is all the odometry interpolation
+  needs.
+- **As live, scans are only taken while mapping is running.** Scans recorded
+  while paused are counted and ignored. The Clear that ends a session is
+  caught just before its recording stops, so a clear ends the rebuild with
+  the map built so far.
+- **Deterministic and faster than real time.** The same session and config
+  always give the same map. A 62 s session (2,487 scans) rebuilds in about
+  14 s in a release build.
+- **The outcome:** the map, every kept scan's corrected and odometric pose
+  with its time, every processed scan's match response and processing time,
+  the loop-closure edges, and the counts of dropped and paused scans. Its
+  `save(name, maps_root)` writes the map as **Save map** does.
+
+A rebuild is close to the live run, not identical: live SLAM polls at
+`rate_hz`, so it can miss odometry samples and take scans a tick late. On a
+recorded 62 s drive, live kept 1,099 scans and the rebuild 1,097, with
+errors against the true pose of the same size (1.5 to 1.8 m after 20 s).
 
 ## Localization
 

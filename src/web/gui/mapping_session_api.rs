@@ -161,6 +161,7 @@ fn start(
                 .iter()
                 .map(|parameter| (parameter.name.clone(), parameter.value))
                 .collect(),
+            anchor: Some(status.anchor),
         };
         session.recorder.start_with(
             captain,

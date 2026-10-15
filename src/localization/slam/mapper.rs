@@ -142,6 +142,11 @@ impl Mapper {
         }
     }
 
+    /// Every scan kept, oldest first, at its corrected pose.
+    pub fn scans(&self) -> &[LocalizedScan] {
+        &self.scans
+    }
+
     /// How many scans the map is built from.
     pub fn scan_count(&self) -> usize {
         self.scans.len()

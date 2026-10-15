@@ -15,6 +15,8 @@ mod vehicle_pose;
 
 pub use dead_reckoning::{DeadReckoning, DeadReckoningConfig, Integration};
 pub use slam::{
-    Slam, SlamConfig, save_parameters as save_slam_parameters, saved_values as saved_slam_values,
+    KeptScan, ProcessedScan, RebuildOutcome, Slam, SlamConfig, rebuild,
+    save_parameters as save_slam_parameters, saved_values as saved_slam_values,
+    tunable_parameters as slam_tunable_parameters,
 };
 pub use vehicle_pose::{VehiclePose, WorldPose};

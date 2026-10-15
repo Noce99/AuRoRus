@@ -163,6 +163,11 @@ pub struct SlamStatus {
     /// Every tunable parameter, with the value currently in effect.
     #[serde(default)]
     pub parameters: Vec<AlgorithmParameter>,
+    /// Where odometry was last reset, in the world frame: where SLAM's own
+    /// frame (see [`SlamMap`]) sits on the true map - the start line, or
+    /// wherever the vehicle was placed since.
+    #[serde(default)]
+    pub anchor: crate::topics::StartState,
 }
 
 /// The occupancy map built so far, in SLAM's own frame: the `odom` frame of

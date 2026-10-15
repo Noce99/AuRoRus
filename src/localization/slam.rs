@@ -26,8 +26,11 @@ mod odometry_buffer;
 mod optimizer;
 mod pose;
 mod pose_graph;
+mod rebuild;
 mod scan;
 mod scan_matcher;
+
+pub use rebuild::{KeptScan, ProcessedScan, RebuildOutcome, rebuild};
 
 use crate::environment;
 use crate::topics::{
@@ -159,6 +162,16 @@ impl Default for SlamConfig {
 }
 
 impl SlamConfig {
+    /// This config with `values` - tunable parameters by name, see
+    /// [`tunable_parameters`] - applied, each brought into its range, or why
+    /// it can't be run with.
+    pub fn with_parameters(&self, values: &BTreeMap<String, f64>) -> Result<Self, String> {
+        let mut tuned = *self;
+        crate::config::apply_parameters(&mut tuned, &tunable_parameters(), values);
+        tuned.validate()?;
+        Ok(tuned)
+    }
+
     /// Why this config can't be run with, if it can't: each search's smear
     /// deviation must be between half and ten times its resolution (see
     /// [`correlation_grid::CorrelationGrid::new`]).
@@ -573,7 +586,7 @@ impl Executor for Slam {
             if last_odometry_write != Some(odometry.meta.write_count) {
                 last_odometry_write = Some(odometry.meta.write_count);
                 if let Some(written_at) = odometry.meta.written_at {
-                    state.odometry.push(written_at, odometry.value);
+                    state.push_odometry(written_at, odometry.value);
                 }
             }
 
@@ -581,14 +594,6 @@ impl Executor for Slam {
             let clear_requested = command.clear_requested != applied_clear;
             applied_clear = command.clear_requested;
             if clear_requested || command.state == SlamState::Off {
-                state.clear();
-            }
-            // A reset of odometry not announced through the command (e.g.
-            // from something other than web_gui): the map's frame is gone.
-            if let (Some(built_in), Some(current)) =
-                (state.map_reset_count, state.odometry.reset_count())
-                && built_in != current
-            {
                 state.clear();
             }
 
@@ -617,13 +622,9 @@ impl Executor for Slam {
             let processing = effective_state == SlamState::Running
                 || (effective_state == SlamState::Localizing && state.localization.is_some());
             if processing {
-                // An older scan still waiting for odometry to catch up goes
-                // first; a newer one replaces it only if it's still waiting
-                // after that.
                 state.try_pending();
                 if new_scan && let Some(written_at) = scan.meta.written_at {
-                    state.pending = Some((written_at, scan.value));
-                    state.try_pending();
+                    state.add_scan(written_at, scan.value);
                 }
             } else {
                 state.pending = None;
@@ -636,7 +637,10 @@ impl Executor for Slam {
             }
 
             status_topic
-                .write(self.id, state.status(effective_state, &parameters))
+                .write(
+                    self.id,
+                    state.status(effective_state, &parameters, placement.anchor()),
+                )
                 .expect("lost writer authorization for the slam_status topic");
 
             if let Some(localization) = &state.localization {
@@ -697,7 +701,26 @@ impl Executor for Slam {
     }
 }
 
-/// Everything [`Slam::run`] accumulates.
+/// How [`State`] processed a scan - see [`State::try_pending`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ScanProcessing {
+    /// Whether the scan was added to the map - `false` for one skipped
+    /// because the vehicle barely moved, and while localizing.
+    kept: bool,
+    /// How well it matched - `None` for the first scan of a map, which has
+    /// nothing to match against, and for a skipped one.
+    response: Option<f64>,
+    /// How long processing it took, in milliseconds - including any loop
+    /// closure it triggered.
+    process_ms: f64,
+    /// Whether it closed a loop.
+    loop_closed: bool,
+}
+
+/// Everything [`Slam::run`] accumulates - and [`rebuild`] too, offline: both
+/// feed it through [`State::push_odometry`], [`State::add_scan`] and
+/// [`State::try_pending`], so a map built offline goes through the very code
+/// a live one does.
 struct State {
     mapper: Mapper,
     odometry: OdometryBuffer,
@@ -717,6 +740,9 @@ struct State {
     localization: Option<Localization>,
     /// Whether the localized pose changed since it was last drawn.
     localization_changed: bool,
+    /// Scans never processed: replaced by a newer one while waiting for
+    /// odometry, or older than every odometry sample held.
+    dropped_scans: usize,
 }
 
 /// A [`Localizer`], and what it was built for: once either changes, it's
@@ -743,7 +769,31 @@ impl State {
             last_save: None,
             localization: None,
             localization_changed: false,
+            dropped_scans: 0,
         }
+    }
+
+    /// Adds an odometry sample, written at `at`. A reset of odometry that
+    /// nothing announced (e.g. through [`SlamCommand`] by something other
+    /// than web_gui) throws the map away: its frame is gone.
+    fn push_odometry(&mut self, at: Instant, odometry: Odometry) {
+        self.odometry.push(at, odometry);
+        if let (Some(built_in), Some(current)) = (self.map_reset_count, self.odometry.reset_count())
+            && built_in != current
+        {
+            self.clear();
+        }
+    }
+
+    /// Takes a new scan, written at `at`, and processes it if odometry
+    /// already covers that instant (see [`Self::try_pending`]). An older scan
+    /// still waiting for odometry is dropped for it - call
+    /// [`Self::try_pending`] first to give that one its chance.
+    fn add_scan(&mut self, at: Instant, scan: LidarScan) -> Option<ScanProcessing> {
+        if self.pending.replace((at, scan)).is_some() {
+            self.dropped_scans += 1;
+        }
+        self.try_pending()
     }
 
     /// Runs with `config` from now on, keeping the map, the odometry and
@@ -823,16 +873,16 @@ impl State {
 
     /// Processes the pending scan if odometry covers the instant it was
     /// written, drops it if odometry never will, or leaves it waiting.
-    fn try_pending(&mut self) {
-        let Some((written_at, _)) = &self.pending else {
-            return;
-        };
+    /// Returns how it was processed, if it was.
+    fn try_pending(&mut self) -> Option<ScanProcessing> {
+        let (written_at, _) = self.pending.as_ref()?;
         let pose = match self.odometry.pose_at(*written_at) {
             PoseAt::Pose(pose) => pose,
-            PoseAt::NotYet => return,
+            PoseAt::NotYet => return None,
             PoseAt::Unavailable => {
                 self.pending = None;
-                return;
+                self.dropped_scans += 1;
+                return None;
             }
         };
         let (written_at, scan) = self.pending.take().expect("checked above");
@@ -848,27 +898,56 @@ impl State {
                 pose,
                 threshold_m,
             ));
+            let process_ms = started.elapsed().as_secs_f64() * 1000.0;
             self.last_match_response = Some(localized.response);
-            self.last_process_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+            self.last_process_ms = Some(process_ms);
             self.localization_changed = true;
-            return;
+            return Some(ScanProcessing {
+                kept: false,
+                response: Some(localized.response),
+                process_ms,
+                loop_closed: false,
+            });
         }
 
         let threshold_m = self.mapper.range_threshold_m(f64::from(scan.max_distance));
         let processed =
             self.mapper
                 .process(LocalizedScan::new(&scan, written_at, pose, threshold_m));
-        match processed {
-            Processed::Skipped => return,
-            Processed::First => self.last_match_response = None,
-            Processed::Matched { result, .. } => self.last_match_response = Some(result.response),
-        }
-        self.last_process_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+        let process_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let (response, loop_closed) = match processed {
+            Processed::Skipped => {
+                return Some(ScanProcessing {
+                    kept: false,
+                    response: None,
+                    process_ms,
+                    loop_closed: false,
+                });
+            }
+            Processed::First => (None, false),
+            Processed::Matched {
+                result,
+                loop_closed,
+            } => (Some(result.response), loop_closed),
+        };
+        self.last_match_response = response;
+        self.last_process_ms = Some(process_ms);
         self.map_reset_count = self.odometry.reset_count();
         self.map_changed = true;
+        Some(ScanProcessing {
+            kept: true,
+            response,
+            process_ms,
+            loop_closed,
+        })
     }
 
-    fn status(&self, state: SlamState, parameters: &[AlgorithmParameter]) -> SlamStatus {
+    fn status(
+        &self,
+        state: SlamState,
+        parameters: &[AlgorithmParameter],
+        anchor: StartState,
+    ) -> SlamStatus {
         let as_array = |pose: Pose2| [pose.x_m, pose.y_m, pose.heading_rad];
         let (pose, map_to_odom) = match &self.localization {
             Some(localization) => (
@@ -892,6 +971,7 @@ impl State {
             last_optimization_ms: self.mapper.last_optimization_ms(),
             last_save: self.last_save.clone(),
             parameters: parameters.to_vec(),
+            anchor,
         }
     }
 
