@@ -33,6 +33,7 @@ mod draw_api;
 mod handlers;
 mod live_api;
 mod map_edit_api;
+mod mapping_session_api;
 mod maps_api;
 mod opponents_api;
 mod planning_api;
@@ -125,9 +126,14 @@ pub struct BenchmarkSetup {
     pub pose_source: TelemetryPoseSource,
 }
 
+/// Folder mapping sessions are recorded into, unless
+/// [`WebGui::with_mapping_sessions_root`] says otherwise.
+pub const DEFAULT_MAPPING_SESSIONS_ROOT: &str = "mapping_sessions";
+
 /// Serves the map browser/generator web UI. Reads and writes map folders
-/// under `maps_root` directly off disk, and records debug sessions into
-/// `debugs_root`.
+/// under `maps_root` directly off disk, records debug sessions into
+/// `debugs_root`, and mapping sessions into a folder of their own (see
+/// [`WebGui::with_mapping_sessions_root`]).
 pub struct WebGui {
     id: u16,
     name: String,
@@ -136,6 +142,8 @@ pub struct WebGui {
     /// Kept across restarts (see [`Executor::fresh`]), so the Debug panel
     /// still shows how the recording a restart ended went.
     recorder: DebugRecorder,
+    /// Kept across restarts like `recorder`.
+    mapping_session: mapping_session_api::MappingSession,
     benchmark_setup: BenchmarkSetup,
     /// Kept across restarts like `recorder`, so the Benchmark panel still
     /// shows the last results.
@@ -163,11 +171,21 @@ impl WebGui {
             maps_root: maps_root.into(),
             debugs_root: debugs_root.into(),
             recorder,
+            mapping_session: mapping_session_api::MappingSession::new(
+                DEFAULT_MAPPING_SESSIONS_ROOT,
+            ),
             benchmark_setup,
             benchmark: benchmark_api::Benchmark::default(),
             config,
             car_name: None,
         }
+    }
+
+    /// Records mapping sessions into `root` instead of
+    /// [`DEFAULT_MAPPING_SESSIONS_ROOT`].
+    pub fn with_mapping_sessions_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.mapping_session = mapping_session_api::MappingSession::new(root);
+        self
     }
 
     /// Marks this as running on the real car `name`, which the UI shows.
@@ -288,6 +306,7 @@ impl Executor for WebGui {
         let debug = handlers::Debug {
             root: &self.debugs_root,
             recorder: &self.recorder,
+            mapping_session: &self.mapping_session,
         };
         let benchmarks = handlers::Benchmarks {
             setup: &self.benchmark_setup,
@@ -307,6 +326,9 @@ impl Executor for WebGui {
         };
         thread::scope(|scope| {
             scope.spawn(|| benchmark_orchestrator::run_orchestrator(&orchestrator));
+            scope.spawn(|| {
+                mapping_session_api::run_controller(captain, id, &self.mapping_session, car_name)
+            });
             for _ in 0..self.config.worker_threads {
                 let server = server.clone();
                 let debug = &debug;
@@ -345,6 +367,7 @@ impl Executor for WebGui {
             self.config.clone(),
         );
         fresh.benchmark = self.benchmark.clone();
+        fresh.mapping_session = self.mapping_session.clone();
         fresh.car_name = self.car_name.clone();
         Box::new(fresh)
     }

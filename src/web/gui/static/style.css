@@ -358,6 +358,34 @@
   color: #e0a458;
 }
 
+#slam-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#slam-session-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#slam-session-status {
+  margin: 0;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#slam-session-status.recording {
+  color: #ef4444;
+}
+
+#slam-session-status.error {
+  color: #f59e0b;
+}
+
 #slam-controls,
 #localization-controls,
 #algorithm-controls,
@@ -496,6 +524,7 @@
 #algorithm-select,
 #planning-objective,
 #slam-save-name,
+#slam-session-name,
 #debug-name,
 #debug-frequency {
   flex: 0 0 auto;

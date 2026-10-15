@@ -252,6 +252,13 @@ the [tutorials](../tutorial/README.md) for writing one.
 Builds a map of an unknown track with SLAM, while the car is driven around
 it (by hand or by an algorithm that needs no map, such as the gap follower).
 
+- **Record session** records what SLAM maps from into
+  `mapping_sessions/<name>.mapping`, to map it again offline with other
+  parameters. While it's on, each map gets a session of its own: recording
+  starts with Play on a cleared map, and stops on Clear, once Save map
+  succeeds, or when the toggle is turned off. The status line shows the
+  file, its length and size, and any writes missed. See
+  [SLAM](slam.md#mapping-sessions).
 - **Play** starts or resumes mapping. **Pause** keeps the map. **Clear**
   throws it away.
 - The details line shows how many scans are in the map, how well and how
@@ -432,7 +439,7 @@ flowchart LR
     W -- "reads topics" --> C
     W -- "writes its own topics" --> C
     E -- "read and write topics" --> C
-    W -- "reads and writes files" --> D["maps/, config/, debugs/, benchmarks/"]
+    W -- "reads and writes files" --> D["maps/, config/, debugs/,\nmapping_sessions/, benchmarks/"]
 ```
 
 The GUI is one executor among the others, `WebGui` (`src/web/gui.rs`). It is
@@ -590,6 +597,7 @@ Every route is in `src/web/gui/handlers.rs`. Bodies are JSON.
 | `POST /api/autonomous_parameter`, `/api/autonomous_parameters_save`, `/api/autonomous_parameters_load` | The selected algorithm's parameters |
 | `GET /api/slam`, `POST /api/slam_command`, `POST /api/slam_save` | Mapping and localization |
 | `POST /api/slam_parameter`, `/api/slam_parameters_save`, `/api/slam_parameters_load` | SLAM's parameters |
+| `GET /api/mapping_session`, `POST /api/mapping_session` | The Record session toggle |
 | `GET /api/detector`, `POST /api/detector_parameter`, `/api/detector_parameters_save`, `/api/detector_parameters_load` | The detector |
 | `GET /api/planning`, `POST /api/planning_start`, `POST /api/planning_parameter`, `/api/planning_parameters_save`, `/api/planning_parameters_load` | The planner |
 | `GET /api/opponents`, `POST /api/opponents`, `POST /api/opponents/delete`, `POST /api/race/start` | Opponents and races |

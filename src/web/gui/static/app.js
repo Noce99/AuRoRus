@@ -561,6 +561,11 @@ const slamSaveNameEl = document.getElementById("slam-save-name");
 const slamSaveBtn = document.getElementById("slam-save-btn");
 const slamSaveStatusEl = document.getElementById("slam-save-status");
 
+const slamNavBtn = document.querySelector('.panel-nav-btn[data-panel="mapping"]');
+const slamSessionArmedEl = document.getElementById("slam-session-armed");
+const slamSessionNameEl = document.getElementById("slam-session-name");
+const slamSessionStatusEl = document.getElementById("slam-session-status");
+
 const syncSlamParameters = createParameterPanel({
   containerEl: document.getElementById("slam-parameters"),
   saveEl: document.getElementById("slam-parameters-save"),
@@ -626,6 +631,70 @@ slamSaveFormEl.addEventListener("submit", (event) => {
       slamSaveBtn.disabled = !slamHasMap;
     });
 });
+
+// Record session: the server starts a recording whenever mapping starts on
+// an empty map while this is on, and stops it on Clear, Save map, an
+// odometry reset, or turning it off - see `mapping_session_api.rs`.
+slamSessionArmedEl.addEventListener("change", () => {
+  const armed = slamSessionArmedEl.checked;
+  fetchJSON("/api/mapping_session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ armed, name: slamSessionNameEl.value.trim() }),
+  })
+    .then(() => pollSlamSession())
+    .catch((err) => {
+      slamSessionArmedEl.checked = !armed;
+      slamSessionStatusEl.className = "error";
+      slamSessionStatusEl.textContent = `Couldn't change it: ${err.message}`;
+    });
+});
+
+/** Shows the toggle and the current or last session, from
+ *  `/api/mapping_session`. */
+function renderSlamSession(session) {
+  const recording = session.recording;
+  const isRecording = recording.state === "recording" || recording.state === "saving";
+  slamSessionArmedEl.checked = session.armed;
+  slamSessionNameEl.disabled = session.armed;
+  if (session.armed && document.activeElement !== slamSessionNameEl) {
+    slamSessionNameEl.value = session.name;
+  }
+  slamNavBtn.classList.toggle("recording", recording.state === "recording");
+
+  const details = () => {
+    const parts = [
+      formatDuration(recording.duration_s),
+      `${recording.samples.toLocaleString()} sample${recording.samples === 1 ? "" : "s"}`,
+    ];
+    if (session.file_size_bytes !== null) parts.push(formatBytes(session.file_size_bytes));
+    let text = `${recording.path} - ${parts.join(" · ")}.`;
+    if (recording.missed_writes > 0) {
+      text += ` ${recording.missed_writes.toLocaleString()} write${recording.missed_writes === 1 ? "" : "s"} missed.`;
+    }
+    return text;
+  };
+
+  slamSessionStatusEl.className = "";
+  if (session.error !== null) {
+    slamSessionStatusEl.className = "error";
+    slamSessionStatusEl.textContent = `Couldn't record: ${session.error}`;
+  } else if (isRecording) {
+    slamSessionStatusEl.className = "recording";
+    slamSessionStatusEl.textContent = `Recording ${details()}`;
+  } else if (recording.state === "failed") {
+    slamSessionStatusEl.className = "error";
+    slamSessionStatusEl.textContent = `Recording failed: ${recording.error}`;
+  } else {
+    const last = recording.state === "saved" ? `Last session: ${details()}` : "";
+    const armed = session.armed ? "Recording starts with the next map (Play on a cleared map). " : "";
+    slamSessionStatusEl.textContent = armed + last || `Saved under ${session.folder}/.`;
+  }
+}
+
+async function pollSlamSession() {
+  renderSlamSession(await fetchJSON("/api/mapping_session"));
+}
 
 /** Shows how SLAM handled this tab's pending save request, once it has. */
 function showSlamSaveOutcome(outcome) {
@@ -3272,6 +3341,7 @@ const topicPoller = startPolling(pollSelectedTopic, 1000 / DEFAULT_TOPIC_RATE_HZ
 startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
+startPolling(pollSlamSession, SELECTION_POLL_MS);
 startPolling(pollDetector, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);

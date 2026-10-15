@@ -212,6 +212,13 @@
     <section id="panel-mapping" class="panel-section" hidden>
       <h1>Mapping</h1>
       <p id="slam-state"></p>
+      <div id="slam-session">
+        <label id="slam-session-toggle" title="Record what SLAM maps from into a .mapping file, to build the map again offline with other parameters">
+          <input type="checkbox" id="slam-session-armed" /> Record session
+        </label>
+        <input type="text" id="slam-session-name" placeholder="Session name (blank: date and time)" title="Name of the .mapping file - a taken name gets _2, _3, ..." />
+        <p id="slam-session-status"></p>
+      </div>
       <div id="slam-controls">
         <button type="button" id="slam-play-btn" data-state="running" title="Start or resume mapping">&#9654; Play</button>
         <button type="button" id="slam-pause-btn" data-state="waiting" title="Pause, keeping the map">&#10074;&#10074; Pause</button>

@@ -11,6 +11,7 @@ use super::detector_api;
 use super::draw_api;
 use super::live_api;
 use super::map_edit_api;
+use super::mapping_session_api::{self, MappingSession};
 use super::maps_api;
 use super::opponents_api;
 use super::planning_api;
@@ -25,11 +26,13 @@ use crate::{Captain, DebugRecorder};
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
 
-/// What the Debug panel's routes need - see [`debug_api`].
+/// What the recording routes need: the Debug panel's (see [`debug_api`])
+/// and the Mapping panel's sessions (see [`mapping_session_api`]).
 pub struct Debug<'a> {
-    /// Folder recordings go into.
+    /// Folder debug recordings go into.
     pub root: &'a Path,
     pub recorder: &'a DebugRecorder,
+    pub mapping_session: &'a MappingSession,
 }
 
 /// What the Benchmark panel's routes need - see [`benchmark_api`].
@@ -161,6 +164,10 @@ pub fn handle(
             slam_api::slam_command(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/slam_save") => slam_api::slam_save(&mut request, captain, writer_id),
+        (Method::Get, "/api/mapping_session") => mapping_session_api::status(debug.mapping_session),
+        (Method::Post, "/api/mapping_session") => {
+            mapping_session_api::arm(&mut request, debug.mapping_session)
+        }
         (Method::Post, "/api/slam_parameter") => {
             slam_api::set_slam_parameter(&mut request, captain, writer_id)
         }

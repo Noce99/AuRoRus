@@ -356,6 +356,60 @@ the first time a race line is planned on the map (see `planning.md`).
 that way (`StartFinishLine::start_pose`). The generator writes its lines in
 that order too.
 
+## Mapping sessions
+
+The Mapping panel's **Record session** toggle records what SLAM maps from
+into a mapping session, so the same drive can be mapped again offline with
+other parameters and the results compared fairly: every run sees the same
+scans and the same odometry.
+
+**What's recorded.** A session is a `.debug` file (the format
+`replay_web_gui` reads) holding only these topics, named `<name>.mapping`
+under `mapping_sessions/` (`web_gui --mapping-sessions-root` to change it):
+
+| Topic | Why |
+|---|---|
+| `lidar_scan`, `odometry` | SLAM's inputs |
+| `imu` | What odometry is integrated from, to tune dead reckoning offline too |
+| `start_state`, `place_at_start` | Where the map's frame sits in the world |
+| `slam_command` | When mapping was played and paused |
+| `vehicle_geometry` | The vehicle's size, for drawing |
+| `vehicle_status` | Simulation only: the true pose, to score a map against |
+
+A topic still holding the value it was registered with (never written) is
+not recorded, as in a debug recording. The file starts with a
+`mapping_session_info` record, JSON rather than bincode so it stays readable
+as fields are added: the car (none in simulation), the selected map (in
+simulation, the true map), and the value of every tunable SLAM parameter
+when recording started, which is the baseline for offline runs.
+
+**One session, one map.** `web_gui` watches `slam_status` (see
+`src/web/gui/mapping_session_api.rs`), so every way mapping starts or ends is
+handled the same way:
+
+- recording starts when mapping starts on an empty map, i.e. Play after
+  Clear. Turning the toggle on halfway through a map waits for the next one;
+- **Pause** keeps recording;
+- it stops on **Clear** (or anything else that turns SLAM off: selecting a
+  map, placing the vehicle, a benchmark), once **Save map** succeeds (a
+  failed save keeps recording), when odometry is reset, or when the toggle
+  is turned off. A restart (R) ends it too, as it ends a debug recording.
+
+The toggle stays on, so the next map gets the next session. A name already
+taken gets `_2`, `_3`, ...; a blank one is the date and time.
+
+**Every write, by polling.** Topics only hold their latest value, so the
+recorder (a `DebugRecorder` limited to these topics, running as its own
+group so it can run alongside a debug recording) polls them at 1 kHz, well
+above the fastest (odometry, about 100 Hz in practice). A write is only
+missed if the recorder's thread is held up for longer than a topic's
+period. The jumps in `write_count` are counted, and the panel shows them as
+missed writes, so a lossy session is visible. Live SLAM polls at `rate_hz`
+too, so it can miss a scan that the session holds.
+
+A session takes about 0.4 MB per second of mapping in simulation (most of it
+the scans).
+
 ## Localization
 
 The **Localization** panel's **Start** and **Pause** write `localizing` and
@@ -398,6 +452,21 @@ driving for 90 s: odometry drifted up to 8.4 m, while the localized pose
 map SLAM saved of that track, the error stayed within 5 cm.
 
 ## What's next
+
+- **Mapping offline (`mapping_lab`).** A new binary with a web UI like
+  `replay_web_gui`'s, which builds a map from a [mapping
+  session](#mapping-sessions) with chosen parameters, running the same code
+  as live SLAM but faster than real time, and compares the results: maps
+  side by side or overlaid, with scores (in simulation, the error against
+  the true trajectory and map; otherwise match responses, loop closures,
+  wall sharpness, processing time). The chosen map is saved under `maps/`,
+  and its parameters into `config/localization/slam.toml`. It starts with
+  manual runs, one parameter set per run.
+- **Parameter sweeps,** the step after manual runs: ranges for one or more
+  parameters, every combination queued and run in parallel, and a sortable
+  table and score heatmap to choose from.
+- **Dead reckoning offline:** integrating the recorded `imu` again, to tune
+  dead reckoning's parameters together with SLAM's.
 
 - **Asynchronous optimization.** A long session with several laps grows the
   graph. Optimizing on a separate thread, as slam_toolbox's async mode does

@@ -11,6 +11,8 @@ const DEFAULT_MAPS_ROOT: &str = "maps";
 const DEFAULT_DEBUGS_ROOT: &str = "debugs";
 /// Default folder the Benchmark panel writes its runs into.
 const DEFAULT_BENCHMARKS_ROOT: &str = "benchmarks";
+/// Default folder the Mapping panel records sessions into.
+const DEFAULT_MAPPING_SESSIONS_ROOT: &str = aurorus::web::gui::DEFAULT_MAPPING_SESSIONS_ROOT;
 /// Default recording rate for `--debug`, in Hz, when `--debug_frequency` isn't given.
 const DEFAULT_DEBUG_FREQUENCY_HZ: f64 = aurorus::DEFAULT_DEBUG_FREQUENCY_HZ;
 
@@ -21,6 +23,8 @@ pub struct Config {
     pub debugs_root: PathBuf,
     /// Folder the Benchmark panel writes its runs into.
     pub benchmarks_root: PathBuf,
+    /// Folder the Mapping panel records sessions into.
+    pub mapping_sessions_root: PathBuf,
     /// The fully resolved `.debug` file path to record to, or `None` if
     /// `--debug` wasn't given at all. See [`resolve_debug_output`]. Recording
     /// starts right away, as if started from the Debug panel.
@@ -76,6 +80,9 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          --maps-root DIR       folder to serve/generate maps from (default: {DEFAULT_MAPS_ROOT:?})\n  \
          --config-dir DIR      folder to load config/ files from (default: {:?})\n  \
          --benchmarks-root DIR folder the Benchmark panel writes into (default: {DEFAULT_BENCHMARKS_ROOT:?})\n  \
+         --mapping-sessions-root DIR\n  \
+         \x20                    folder the Mapping panel records sessions into\n  \
+         \x20                    (default: {DEFAULT_MAPPING_SESSIONS_ROOT:?})\n  \
          --debug [PATH]        start recording every written topic to a .debug session file right\n  \
          \x20                    away, until stopped from the Debug panel, a restart, or Ctrl+C -\n  \
          \x20                    no PATH: {DEFAULT_DEBUGS_ROOT:?}/<generated name>.debug\n  \
@@ -99,6 +106,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     let mut maps_root = PathBuf::from(DEFAULT_MAPS_ROOT);
     let mut config_dir = PathBuf::from(aurorus::config::DEFAULT_CONFIG_ROOT);
     let mut benchmarks_root = PathBuf::from(DEFAULT_BENCHMARKS_ROOT);
+    let mut mapping_sessions_root = PathBuf::from(DEFAULT_MAPPING_SESSIONS_ROOT);
     let mut debug_arg = DebugCliArg::Disabled;
     let mut debug_frequency_hz = DEFAULT_DEBUG_FREQUENCY_HZ;
     let mut sim = false;
@@ -122,6 +130,11 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
             }
             "--benchmarks-root" => {
                 benchmarks_root = args.next().map(PathBuf::from).unwrap_or_else(|| {
+                    fail(format!("Missing value for {flag}"));
+                })
+            }
+            "--mapping-sessions-root" => {
+                mapping_sessions_root = args.next().map(PathBuf::from).unwrap_or_else(|| {
                     fail(format!("Missing value for {flag}"));
                 })
             }
@@ -160,6 +173,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
         config_dir,
         debugs_root: PathBuf::from(DEFAULT_DEBUGS_ROOT),
         benchmarks_root,
+        mapping_sessions_root,
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
         sim,
