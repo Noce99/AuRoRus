@@ -548,7 +548,8 @@ const syncVehicleLimits = createParameterPanel({
 // ---------------------------------------------------------------------
 // Mapping panel - drives SLAM through the `slam_command` topic (Play:
 // running, Pause: waiting, Clear: off), saves its map through the
-// `slam_save` topic, and shows what it's actually doing, from the
+// `slam_save` topic, tunes it through `slam_parameters`, and shows what
+// it's actually doing (and the parameter values it runs with), from the
 // `slam_status` topic.
 // ---------------------------------------------------------------------
 
@@ -559,6 +560,14 @@ const slamSaveFormEl = document.getElementById("slam-save");
 const slamSaveNameEl = document.getElementById("slam-save-name");
 const slamSaveBtn = document.getElementById("slam-save-btn");
 const slamSaveStatusEl = document.getElementById("slam-save-status");
+
+const syncSlamParameters = createParameterPanel({
+  containerEl: document.getElementById("slam-parameters"),
+  saveEl: document.getElementById("slam-parameters-save"),
+  setUrl: "/api/slam_parameter",
+  saveUrl: "/api/slam_parameters_save",
+  loadUrl: "/api/slam_parameters_load",
+});
 
 /** The save request this tab is waiting on SLAM to answer, or null. */
 let pendingSlamSave = null;
@@ -646,6 +655,7 @@ async function pollSlam() {
     button.disabled = !stale && button.dataset.state === status.state;
   }
   renderLocalization(status, stale);
+  syncSlamParameters("slam", stale ? [] : status.parameters);
 
   if (!stale) showSlamSaveOutcome(status.last_save);
   slamHasMap = !stale && status.scans > 0;

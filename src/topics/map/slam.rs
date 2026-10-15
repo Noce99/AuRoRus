@@ -1,11 +1,14 @@
 //! The topics tying [`crate::localization::Slam`] to whoever drives it (e.g.
 //! `web_gui`'s Mapping panel): [`SlamCommand`] says what SLAM should be
-//! doing, [`SlamSaveRequest`] asks it to save its map, [`SlamStatus`]
-//! reports what it's actually doing, and [`SlamMap`] carries the map built
-//! so far - mirroring the
+//! doing, [`SlamSaveRequest`] asks it to save its map, [`SlamParameters`]
+//! tunes it, [`SlamStatus`] reports what it's actually doing (and the
+//! parameter values it runs with), and [`SlamMap`] carries the map built so
+//! far - mirroring the
 //! [`crate::topics::VehicleModelSelection`]/[`crate::topics::VehicleModelStatus`]
 //! pair.
 
+use crate::topics::AlgorithmParameter;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Name of the topic [`SlamCommand`] is published on.
@@ -16,6 +19,8 @@ pub const SLAM_STATUS_TOPIC_NAME: &str = "slam_status";
 pub const SLAM_MAP_TOPIC_NAME: &str = "slam_map";
 /// Name of the topic [`SlamSaveRequest`] is published on.
 pub const SLAM_SAVE_TOPIC_NAME: &str = "slam_save";
+/// Name of the topic [`SlamParameters`] are published on.
+pub const SLAM_PARAMETERS_TOPIC_NAME: &str = "slam_parameters";
 
 /// What SLAM is (or should be) doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -109,6 +114,17 @@ pub struct SlamSaveOutcome {
     pub error: Option<String>,
 }
 
+/// The parameter values a driver (e.g. `web_gui`) wants
+/// [`crate::localization::Slam`] to run with, by name. Always the *whole*
+/// wanted state. Applied (sanitized, see
+/// [`crate::topics::ParameterKind::sanitize`]) from the next tick on, and
+/// reported back in [`SlamStatus::parameters`] - mirroring
+/// [`crate::topics::DetectorParameters`].
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SlamParameters {
+    pub values: BTreeMap<String, f64>,
+}
+
 /// What [`crate::localization::Slam`] is currently doing, so a driver of
 /// [`SlamCommand`] can reflect it.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -144,6 +160,9 @@ pub struct SlamStatus {
     pub last_optimization_ms: Option<f64>,
     /// How the latest [`SlamSaveRequest`] went - `None` before the first.
     pub last_save: Option<SlamSaveOutcome>,
+    /// Every tunable parameter, with the value currently in effect.
+    #[serde(default)]
+    pub parameters: Vec<AlgorithmParameter>,
 }
 
 /// The occupancy map built so far, in SLAM's own frame: the `odom` frame of

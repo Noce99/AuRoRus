@@ -45,6 +45,23 @@ impl OdometryBuffer {
         }
     }
 
+    /// Keeps at most `capacity` samples from now on, dropping the oldest
+    /// ones beyond it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `capacity` is below `2`, as [`Self::new`] does.
+    pub fn set_capacity(&mut self, capacity: usize) {
+        assert!(
+            capacity >= 2,
+            "OdometryBuffer: capacity must be at least 2, got {capacity}"
+        );
+        self.capacity = capacity;
+        while self.samples.len() > capacity {
+            self.samples.pop_front();
+        }
+    }
+
     /// Adds `odometry`, written at `at`. Samples must arrive in write
     /// order; one older than the newest held is ignored.
     pub fn push(&mut self, at: Instant, odometry: Odometry) {

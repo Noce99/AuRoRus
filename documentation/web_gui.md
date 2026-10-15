@@ -257,6 +257,13 @@ it (by hand or by an algorithm that needs no map, such as the gap follower).
 - The details line shows how many scans are in the map, how well and how
   fast the last scan matched, and how many loop closures were found.
 - **Save map** writes the map built so far as a new folder under `maps/`.
+- **Parameters** has a slider for every numeric parameter of
+  `config/localization/slam.toml`, applied from the next scan without
+  clearing the map (a new `resolution_m` rebuilds it from the scans kept).
+  They are shared with localization. **Save parameters** writes them into
+  the file, **Load from file** goes back to its values. The switches
+  (`draw`, `use_response_expansion`, `do_loop_closing`) only change in the
+  file.
 
 In the screenshot the light area is what SLAM has mapped so far, gray is
 unknown, and the green vehicle with its trail is SLAM's estimate of the pose.
@@ -454,6 +461,7 @@ The topics `WebGui` writes:
 | `vesc_parameters` | The VESC panel |
 | `autonomous_algorithm_selection`, `autonomous_parameters` | The Autonomous Algos panel |
 | `slam_command`, `slam_save` | The Mapping and Localization panels |
+| `slam_parameters` | The Mapping panel |
 | `detector_parameters` | The Detector panel |
 | `planning_parameters`, `planning_request` | The Planning panel |
 | `opponent_requests`, `race_start` | The Opponents panel |
@@ -581,6 +589,7 @@ Every route is in `src/web/gui/handlers.rs`. Bodies are JSON.
 | `GET /api/autonomous_algorithms`, `POST /api/autonomous_algorithm_selection` | The algorithms and the selection |
 | `POST /api/autonomous_parameter`, `/api/autonomous_parameters_save`, `/api/autonomous_parameters_load` | The selected algorithm's parameters |
 | `GET /api/slam`, `POST /api/slam_command`, `POST /api/slam_save` | Mapping and localization |
+| `POST /api/slam_parameter`, `/api/slam_parameters_save`, `/api/slam_parameters_load` | SLAM's parameters |
 | `GET /api/detector`, `POST /api/detector_parameter`, `/api/detector_parameters_save`, `/api/detector_parameters_load` | The detector |
 | `GET /api/planning`, `POST /api/planning_start`, `POST /api/planning_parameter`, `/api/planning_parameters_save`, `/api/planning_parameters_load` | The planner |
 | `GET /api/opponents`, `POST /api/opponents`, `POST /api/opponents/delete`, `POST /api/race/start` | Opponents and races |

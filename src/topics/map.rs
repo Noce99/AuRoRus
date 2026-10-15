@@ -16,6 +16,7 @@ pub use race_line::{
 };
 pub use selected_map::{MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, SelectedMap};
 pub use slam::{
-    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME,
-    SlamCommand, SlamMap, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,
+    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, SlamCommand, SlamMap, SlamParameters, SlamSaveOutcome, SlamSaveRequest,
+    SlamState, SlamStatus,
 };

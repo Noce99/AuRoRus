@@ -68,6 +68,13 @@ impl Localizer {
         }
     }
 
+    /// Runs with `params` from the next scan on, keeping the pose - the
+    /// scan matcher is rebuilt with them.
+    pub fn set_params(&mut self, params: LocalizerParams) {
+        self.params = params;
+        self.matcher = None;
+    }
+
     /// The range threshold a scan from a sensor reaching up to
     /// `max_distance_m` must be built with.
     pub fn range_threshold_m(&self, max_distance_m: f64) -> f64 {

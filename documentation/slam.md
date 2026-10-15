@@ -27,7 +27,7 @@ flowchart LR
     L["SimulatedLidar"] -- "lidar_scan" --> S["Slam"]
     I["SimulatedImu"] -- "imu" --> D["DeadReckoning"]
     D -- "odometry (+ reset_count)" --> S
-    W["WebGui"] -- "slam_command, slam_save" --> S
+    W["WebGui"] -- "slam_command, slam_save, slam_parameters" --> S
     S -- "slam_status" --> W
     S -- "slam_map" --> X["(any consumer)"]
     S -- "draw/Slam" --> W
@@ -39,7 +39,8 @@ flowchart LR
 The diagram shows the simulation. On the real car, `HokuyoLidar` publishes
 `lidar_scan` and `Vesc` publishes `imu` instead; nothing else changes.
 
-- **Inputs:** `lidar_scan`, `odometry`, `slam_command` and `slam_save`,
+- **Inputs:** `lidar_scan`, `odometry`, `slam_command`, `slam_save` and
+  `slam_parameters`,
   plus `map` and `start_state` while localizing. SLAM never reads
   `vehicle_status`, which is the simulator's ground truth. It only knows
   what a real car would know.
@@ -230,6 +231,12 @@ Differences from Karto that matter:
 
 Everything lives in `config/localization/slam.toml`, commented. Names follow
 slam_toolbox's `config/mapper_params_online_async.yaml`, with units added.
+Every numeric one can also be tuned live from the Mapping panel (through
+`slam_parameters`; `slam_status` reports the values in effect): it applies
+from the next scan, keeping the map, and a new `resolution_m`,
+`min_pass_through` or `occupancy_threshold` rebuilds the grid from every scan
+kept. A smear deviation outside half to ten times its search's resolution is
+refused.
 The defaults are slam_toolbox's, except:
 
 - `minimum_travel_distance_m` / `minimum_travel_heading_rad` are 0.2 (vs 0.5),

@@ -52,8 +52,9 @@ use crate::topics::{
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
     PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_START_TOPIC_NAME, RaceLineSelection,
     RaceStart, SIMULATED_IMU_PARAMETERS_TOPIC_NAME, SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME,
-    SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SimulatedSensorParameters, SlamCommand,
-    SlamSaveRequest, VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    SLAM_COMMAND_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SimulatedSensorParameters, SlamCommand, SlamParameters, SlamSaveRequest,
+    VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VESC_PARAMETERS_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
     VescParameters,
 };
@@ -227,6 +228,11 @@ impl Executor for WebGui {
             SLAM_SAVE_TOPIC_NAME,
             self.id,
             SlamSaveRequest::default,
+        );
+        captain.claim_writer::<SlamParameters>(
+            SLAM_PARAMETERS_TOPIC_NAME,
+            self.id,
+            SlamParameters::default,
         );
         captain.claim_writer::<PlanningParameters>(
             PLANNING_PARAMETERS_TOPIC_NAME,

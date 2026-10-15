@@ -161,6 +161,13 @@ pub fn handle(
             slam_api::slam_command(&mut request, captain, writer_id)
         }
         (Method::Post, "/api/slam_save") => slam_api::slam_save(&mut request, captain, writer_id),
+        (Method::Post, "/api/slam_parameter") => {
+            slam_api::set_slam_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/slam_parameters_save") => slam_api::save_slam_parameters(captain),
+        (Method::Post, "/api/slam_parameters_load") => {
+            slam_api::load_slam_parameters(captain, writer_id)
+        }
         (Method::Get, "/api/detector") => detector_api::detector(captain),
         (Method::Post, "/api/detector_parameter") => {
             detector_api::set_detector_parameter(&mut request, captain, writer_id)

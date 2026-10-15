@@ -1,14 +1,18 @@
 //! The SLAM part of the live API: starting, pausing and resetting mapping
-//! and localization, and saving the map built (`slam_command`,
-//! `slam_save`).
+//! and localization, saving the map built (`slam_command`, `slam_save`),
+//! and tuning SLAM live (`slam_parameters`) and saving or reloading its
+//! config file - the same shape as the Detector panel's, see
+//! [`super::detector_api`].
 
-use super::live_api::stamped_json;
+use super::live_api::{loaded, stamped_json};
+use crate::localization;
 use crate::topics::{
-    SLAM_COMMAND_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SlamCommand,
-    SlamSaveRequest, SlamState, SlamStatus,
+    AlgorithmParameter, SLAM_COMMAND_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
+    SLAM_STATUS_TOPIC_NAME, SlamCommand, SlamParameters, SlamSaveRequest, SlamState, SlamStatus,
 };
-use crate::web::{bad_request, json_response, read_json};
+use crate::web::{bad_request, error_response, json_response, read_json};
 use crate::{Captain, WriteMeta};
+use std::sync::Mutex;
 use tiny_http::{Request, ResponseBox};
 
 /// Turns SLAM's mapping off, as any placement of the ego vehicle must: it
@@ -106,4 +110,103 @@ pub(super) fn write_slam_command(captain: &Captain, writer_id: u16, state: SlamS
     topic
         .write(writer_id, command)
         .expect("lost writer authorization for the slam_command topic");
+}
+
+/// SLAM's tunable parameters with the values it currently runs with - or a
+/// `400` response if SLAM reports none.
+fn slam_parameters(captain: &Captain) -> Result<Vec<AlgorithmParameter>, ResponseBox> {
+    let parameters = captain
+        .try_topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME)
+        .map(|topic| topic.read().into_value().parameters)
+        .unwrap_or_default();
+    if parameters.is_empty() {
+        return Err(bad_request("SLAM is not running"));
+    }
+    Ok(parameters)
+}
+
+/// Serializes the read-modify-writes of `slam_parameters` across
+/// `WebGui`'s worker threads, as the detector's own lock does.
+static SLAM_PARAMETERS_LOCK: Mutex<()> = Mutex::new(());
+
+/// Read-modify-writes `slam_parameters` with `change`, under
+/// [`SLAM_PARAMETERS_LOCK`].
+fn write_slam_parameters(
+    captain: &Captain,
+    writer_id: u16,
+    change: impl FnOnce(&mut SlamParameters),
+) {
+    let _guard = SLAM_PARAMETERS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let topic = captain.topic::<SlamParameters>(SLAM_PARAMETERS_TOPIC_NAME);
+    let mut wanted = topic.read().into_value();
+    change(&mut wanted);
+    topic
+        .write(writer_id, wanted)
+        .expect("lost writer authorization for the slam_parameters topic");
+}
+
+#[derive(serde::Deserialize)]
+struct SetSlamParameterBody {
+    name: String,
+    value: f64,
+}
+
+/// `POST /api/slam_parameter` - body `{"name": "...", "value": ...}` - sets
+/// one parameter's wanted value in `slam_parameters`, for SLAM to apply
+/// before its next tick; it reports the value it actually runs with in
+/// `slam_status`.
+pub fn set_slam_parameter(request: &mut Request, captain: &Captain, writer_id: u16) -> ResponseBox {
+    let body: SetSlamParameterBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    if !body.value.is_finite() {
+        return bad_request("value must be a finite number");
+    }
+    let parameters = match slam_parameters(captain) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
+    };
+    if !parameters
+        .iter()
+        .any(|parameter| parameter.name == body.name)
+    {
+        return bad_request(&format!("SLAM has no tunable parameter {:?}", body.name));
+    }
+    write_slam_parameters(captain, writer_id, |wanted| {
+        wanted.values.insert(body.name, body.value);
+    });
+    json_response(&(), 200)
+}
+
+/// `POST /api/slam_parameters_save` - writes the parameter values SLAM
+/// currently runs with into its config file, keeping the file's comments.
+/// Responds with the file's path.
+pub fn save_slam_parameters(captain: &Captain) -> ResponseBox {
+    let parameters = match slam_parameters(captain) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
+    };
+    match localization::save_slam_parameters(&parameters) {
+        Ok(path) => loaded(&path),
+        Err(err) => error_response(500, &err),
+    }
+}
+
+/// `POST /api/slam_parameters_load` - asks SLAM to run with the values its
+/// config file holds again, undoing any unsaved tuning, by writing them to
+/// `slam_parameters` like a slider would. Responds with the file's path.
+pub fn load_slam_parameters(captain: &Captain, writer_id: u16) -> ResponseBox {
+    let parameters = match slam_parameters(captain) {
+        Ok(parameters) => parameters,
+        Err(response) => return response,
+    };
+    let (values, path) = match localization::saved_slam_values(&parameters) {
+        Ok(saved) => saved,
+        Err(err) => return error_response(500, &err),
+    };
+    write_slam_parameters(captain, writer_id, |wanted| wanted.values.extend(values));
+    loaded(&path)
 }

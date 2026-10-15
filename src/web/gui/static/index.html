@@ -223,6 +223,14 @@
         <button type="submit" id="slam-save-btn" title="Save the map built so far under maps/">Save map</button>
         <p id="slam-save-status"></p>
       </form>
+      <h2 class="parameter-group-title">Parameters</h2>
+      <p class="parameter-description">Applied from the next scan, keeping the map - shared with the Localization panel. A smear deviation outside half to ten times its search's resolution is refused.</p>
+      <div id="slam-parameters" class="parameter-list" hidden></div>
+      <div id="slam-parameters-save" class="parameter-save" hidden>
+        <button type="button" id="slam-parameters-save-btn" class="parameter-save-btn" title="Write these values into SLAM's config file">Save parameters</button>
+        <button type="button" id="slam-parameters-load-btn" class="parameter-load-btn" title="Use the values in SLAM's config file again, dropping unsaved changes">Load from file</button>
+        <p id="slam-parameters-save-status"></p>
+      </div>
     </section>
 
     <section id="panel-localization" class="panel-section" hidden>

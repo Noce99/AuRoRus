@@ -122,6 +122,26 @@ impl Mapper {
         self.last_optimization_ms = None;
     }
 
+    /// Runs with `params` from the next scan on, keeping the map: the scan
+    /// matchers are rebuilt with them, and so is the occupancy grid - from
+    /// every scan kept - if its own parameters changed. Scans already kept
+    /// keep the range threshold they were built with.
+    pub fn set_params(&mut self, params: MapperParams) {
+        let grid = |p: &MapperParams| (p.resolution_m, p.min_pass_through, p.occupancy_threshold);
+        let grid_changed = grid(&params) != grid(&self.params);
+        self.params = params;
+        self.matcher = None;
+        self.loop_matcher = None;
+        if grid_changed {
+            self.grid = OccupancyGrid::new(
+                params.resolution_m,
+                params.min_pass_through,
+                params.occupancy_threshold,
+            );
+            self.grid.rebuild(&self.scans);
+        }
+    }
+
     /// How many scans the map is built from.
     pub fn scan_count(&self) -> usize {
         self.scans.len()
