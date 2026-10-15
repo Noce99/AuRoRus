@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AuRoRus Mapping Lab</title>
+<link rel="stylesheet" href="/base.css" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <div id="main-row">
+    <div id="sidebar-toggle">
+      <button id="sidebar-toggle-btn" title="Show/hide the session" aria-label="Show/hide the session">&#9664;</button>
+    </div>
+
+    <aside id="sidebar">
+      <h1>Session</h1>
+      <div id="session-picker">
+        <select id="session-select" title="Mapping sessions recorded by web_gui's Record session toggle"></select>
+        <button type="button" id="session-load-btn" title="Load this session - every run of the current one is forgotten">Load</button>
+      </div>
+      <p id="session-status" class="sidebar-note"></p>
+      <dl id="session-info" hidden>
+        <dt>Length</dt><dd id="session-duration"></dd>
+        <dt>Scans</dt><dd id="session-scans"></dd>
+        <dt>Recorded on</dt><dd id="session-source"></dd>
+        <dt>Map</dt><dd id="session-map"></dd>
+      </dl>
+
+      <nav id="panel-nav">
+        <button class="panel-nav-btn selected" data-panel="runs">Runs</button>
+        <button class="panel-nav-btn" data-panel="parameters">Parameters</button>
+        <button class="panel-nav-btn" data-panel="layers">Layers</button>
+      </nav>
+    </aside>
+
+    <div id="center-column">
+      <main id="canvas-area">
+        <canvas id="map-canvas"></canvas>
+
+        <div id="status-bar">
+          <span id="status-map-name"></span>
+          <span id="status-vertical-size"></span>
+          <span id="status-speed"></span>
+        </div>
+
+        <div id="zoom-controls">
+          <button id="home-btn" title="Center on the map" aria-label="Home">&#8962;</button>
+          <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+        </div>
+      </main>
+    </div>
+
+    <div id="right-panel-toggle">
+      <button id="right-panel-toggle-btn" title="Show/hide details" aria-label="Show/hide details">&#9654;</button>
+    </div>
+
+    <aside id="right-panel">
+      <section id="panel-runs" class="panel-section">
+        <h1>Runs</h1>
+        <button type="button" id="run-btn" class="primary-btn" title="Build the session's map again with the draft parameters (see Parameters)">&#9654; Run with the draft</button>
+        <p id="run-status" class="panel-hint"></p>
+        <p class="panel-hint">Click a run to show its map; <b>Compare</b> lays another run's walls and trajectory over it, in amber. In simulation, the ground truth is drawn in pink.</p>
+        <ul id="run-list"></ul>
+      </section>
+
+      <section id="panel-parameters" class="panel-section" hidden>
+        <h1>Parameters</h1>
+        <p class="panel-hint">The draft the next run is built with. It starts as the parameters the session was recorded with.</p>
+        <div class="button-row">
+          <button type="button" id="draft-run-btn" class="primary-btn" title="Build the session's map again with these parameters">&#9654; Run</button>
+          <button type="button" id="draft-reset-btn" title="Go back to the parameters the session was recorded with">Reset to session</button>
+        </div>
+        <div id="draft-parameters" class="parameter-list" hidden></div>
+        <div id="draft-save" class="parameter-save" hidden>
+          <button type="button" id="draft-save-btn" class="parameter-save-btn" title="Write the draft into config/localization/slam.toml - what web_gui's SLAM starts with">Save to slam.toml</button>
+          <button type="button" id="draft-load-btn" class="parameter-load-btn" title="Set the draft to the values in config/localization/slam.toml">Load from slam.toml</button>
+          <p id="draft-save-status"></p>
+        </div>
+      </section>
+
+      <section id="panel-layers" class="panel-section" hidden>
+        <h1>Layers</h1>
+        <ul id="layer-list"></ul>
+      </section>
+    </aside>
+  </div>
+</div>
+<script src="/map_view.js"></script>
+<script src="/draw_layers.js"></script>
+<script src="/parameter_panel.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

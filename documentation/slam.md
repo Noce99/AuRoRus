@@ -488,20 +488,10 @@ map SLAM saved of that track, the error stayed within 5 cm.
 
 ## What's next
 
-- **Mapping offline (`mapping_lab`).** A new binary with a web UI like
-  `replay_web_gui`'s, which builds a map from a [mapping
-  session](#mapping-sessions) with chosen parameters, running the same code
-  as live SLAM but faster than real time, and compares the results: maps
-  side by side or overlaid, with scores (in simulation, the error against
-  the true trajectory and map; otherwise match responses, loop closures,
-  wall sharpness, processing time). The chosen map is saved under `maps/`,
-  and its parameters into `config/localization/slam.toml`. It starts with
-  manual runs, one parameter set per run.
-- **Parameter sweeps,** the step after manual runs: ranges for one or more
-  parameters, every combination queued and run in parallel, and a sortable
-  table and score heatmap to choose from.
-- **Dead reckoning offline:** integrating the recorded `imu` again, to tune
-  dead reckoning's parameters together with SLAM's.
+- **Tuning offline:** [`mapping_lab`](mapping_lab.md) builds maps from
+  mapping sessions with other parameters. Its next steps - scores against
+  the ground truth, parameter sweeps, dead reckoning offline - are listed in
+  [its own document](mapping_lab.md#whats-next).
 
 - **Asynchronous optimization.** A long session with several laps grows the
   graph. Optimizing on a separate thread, as slam_toolbox's async mode does

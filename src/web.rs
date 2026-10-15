@@ -30,6 +30,8 @@ pub const LAP_PANEL_JS: &str = include_str!("web/lap_panel.js");
 /// The shared playback clock of the replaying UIs, served at
 /// `/playback_clock.js`.
 pub const PLAYBACK_CLOCK_JS: &str = include_str!("web/playback_clock.js");
+/// The shared parameter sliders, served at `/parameter_panel.js`.
+pub const PARAMETER_PANEL_JS: &str = include_str!("web/parameter_panel.js");
 /// A few canvas chart helpers, served at `/chart.js`.
 pub const CHART_JS: &str = include_str!("web/chart.js");
 /// The shared page/canvas styles, served at `/base.css`.
@@ -145,6 +147,7 @@ pub fn shared_asset(path: &str) -> Option<ResponseBox> {
         "/lap_panel.js" => (LAP_PANEL_JS, "text/javascript; charset=utf-8"),
         "/playback_clock.js" => (PLAYBACK_CLOCK_JS, "text/javascript; charset=utf-8"),
         "/chart.js" => (CHART_JS, "text/javascript; charset=utf-8"),
+        "/parameter_panel.js" => (PARAMETER_PANEL_JS, "text/javascript; charset=utf-8"),
         "/base.css" => (BASE_CSS, "text/css; charset=utf-8"),
         _ => return None,
     };

@@ -11,9 +11,13 @@
 //! rebuild started, which is all the odometry interpolation needs.
 
 use super::pose::Pose2;
-use super::{SlamConfig, State, save_map};
+use super::{SlamConfig, State, localizer, save_map};
+use crate::environment::Map;
 use crate::localization::mapping_session::MappingSession;
-use crate::topics::{LidarScan, Odometry, SlamCommand, SlamMap, SlamState};
+use crate::topics::{
+    Color, Drawing, LidarScan, Odometry, SelectedMap, Shape, SlamCommand, SlamMap, SlamState,
+    StartState, VehicleGeometry,
+};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -82,6 +86,98 @@ impl RebuildOutcome {
     pub fn save(&self, name: &str, maps_root: &Path) -> Result<PathBuf, String> {
         save_map(&self.map, self.first_pose, name, maps_root)
     }
+
+    /// What live SLAM draws of this map - the map, its trajectory, its loop
+    /// closures and the vehicle at the last kept scan - with SLAM's frame
+    /// placed at `anchor` (see [`MappingSession::anchor`]).
+    pub fn drawing(&self, anchor: &StartState) -> Drawing {
+        let pose = |p: [f64; 3]| Pose2::new(p[0], p[1], p[2]);
+        let loop_edges: Vec<_> = self
+            .loop_edges
+            .iter()
+            .map(|&(from, to)| (pose(from), pose(to)))
+            .collect();
+        super::drawing(
+            &self.map,
+            self.kept.last().map(|kept| pose(kept.pose)),
+            &loop_edges,
+            anchor,
+            &VehicleGeometry::default(),
+        )
+    }
+
+    /// This map's walls (its occupied cells) and trajectory alone, in
+    /// `color`, with SLAM's frame placed at `anchor` - to lay over another
+    /// map's [`Self::drawing`] and compare the two.
+    pub fn comparison_drawing(&self, anchor: &StartState, color: Color) -> Drawing {
+        let anchor = Pose2::new(anchor.x_m, anchor.y_m, anchor.heading_rad);
+        let map = &self.map;
+        let resolution_m = map.resolution_m_per_px;
+        let mut walls = Vec::new();
+        for row in 0..map.height_px as usize {
+            for col in 0..map.width_px as usize {
+                if map.pixels[row * map.width_px as usize + col] != SlamMap::OCCUPIED {
+                    continue;
+                }
+                let (x, y) = anchor.transform_point(
+                    map.origin_x_m + (col as f64 + 0.5) * resolution_m,
+                    map.origin_y_m + (row as f64 + 0.5) * resolution_m,
+                );
+                walls.push([x as f32, y as f32]);
+            }
+        }
+        let trajectory = self
+            .kept
+            .iter()
+            .map(|kept| {
+                let (x, y) = anchor.transform_point(kept.pose[0], kept.pose[1]);
+                [x as f32, y as f32]
+            })
+            .collect();
+        Drawing::default()
+            .element(
+                "Walls",
+                [Shape::Points {
+                    points: walls,
+                    radius_px: 1.5,
+                    color,
+                }],
+                true,
+            )
+            .element(
+                "Trajectory",
+                [Shape::Polyline {
+                    points: trajectory,
+                    closed: false,
+                    width_px: 2.0,
+                    color,
+                }],
+                true,
+            )
+            .z_index(COMPARISON_Z_INDEX)
+    }
+}
+
+/// Above the maps [`RebuildOutcome::drawing`] draws, so a comparison lies
+/// over them.
+const COMPARISON_Z_INDEX: i32 = -40;
+
+/// The walls of the map in `folder` - the centers of its black pixels next
+/// to a white one, in the world frame - e.g. the true map a session was
+/// recorded on in simulation, to compare a rebuilt map against.
+pub fn map_walls(folder: &Path) -> Result<Vec<[f32; 2]>, String> {
+    let map = Map::load(folder).map_err(|err| format!("{folder:?}: {err}"))?;
+    let selected = SelectedMap {
+        path: Some(folder.to_path_buf()),
+        width_px: map.raster.width_px,
+        height_px: map.raster.height_px,
+        pixels: map.raster.to_bytes().into(),
+        info: Some(map.info),
+    };
+    Ok(localizer::wall_points(&selected)
+        .into_iter()
+        .map(|(x, y)| [x as f32, y as f32])
+        .collect())
 }
 
 /// One recorded write, in the order [`rebuild`] replays them.

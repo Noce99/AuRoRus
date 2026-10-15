@@ -73,6 +73,7 @@ Each one prints its full list of options with `--help`.
 | [`replay_web_gui`](#replay_web_gui) | Play back a recorded debug session | <http://localhost:1998> |
 | [`benchmark_viewer`](#benchmark_viewer) | Compare and replay recorded benchmark runs | <http://localhost:1997> |
 | [`car_calibration`](#car_calibration) | Guided calibration of a car's hardware | <http://localhost:1996> |
+| [`mapping_lab`](#mapping_lab) | Build maps from a recorded mapping session with other SLAM parameters, and compare them | <http://localhost:1995> |
 | [`probe`](#probe) | Test one piece of the car's hardware on its own | - |
 | [`benchmark_communication_time`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure topic read/write latency | - |
 | [`benchmark_data_freshness`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure how stale the data readers see is | - |
@@ -122,6 +123,19 @@ replay several of them together on the map. See
 
 ```sh
 ./target/release/benchmark_viewer
+```
+
+### `mapping_lab`
+
+Builds maps offline from the mapping sessions `web_gui` records (the Mapping
+panel's Record session toggle), each with its own SLAM parameters, and
+compares them on the map, over the true map in simulation. The chosen map is
+saved under `maps/`, and its parameters into `config/localization/slam.toml`.
+See [Mapping lab](documentation/mapping_lab.md).
+
+```sh
+./target/release/mapping_lab                                  # pick a session on the page
+./target/release/mapping_lab --file mapping_sessions/lap.mapping
 ```
 
 ### `car_calibration`
@@ -199,6 +213,7 @@ as the executables run and are specific to one machine.
 | `maps/` | Every map but the race tracks above, and every map's race lines (see [Maps](#maps)) |
 | `debugs/` | `.debug` session files recorded by `web_gui`, played back by `replay_web_gui` |
 | `benchmarks/` | Benchmark runs recorded by `web_gui`, read by `benchmark_viewer` |
+| `mapping_sessions/` | `.mapping` session files recorded by `web_gui`, read by `mapping_lab` |
 | `CAR_NAME` | One line naming the car this machine drives; without it, `web_gui` simulates |
 | `config/calibration/history/` | Each car's older calibrations, kept when `car_calibration` saves a new one |
 | `other_repos/` | Local clones of third-party projects kept for reference |
@@ -218,6 +233,7 @@ loaded at startup.
 | [Tutorials](tutorial/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
+| [Mapping lab](documentation/mapping_lab.md) | Recording mapping sessions and building their maps again offline with other parameters |
 | [Detector](documentation/detector.md) | Finding and tracking an opponent by comparing the LIDAR scan with the map |
 | [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |
 | [Car calibration](documentation/car_calibration.md) | Calibrating a real car and the car file it produces |

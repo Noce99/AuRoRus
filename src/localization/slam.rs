@@ -30,7 +30,7 @@ mod rebuild;
 mod scan;
 mod scan_matcher;
 
-pub use rebuild::{KeptScan, ProcessedScan, RebuildOutcome, rebuild};
+pub use rebuild::{KeptScan, ProcessedScan, RebuildOutcome, map_walls, rebuild};
 
 use crate::environment;
 use crate::topics::{

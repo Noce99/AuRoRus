@@ -2,15 +2,16 @@
  * Styles shared by every web UI in this project: the page reset, the map
  * canvas and its status bar, the zoom controls, the sidebar collapse
  * toggle, the left nav rail and the right panel it switches between, the
- * bottom panel under the map (see /lap_panel.js), the button look, and the
- * drawing layer list (see /draw_layers.js).
+ * bottom panel under the map (see /lap_panel.js), the button look, the
+ * drawing layer list (see /draw_layers.js), and the parameter sliders (see
+ * /parameter_panel.js).
  *
  * Anything a particular UI lays out differently - the sidebar's own
  * contents, the debug timeline, the generate modal - stays in that UI's
  * own style.css, which is loaded after this file and so can override
  * whatever it needs to.
  *
- * Served at /base.css by both binaries.
+ * Served at /base.css by every web UI binary.
  * --------------------------------------------------------------------- */
 
 
@@ -544,4 +545,78 @@ body:has(#bottom-panel:not(.collapsed)) #bottom-panel-toggle-btn {
   text-align: left;
   color: #6b7280;
   font-style: italic;
+}
+
+/* ---------- parameter sliders (see /parameter_panel.js) ---------- */
+
+.parameter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #303640;
+}
+
+.parameter-list[hidden] {
+  display: none;
+}
+
+.parameter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.parameter-name {
+  font-family: ui-monospace, monospace;
+  color: #e8e8e8;
+}
+
+.parameter-value {
+  font-variant-numeric: tabular-nums;
+  color: #e8e8e8;
+}
+
+.parameter-row input[type="range"] {
+  width: 100%;
+  margin: 4px 0 2px;
+  accent-color: #3f6dc9;
+}
+
+.parameter-group-title {
+  font-size: 13px;
+  margin: 10px 0 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9aa4b2;
+}
+
+.parameter-save {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.parameter-save[hidden] {
+  display: none;
+}
+
+.parameter-save p {
+  margin: 0;
+  font-size: 12px;
+  color: #9aa4b2;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.parameter-save p.error {
+  color: #f59e0b;
+}
+
+.parameter-description {
+  margin: 0;
+  font-size: 12px;
+  color: #9aa4b2;
+  line-height: 1.35;
 }
