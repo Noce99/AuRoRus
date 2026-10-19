@@ -38,7 +38,7 @@ on a laptop and on the car.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-   The crate uses the 2024 edition, so it needs Rust 1.85 or newer -
+   The crate needs Rust 1.95 or newer -
    `rustup update` brings an older install up to date. No other system
    library is required.
 
