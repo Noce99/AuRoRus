@@ -293,7 +293,8 @@
   gap: 6px;
 }
 
-#slam-session-toggle {
+#slam-session-toggle,
+#planning-reverse-toggle {
   display: flex;
   align-items: center;
   gap: 8px;

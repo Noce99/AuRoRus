@@ -8,8 +8,8 @@ use crate::environment::{CENTERLINE_FILE_NAME, Map, RaceLineMethod, race_lines, 
 use crate::geometry::Point2;
 use crate::topics::{
     ActuatorLimits, Color, Drawing, DrawingExt, MAP_TOPIC_NAME, PLANNING_PARAMETERS_TOPIC_NAME,
-    PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME, PlanningObjective, PlanningOutcome,
-    PlanningParameters, PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
+    PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME, PlanningOutcome, PlanningParameters,
+    PlanningRequest, PlanningState, PlanningStatus, SelectedMap, Shape,
     VEHICLE_GEOMETRY_TOPIC_NAME, VEHICLE_LIMITS_TOPIC_NAME, VehicleGeometry,
 };
 use crate::{Captain, Executor, Ticker};
@@ -82,6 +82,7 @@ impl Planner {
         let mut outcome = PlanningOutcome {
             requested: request.requested,
             objective: request.objective,
+            reverse: request.reverse,
             map: map_path.map(|path| path.display().to_string()),
             ..PlanningOutcome::default()
         };
@@ -113,6 +114,7 @@ impl Planner {
                     &self.config,
                     &vehicle,
                     request.objective,
+                    request.reverse,
                     &mut |progress| {
                         let drawing = match progress {
                             Progress::Stage(stage) => {
@@ -299,7 +301,6 @@ impl Executor for Planner {
         // Seeded from the topic, so a restart of just this executor doesn't
         // replay a request it already handled.
         let mut handled = request_topic().map_or(0, |topic| topic.read().requested);
-        let mut objective = PlanningObjective::default();
 
         while captain.is_running(self.id) {
             if self.apply_parameters(captain, &mut seen_parameters) {
@@ -312,13 +313,12 @@ impl Executor for Planner {
             let request = request_topic().map_or(
                 PlanningRequest {
                     requested: handled,
-                    objective,
+                    ..PlanningRequest::default()
                 },
                 |topic| topic.read().into_value(),
             );
             if request.requested != handled {
                 handled = request.requested;
-                objective = request.objective;
                 let map_path = map_topic.read().into_value().path;
                 let outcome =
                     self.handle_request(captain, request, map_path.as_deref(), &mut status);

@@ -48,6 +48,10 @@ pub struct PlanningRequest {
     /// [`crate::topics::SlamSaveRequest::requested`].
     pub requested: u64,
     pub objective: PlanningObjective,
+    /// Whether to plan for driving the track the other way round: against
+    /// the direction of travel its start/finish line gives.
+    #[serde(default)]
+    pub reverse: bool,
 }
 
 /// What the planner is doing.
@@ -69,6 +73,10 @@ pub struct PlanningOutcome {
     pub requested: u64,
     /// The objective asked for.
     pub objective: PlanningObjective,
+    /// Whether the line was planned against the start/finish line's
+    /// direction of travel - see [`PlanningRequest::reverse`].
+    #[serde(default)]
+    pub reverse: bool,
     /// The map folder the race line was planned for, if one was selected.
     pub map: Option<String>,
     /// The (minimum-curvature) race line file written, by name inside the
@@ -144,6 +152,7 @@ mod tests {
                 reference_max_curvature_per_m: 1.4,
                 elapsed_ms: 250.0,
                 objective: PlanningObjective::MinTime,
+                reverse: true,
                 min_time_saved_to: Some("2026_09_25__15_30_14.csv".to_string()),
                 min_time_error: None,
                 min_time_lap_length_m: 41.0,

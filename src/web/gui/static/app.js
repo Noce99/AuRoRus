@@ -742,6 +742,7 @@ const planningDetailsEl = document.getElementById("planning-details");
 const planningOutcomeEl = document.getElementById("planning-outcome");
 const planningStartBtn = document.getElementById("planning-start-btn");
 const planningObjectiveEl = document.getElementById("planning-objective");
+const planningReverseEl = document.getElementById("planning-reverse");
 
 /** Where this browser remembers the picked objective. */
 const PLANNING_OBJECTIVE_KEY = "aurorus.planning.objective";
@@ -756,6 +757,21 @@ try {
 planningObjectiveEl.addEventListener("change", () => {
   try {
     localStorage.setItem(PLANNING_OBJECTIVE_KEY, planningObjectiveEl.value);
+  } catch {
+    // Not remembered - it still applies to this page.
+  }
+});
+
+/** Where this browser remembers whether to plan the track reversed. */
+const PLANNING_REVERSE_KEY = "aurorus.planning.reverse";
+try {
+  planningReverseEl.checked = localStorage.getItem(PLANNING_REVERSE_KEY) === "true";
+} catch {
+  // No storage: the start/finish line's direction it is.
+}
+planningReverseEl.addEventListener("change", () => {
+  try {
+    localStorage.setItem(PLANNING_REVERSE_KEY, String(planningReverseEl.checked));
   } catch {
     // Not remembered - it still applies to this page.
   }
@@ -779,7 +795,10 @@ planningStartBtn.addEventListener("click", () => {
   fetchJSON("/api/planning_start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ objective: planningObjectiveEl.value }),
+    body: JSON.stringify({
+      objective: planningObjectiveEl.value,
+      reverse: planningReverseEl.checked,
+    }),
   })
     .then(() => pollPlanning())
     .catch((err) => {
@@ -794,7 +813,7 @@ function describePlanningOutcome(outcome) {
   const map = outcome.map ? outcome.map.split("/").pop() : "no map";
   if (outcome.error !== null) return `Planning for ${map} failed: ${outcome.error}`;
   const parts = [
-    `Race line for ${map} saved to ${outcome.saved_to} (${(outcome.elapsed_ms / 1000).toFixed(1)} s).`,
+    `${outcome.reverse ? "Reversed race" : "Race"} line for ${map} saved to ${outcome.saved_to} (${(outcome.elapsed_ms / 1000).toFixed(1)} s).`,
     `Lap: ${outcome.lap_length_m.toFixed(1)} m in ${outcome.lap_time_s.toFixed(2)} s.`,
     `Max curvature ${outcome.max_curvature_per_m.toFixed(2)} 1/m`,
     `(centerline: ${outcome.reference_max_curvature_per_m.toFixed(2)} 1/m).`,
@@ -830,6 +849,7 @@ async function pollPlanning() {
   planningStateEl.textContent = missing ? "Planner not running" : planningComputing ? "Computing" : "Idle";
   planningStartBtn.disabled = missing || planningComputing || liveMapName === null;
   planningObjectiveEl.disabled = planningComputing;
+  planningReverseEl.disabled = planningComputing;
 
   if (missing) {
     planningDetailsEl.textContent = "";
@@ -838,10 +858,13 @@ async function pollPlanning() {
   } else if (liveMapName === null) {
     planningDetailsEl.textContent = "Select a map to plan a race line for.";
   } else {
+    const direction = planningReverseEl.checked
+      ? " Driven against the start/finish line's direction."
+      : "";
     planningDetailsEl.textContent =
-      planningObjectiveEl.value === "min_time"
+      (planningObjectiveEl.value === "min_time"
         ? `Plans the minimum-curvature race line for ${liveMapName}, then the minimum-time line from it.`
-        : `Plans a minimum-curvature race line for ${liveMapName}, with a speed profile.`;
+        : `Plans a minimum-curvature race line for ${liveMapName}, with a speed profile.`) + direction;
   }
 
   const outcome = status.last_outcome;

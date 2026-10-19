@@ -63,13 +63,16 @@ pub struct PlannedLines {
     pub min_time: Option<Result<MinTimeLine, PlanError>>,
 }
 
-/// Plans `map`'s race line for `objective` with `config`, for `vehicle`. `progress` is told what's going on, and cancels the
+/// Plans `map`'s race line for `objective` with `config`, for `vehicle`,
+/// driven in the direction of travel the start/finish line gives - or the
+/// other way round if `reverse`. `progress` is told what's going on, and cancels the
 /// planning - with [`PlanError::Cancelled`] - by returning `false`.
 pub fn plan(
     map: &Map,
     config: &PlanningConfig,
     vehicle: &PlanningVehicle,
     objective: PlanningObjective,
+    reverse: bool,
     progress: &mut dyn FnMut(Progress) -> bool,
 ) -> Result<PlannedLines, PlanError> {
     let stage = |name: &str, progress: &mut dyn FnMut(Progress) -> bool| {
@@ -100,7 +103,10 @@ pub fn plan(
         let even = resample_even_spacing(&extracted, config.spacing_m);
         smooth(&even, config.centerline_smoothing_window)
     };
-    let (x_m, y_m, heading_rad) = map.info.start_finish_line.start_pose();
+    let (x_m, y_m, mut heading_rad) = map.info.start_finish_line.start_pose();
+    if reverse {
+        heading_rad += std::f64::consts::PI;
+    }
     orient_from(&mut reference, x_m, y_m, heading_rad);
     let reference = resample_even_spacing(&reference, config.spacing_m);
 
@@ -196,6 +202,7 @@ mod tests {
             &config,
             &vehicle(),
             PlanningObjective::MinCurvature,
+            false,
             &mut |_| true,
         )
         .unwrap();
@@ -215,6 +222,29 @@ mod tests {
         }
         assert!(planned.max_curvature_per_m < planned.reference_max_curvature_per_m);
         assert!(planned.lap_time_s.is_finite() && planned.lap_time_s > 0.0);
+    }
+
+    #[test]
+    fn reverse_runs_the_ring_the_other_way_round() {
+        let map = ring_map(1.0, 2.0, 0.02);
+        let config = PlanningConfig {
+            spacing_m: 0.05,
+            ..PlanningConfig::default()
+        };
+        let planned = plan(
+            &map,
+            &config,
+            &vehicle(),
+            PlanningObjective::MinCurvature,
+            true,
+            &mut |_| true,
+        )
+        .unwrap();
+
+        // Starts at the start line, heading clockwise (-y there).
+        let line = &planned.race_line;
+        assert!(line[0].y.abs() < 0.05);
+        assert!(line[3].y < line[0].y);
     }
 
     /// A generated track a fraction the size of a default one - the
@@ -246,6 +276,7 @@ mod tests {
             &config,
             &vehicle(),
             PlanningObjective::MinCurvature,
+            false,
             &mut |_| true,
         )
         .unwrap();
@@ -292,6 +323,7 @@ mod tests {
                 &config,
                 &vehicle,
                 PlanningObjective::MinCurvature,
+                false,
                 &mut |_| true,
             );
             (planned, config.curvature_limit_per_m(&vehicle))
@@ -328,6 +360,7 @@ mod tests {
             &config,
             &vehicle(),
             PlanningObjective::MinTime,
+            false,
             &mut |_| true,
         )
         .unwrap();

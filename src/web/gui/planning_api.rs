@@ -147,10 +147,13 @@ struct PlanningStartResponse {
 struct PlanningStartBody {
     #[serde(default)]
     objective: PlanningObjective,
+    #[serde(default)]
+    reverse: bool,
 }
 
 /// `POST /api/planning_start` - body `{"objective": "min_curvature" |
-/// "min_time"}` (empty for minimum curvature) - asks
+/// "min_time", "reverse": bool}` (empty for minimum curvature, in the
+/// start/finish line's direction) - asks
 /// [`crate::planning::Planner`] to plan a race line for the selected map,
 /// by bumping `planning_request`'s counter. The planner reports its
 /// progress and outcome on `planning_status`, the outcome under the
@@ -195,6 +198,7 @@ pub fn planning_start(request: &mut Request, captain: &Captain, writer_id: u16) 
             PlanningRequest {
                 requested,
                 objective: body.objective,
+                reverse: body.reverse,
             },
         )
         .expect("lost writer authorization for the planning_request topic");

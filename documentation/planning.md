@@ -33,8 +33,8 @@ flowchart LR
 - **`planning_parameters`:** the parameter values `web_gui` wants, the whole
   set at once. The planner applies them whenever it's idle, so they take
   effect **before** Start is pressed.
-- **`planning_request`:** a counter and an objective (`min_curvature` or
-  `min_time`). Each bump asks for a race line for the map currently on
+- **`planning_request`:** a counter, an objective (`min_curvature` or
+  `min_time`) and whether to reverse the direction of travel. Each bump asks for a race line for the map currently on
   `map`.
 - **`planning_status`:** idle or computing, the current step (e.g.
   `Optimizing - iteration 3/30, moved up to 0.300 m`), every parameter with
@@ -76,7 +76,8 @@ flowchart LR
      map's `centerline.csv` too.
 
    Either way, the line is turned to run in the direction of travel given
-   by the start/finish line, starts at its point nearest that line, and is
+   by the start/finish line (or against it, when the request asks for the
+   reverse direction), starts at its point nearest that line, and is
    resampled every `spacing_m`.
 3. **Minimum curvature** (`planning/min_curvature.rs`).
    - Each point may only move sideways along the reference's normal:
@@ -225,6 +226,9 @@ use that. If you see it, raise `solver_max_iterations`, or `spacing_m`.
 
 - **Objective:** Minimum curvature or Minimum time. This browser remembers
   the choice.
+- **Reverse direction:** plans for driving the track the other way round
+  (clockwise instead of counterclockwise, or vice versa) than its
+  start/finish line says. This browser remembers the choice.
 - **Start computation** plans for the selected map. It's disabled while
   computing and with no map selected. The status line shows the current
   step. Once done, the outcome line shows the file written and the lap's
