@@ -10,6 +10,7 @@ mod assets;
 mod cli;
 mod handlers;
 mod lab;
+mod sweep;
 
 use lab::Lab;
 use std::sync::Arc;
@@ -21,10 +22,16 @@ const HTTP_THREADS: usize = 4;
 
 fn main() {
     let config = cli::parse_config(std::env::args());
+    let workers = config.workers.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map_or(1, |n| n.get().saturating_sub(1))
+            .max(1)
+    });
     let lab = Arc::new(Lab::new(
         config.sessions_root.clone(),
         config.maps_root.clone(),
         config.config_dir.clone(),
+        workers,
     ));
     if let Some(file) = &config.file
         && let Err(err) = lab.load("", Some(file))
@@ -33,11 +40,6 @@ fn main() {
         std::process::exit(1);
     }
 
-    let workers = config.workers.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map_or(1, |n| n.get().saturating_sub(1))
-            .max(1)
-    });
     lab::run_workers(&lab, workers);
 
     let server = aurorus::web::bind_http(config.bind_addr.as_str()).unwrap_or_else(|err| {

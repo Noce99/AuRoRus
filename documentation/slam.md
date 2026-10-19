@@ -488,9 +488,19 @@ map SLAM saved of that track, the error stayed within 5 cm.
 
 ## What's next
 
+- **Drift in tight turns.** On a recorded 62 s simulated drive on
+  Vienna_2026_Quali, where the gap follower ended up turning in place
+  against a wall, SLAM ended 1.5 m and up to 25° off the true pose while
+  odometry alone stayed within 0.1 m: the heading drifts during sharp turns
+  and the offset is never recovered. Trusting odometry more
+  (`distance_variance_penalty`, `angle_variance_penalty`) didn't help.
+  [`mapping_lab`](mapping_lab.md)'s trajectory score measures it, for any
+  parameters.
+
 - **Tuning offline:** [`mapping_lab`](mapping_lab.md) builds maps from
-  mapping sessions with other parameters. Its next steps - scores against
-  the ground truth, parameter sweeps, dead reckoning offline - are listed in
+  mapping sessions with other parameters, scores them against the ground
+  truth, and sweeps parameter ranges. Its next steps - random sampling,
+  scoring over several sessions, dead reckoning offline - are listed in
   [its own document](mapping_lab.md#whats-next).
 
 - **Asynchronous optimization.** A long session with several laps grows the

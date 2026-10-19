@@ -129,8 +129,10 @@ replay several of them together on the map. See
 
 Builds maps offline from the mapping sessions `web_gui` records (the Mapping
 panel's Record session toggle), each with its own SLAM parameters, and
-compares them on the map, over the true map in simulation. The chosen map is
-saved under `maps/`, and its parameters into `config/localization/slam.toml`.
+compares them on the map, over the true map in simulation, by their scores.
+Sweeps run every combination of up to three parameters' ranges at once. The
+chosen map is saved under `maps/`, and its parameters into
+`config/localization/slam.toml`.
 See [Mapping lab](documentation/mapping_lab.md).
 
 ```sh

@@ -1,7 +1,7 @@
 //! The lab's HTTP API: the session list and the loaded session, the draft
 //! parameters (the same `set`/`save`/`load` shape as `web_gui`'s parameter
-//! panels, so the page reuses `/parameter_panel.js`), the runs, and the
-//! drawing protocol (see `aurorus::web::draw`) the map canvas is fed by.
+//! panels, so the page reuses `/parameter_panel.js`), the runs, the sweeps,
+//! and the drawing protocol (see `aurorus::web::draw`) the map canvas is fed by.
 //!
 //! The canvas has three layers: the selected run's map as live SLAM draws
 //! it, a compared run's walls and trajectory laid over it, and - in
@@ -9,17 +9,21 @@
 //! trajectory. Which runs are selected and compared is the page's, sent
 //! with every `POST /api/draw`.
 
-use crate::lab::{Lab, Loaded, Run, RunState, parameters_with};
+use crate::lab::{Finished, Lab, Loaded, Run, RunState, Sweep, View, parameters_with};
+use crate::sweep::{Axis, AxisSpec};
+use aurorus::localization::Scores;
 use aurorus::topics::{Color, Drawing, Shape};
 use aurorus::web::draw::{
     DrawLayer, DrawRequest, DrawResponse, RasterQuery, raster_response, stale_raster,
     without_raster_pixels,
 };
-use aurorus::web::{bad_request, error_response, json_response, not_found, read_json};
+use aurorus::web::{
+    bad_request, error_response, header, json_response, not_found, query_param, read_json,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
-use tiny_http::{Request, ResponseBox};
+use tiny_http::{Request, Response, ResponseBox};
 
 /// The layer the selected run's map is drawn on.
 const SELECTED_LAYER: &str = "Selected run";
@@ -90,31 +94,30 @@ struct Change<'a> {
 }
 
 #[derive(serde::Serialize)]
-struct RunStats {
+struct RunStats<'a> {
     kept: usize,
     processed: usize,
     loop_closures: usize,
     dropped: usize,
     paused: usize,
-    mean_response: Option<f64>,
-    min_response: Option<f64>,
-    mean_process_ms: Option<f64>,
-    max_process_ms: Option<f64>,
     elapsed_s: f64,
     map_width_m: f64,
     map_height_m: f64,
+    scores: &'a Scores,
 }
 
 #[derive(serde::Serialize)]
 struct RunSummary<'a> {
     id: u64,
+    /// The sweep that queued it, if one did.
+    sweep: Option<u64>,
     /// `queued`, `running`, `done`, `failed` or `cancelled`.
     state: &'static str,
     progress: f64,
     error: Option<&'a str>,
     /// The parameters that differ from the session's baseline.
     changes: Vec<Change<'a>>,
-    stats: Option<RunStats>,
+    stats: Option<RunStats<'a>>,
 }
 
 #[derive(serde::Serialize)]
@@ -126,11 +129,46 @@ struct LabBody<'a> {
     parameters: Vec<aurorus::topics::AlgorithmParameter>,
     /// Newest first.
     runs: Vec<RunSummary<'a>>,
+    /// Newest first.
+    sweeps: Vec<SweepSummary<'a>>,
+    /// How many runs are built at once.
+    workers: usize,
 }
 
-/// `GET /api/lab` - the loaded session, the draft and every run.
+#[derive(serde::Serialize)]
+struct CellSummary<'a> {
+    /// An index into each axis' values.
+    cell: &'a [usize],
+    /// Its run - `None` if it was skipped.
+    run: Option<u64>,
+    /// Why SLAM can't run with it, if it was skipped.
+    skipped: Option<&'a str>,
+}
+
+#[derive(serde::Serialize)]
+struct SweepSummary<'a> {
+    id: u64,
+    axes: &'a [Axis],
+    cells: Vec<CellSummary<'a>>,
+    /// How many of its runs are over, of how many.
+    over: usize,
+    runs: usize,
+    /// Where its results were written, once every run is over.
+    saved_to: Option<String>,
+    save_error: Option<&'a str>,
+}
+
+/// `GET /api/lab` - the loaded session, the draft, every run and every
+/// sweep.
 pub fn lab(lab: &Lab) -> ResponseBox {
-    lab.with(|session, draft, runs, load_error| {
+    lab.with(|view| {
+        let View {
+            session,
+            draft,
+            runs,
+            sweeps,
+            load_error,
+        } = view;
         let body = LabBody {
             sessions_folder: lab.sessions_root.display().to_string(),
             session: session.map(|loaded| summary(loaded)),
@@ -144,9 +182,53 @@ pub fn lab(lab: &Lab) -> ResponseBox {
                     .collect(),
                 None => Vec::new(),
             },
+            sweeps: sweeps
+                .iter()
+                .rev()
+                .map(|sweep| sweep_summary(sweep, runs))
+                .collect(),
+            workers: lab.workers,
         };
         json_response(&body, 200)
     })
+}
+
+fn sweep_summary<'a>(sweep: &'a Sweep, runs: &[Run]) -> SweepSummary<'a> {
+    let run_ids: Vec<u64> = sweep
+        .cells
+        .iter()
+        .filter_map(|c| c.run.as_ref().ok().copied())
+        .collect();
+    let over = run_ids
+        .iter()
+        .filter(|&&id| {
+            runs.iter()
+                .find(|run| run.id == id)
+                .is_none_or(|run| run.state.is_over())
+        })
+        .count();
+    let (saved_to, save_error) = match &sweep.saved {
+        Some(Ok(path)) => (Some(path.display().to_string()), None),
+        Some(Err(err)) => (None, Some(err.as_str())),
+        None => (None, None),
+    };
+    SweepSummary {
+        id: sweep.id,
+        axes: &sweep.axes,
+        cells: sweep
+            .cells
+            .iter()
+            .map(|cell| CellSummary {
+                cell: &cell.cell,
+                run: cell.run.as_ref().ok().copied(),
+                skipped: cell.run.as_ref().err().map(String::as_str),
+            })
+            .collect(),
+        over,
+        runs: run_ids.len(),
+        saved_to,
+        save_error,
+    }
 }
 
 fn summary(loaded: &Loaded) -> SessionSummary<'_> {
@@ -177,16 +259,16 @@ fn run_summary<'a>(run: &'a Run, baseline: &BTreeMap<String, f64>) -> RunSummary
             })
         })
         .collect();
-    let (state, progress, error, stats) = match &run.state {
-        RunState::Queued => ("queued", 0.0, None, None),
-        RunState::Running { progress } => ("running", *progress, None, None),
-        RunState::Done(finished) => ("done", 1.0, None, Some(stats(&finished.outcome))),
-        RunState::Failed(err) => ("failed", 0.0, Some(err.as_str()), None),
-        RunState::Cancelled => ("cancelled", 0.0, None, None),
+    let (progress, error, stats) = match &run.state {
+        RunState::Queued | RunState::Cancelled => (0.0, None, None),
+        RunState::Running { progress } => (*progress, None, None),
+        RunState::Done(finished) => (1.0, None, Some(stats(finished))),
+        RunState::Failed(err) => (0.0, Some(err.as_str()), None),
     };
     RunSummary {
         id: run.id,
-        state,
+        sweep: run.sweep,
+        state: run.state.name(),
         progress,
         error,
         changes,
@@ -194,20 +276,8 @@ fn run_summary<'a>(run: &'a Run, baseline: &BTreeMap<String, f64>) -> RunSummary
     }
 }
 
-fn stats(outcome: &aurorus::localization::RebuildOutcome) -> RunStats {
-    let responses: Vec<f64> = outcome
-        .processed
-        .iter()
-        .filter_map(|scan| scan.response)
-        .collect();
-    let times: Vec<f64> = outcome
-        .processed
-        .iter()
-        .map(|scan| scan.process_ms)
-        .collect();
-    let mean = |values: &[f64]| {
-        (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
-    };
+fn stats(finished: &Finished) -> RunStats<'_> {
+    let outcome = &finished.outcome;
     let map = &outcome.map;
     RunStats {
         kept: outcome.kept.len(),
@@ -215,13 +285,10 @@ fn stats(outcome: &aurorus::localization::RebuildOutcome) -> RunStats {
         loop_closures: outcome.loop_closures,
         dropped: outcome.dropped_scans,
         paused: outcome.paused_scans,
-        mean_response: mean(&responses),
-        min_response: responses.iter().copied().reduce(f64::min),
-        mean_process_ms: mean(&times),
-        max_process_ms: times.iter().copied().reduce(f64::max),
         elapsed_s: outcome.elapsed.as_secs_f64(),
         map_width_m: f64::from(map.width_px) * map.resolution_m_per_px,
         map_height_m: f64::from(map.height_px) * map.resolution_m_per_px,
+        scores: &finished.scores,
     }
 }
 
@@ -262,7 +329,7 @@ fn path_response(path: &Path) -> ResponseBox {
 /// `localization/slam.toml`, keeping its comments. Responds with its path.
 pub fn save_draft(lab: &Lab) -> ResponseBox {
     let path = lab.slam_config_path();
-    let parameters = lab.with(|_, draft, _, _| parameters_with(draft));
+    let parameters = lab.with(|view| parameters_with(view.draft));
     match aurorus::config::save_parameter_values(&path, &parameters) {
         Ok(()) => path_response(&path),
         Err(err) => error_response(500, &err),
@@ -273,7 +340,7 @@ pub fn save_draft(lab: &Lab) -> ResponseBox {
 /// `localization/slam.toml`. Responds with its path.
 pub fn load_draft(lab: &Lab) -> ResponseBox {
     let path = lab.slam_config_path();
-    let parameters = lab.with(|_, draft, _, _| parameters_with(draft));
+    let parameters = lab.with(|view| parameters_with(view.draft));
     match aurorus::config::saved_parameter_values(&path, &parameters) {
         Ok(values) => {
             lab.set_draft_values(&values);
@@ -286,7 +353,7 @@ pub fn load_draft(lab: &Lab) -> ResponseBox {
 /// `POST /api/draft_reset` - sets the draft back to the session's baseline:
 /// what it was recorded with.
 pub fn reset_draft(lab: &Lab) -> ResponseBox {
-    let Some(baseline) = lab.with(|session, _, _, _| session.map(|s| s.baseline.clone())) else {
+    let Some(baseline) = lab.with(|view| view.session.map(|s| s.baseline.clone())) else {
         return bad_request("no session is loaded");
     };
     lab.set_draft_values(&baseline);
@@ -346,6 +413,66 @@ fn run_action(
 }
 
 #[derive(serde::Deserialize)]
+struct SweepBody {
+    axes: Vec<AxisSpec>,
+}
+
+/// `POST /api/sweeps/plan` - body `{"axes": [{"name", "from", "to",
+/// "count"}, ...]}` - what that sweep would queue: each axis' values, and
+/// how many combinations would run and be skipped.
+pub fn plan_sweep(request: &mut Request, lab: &Lab) -> ResponseBox {
+    let body: SweepBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    match lab.plan_sweep(&body.axes) {
+        Ok(plan) => json_response(&plan, 200),
+        Err(err) => bad_request(&err),
+    }
+}
+
+/// `POST /api/sweeps` - the same body - queues a run for every combination
+/// SLAM can run with. Responds with the sweep's id.
+pub fn queue_sweep(request: &mut Request, lab: &Lab) -> ResponseBox {
+    let body: SweepBody = match read_json(request) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    match lab.queue_sweep(&body.axes) {
+        Ok(id) => json_response(&QueuedBody { id }, 200),
+        Err(err) => bad_request(&err),
+    }
+}
+
+/// `POST /api/sweeps/cancel` - body `{"id": ...}`.
+pub fn cancel_sweep(request: &mut Request, lab: &Lab) -> ResponseBox {
+    run_action(request, |id| lab.cancel_sweep(id))
+}
+
+/// `POST /api/sweeps/delete` - body `{"id": ...}` - forgets the sweep and
+/// every run of it.
+pub fn delete_sweep(request: &mut Request, lab: &Lab) -> ResponseBox {
+    run_action(request, |id| lab.delete_sweep(id))
+}
+
+/// `GET /api/sweeps/csv?id=...` - the sweep's results as CSV, to download.
+pub fn sweep_csv(url: &str, lab: &Lab) -> ResponseBox {
+    let Some(id) = query_param(url, "id").and_then(|id| id.parse::<u64>().ok()) else {
+        return bad_request("id must be a sweep's id");
+    };
+    match lab.sweep_csv(id) {
+        Ok(csv) => Response::from_string(csv)
+            .with_header(header("Content-Type", "text/csv; charset=utf-8"))
+            .with_header(header(
+                "Content-Disposition",
+                &format!("attachment; filename=\"sweep{id}.csv\""),
+            ))
+            .boxed(),
+        Err(err) => bad_request(&err),
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct SaveMapBody {
     id: u64,
     name: String,
@@ -391,7 +518,8 @@ pub fn draw(request: &mut Request, lab: &Lab, epoch: u64) -> ResponseBox {
     let finished = |id: Option<u64>| id.and_then(|id| lab.finished(id).map(|f| (id, f)));
     let selected = finished(body.selected);
     let compared = finished(body.compared);
-    let session = lab.with(|session, _, _, _| session.cloned());
+    let session = lab.with(|view| view.session.cloned());
+    let anchor = session.as_ref().map(|s| s.anchor).unwrap_or_default();
 
     let layer = |topic: &str, version: u64, drawing: &dyn Fn() -> Drawing| DrawLayer {
         topic: topic.to_string(),
@@ -408,7 +536,7 @@ pub fn draw(request: &mut Request, lab: &Lab, epoch: u64) -> ResponseBox {
             &|| {
                 compared
                     .as_ref()
-                    .map(|(_, f)| f.comparison.clone())
+                    .map(|(_, f)| f.comparison(&anchor).clone())
                     .unwrap_or_default()
             },
         ),
@@ -418,7 +546,7 @@ pub fn draw(request: &mut Request, lab: &Lab, epoch: u64) -> ResponseBox {
             &|| {
                 selected
                     .as_ref()
-                    .map(|(_, f)| f.drawing.clone())
+                    .map(|(_, f)| f.drawing(&anchor).clone())
                     .unwrap_or_default()
             },
         ),
@@ -478,8 +606,11 @@ pub fn draw_raster(url: &str, lab: &Lab, epoch: u64) -> ResponseBox {
     if query.topic != SELECTED_LAYER {
         return not_found();
     }
-    match lab.finished(query.write_count) {
-        Some(finished) => raster_response(&finished.drawing, query.shape),
-        None => not_found(),
+    let session = lab.with(|view| view.session.cloned());
+    match (session, lab.finished(query.write_count)) {
+        (Some(session), Some(finished)) => {
+            raster_response(finished.drawing(&session.anchor), query.shape)
+        }
+        _ => not_found(),
     }
 }

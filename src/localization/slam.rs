@@ -29,8 +29,10 @@ mod pose_graph;
 mod rebuild;
 mod scan;
 mod scan_matcher;
+mod scores;
 
 pub use rebuild::{KeptScan, ProcessedScan, RebuildOutcome, map_walls, rebuild};
+pub use scores::{Scores, TrajectoryError, WallError, score};
 
 use crate::environment;
 use crate::topics::{

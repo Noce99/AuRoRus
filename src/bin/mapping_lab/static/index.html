@@ -30,6 +30,7 @@
 
       <nav id="panel-nav">
         <button class="panel-nav-btn selected" data-panel="runs">Runs</button>
+        <button class="panel-nav-btn" data-panel="sweeps">Sweeps</button>
         <button class="panel-nav-btn" data-panel="parameters">Parameters</button>
         <button class="panel-nav-btn" data-panel="layers">Layers</button>
       </nav>
@@ -61,8 +62,54 @@
         <h1>Runs</h1>
         <button type="button" id="run-btn" class="primary-btn" title="Build the session's map again with the draft parameters (see Parameters)">&#9654; Run with the draft</button>
         <p id="run-status" class="panel-hint"></p>
-        <p class="panel-hint">Click a run to show its map; <b>Compare</b> lays another run's walls and trajectory over it, in amber. In simulation, the ground truth is drawn in pink.</p>
+        <p class="panel-hint">Click a run to show its map; <b>Compare</b> lays another run's walls and trajectory over it, in amber. In simulation, the ground truth is drawn in pink. The best value of each score among the runs is in green.</p>
+        <label class="run-menu-row">Show
+          <select id="run-filter" title="Which runs to list - the shown and the compared run always are">
+            <option value="manual">Runs queued by hand</option>
+          </select>
+        </label>
+        <label class="run-menu-row">Sort by
+          <select id="run-sort">
+            <option value="newest">Newest first</option>
+            <option value="trajectory">Trajectory error</option>
+            <option value="walls">Wall error</option>
+            <option value="thickness">Wall thickness</option>
+            <option value="match">Match</option>
+            <option value="time">Time per scan</option>
+          </select>
+        </label>
         <ul id="run-list"></ul>
+      </section>
+
+      <section id="panel-sweeps" class="panel-section" hidden>
+        <h1>Sweeps</h1>
+        <p class="panel-hint">A run for every combination of up to three parameters' values, each spread evenly over a range. Every other parameter is the draft's (see Parameters). Runs queued by hand go first.</p>
+        <div id="sweep-axes"></div>
+        <button type="button" id="sweep-add-axis" title="Sweep one more parameter">+ Parameter</button>
+        <p id="sweep-plan" class="panel-hint"></p>
+        <button type="button" id="sweep-start" class="primary-btn" title="Queue a run for every combination">&#9654; Sweep</button>
+        <p id="sweep-status" class="panel-hint"></p>
+
+        <ul id="sweep-list"></ul>
+
+        <div id="sweep-results" hidden>
+          <h2 id="sweep-title"></h2>
+          <div class="sweep-menus">
+            <label>Rank by <select id="sweep-score" title="The score the chart and table rank runs by"></select></label>
+            <label id="sweep-slice-row" hidden><span id="sweep-slice-name"></span> <select id="sweep-slice" title="The third parameter's value the heatmap shows"></select></label>
+          </div>
+          <div id="sweep-chart-wrap">
+            <canvas id="sweep-chart"></canvas>
+            <div id="sweep-tooltip" hidden></div>
+          </div>
+          <div class="button-row">
+            <button type="button" id="sweep-use-best" title="Copy the best run's parameters into the draft">Use best</button>
+            <button type="button" id="sweep-narrow" title="Set up a sweep around the best run, over half the range">Narrow around best</button>
+            <a id="sweep-csv" class="button-link" title="Download the results as CSV">CSV</a>
+          </div>
+          <p id="sweep-saved" class="panel-hint"></p>
+          <div id="sweep-table-wrap"><table id="sweep-table"></table></div>
+        </div>
       </section>
 
       <section id="panel-parameters" class="panel-section" hidden>
@@ -90,6 +137,8 @@
 <script src="/map_view.js"></script>
 <script src="/draw_layers.js"></script>
 <script src="/parameter_panel.js"></script>
+<script src="/chart.js"></script>
+<script src="/sweeps.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
