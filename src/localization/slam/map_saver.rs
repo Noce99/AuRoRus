@@ -9,7 +9,9 @@
 //!   unknown map becomes white (drivable) / black. Only free space the
 //!   vehicle can reach from its trajectory is white. Free specks outside the
 //!   walls, and areas beams leaked into through holes in a one-cell wall,
-//!   aren't reachable, so they turn black.
+//!   aren't reachable, so they turn black. Then noise islands go: only the
+//!   biggest white blob (the track) and the two biggest black ones (the
+//!   outside and the infield) are kept, any other blob flips color.
 //! - **The start/finish line is placed** ([`start_finish_line`]) through
 //!   where mapping started, across the track, as perpendicular to both of its
 //!   borders as possible. A SLAM map has no centerline to derive it from.
@@ -37,6 +39,8 @@ const START_LINE_MAX_LENGTH_RATIO: f64 = 1.5;
 /// Radius around each end of the start/finish line whose border pixels
 /// give that border's direction, in meters.
 const BORDER_FIT_RADIUS_M: f64 = 0.3;
+/// How many black blobs a map keeps: the outside and the infield.
+const KEPT_BLACK_BLOBS: usize = 2;
 
 /// Why [`export`] failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,7 +186,7 @@ fn drivable_area(map: &SlamMap) -> Option<BinaryGrid> {
         }
     }
 
-    let white: Vec<bool> = (0..height)
+    let mut white: Vec<bool> = (0..height)
         .flat_map(|row| (0..width).map(move |col| (col, row)))
         .map(|(col, row)| {
             reached[index(col, row)]
@@ -190,6 +194,8 @@ fn drivable_area(map: &SlamMap) -> Option<BinaryGrid> {
                     && neighbors8(col, row, width, height).any(|(c, r)| reached[index(c, r)]))
         })
         .collect();
+    // Before cropping, so the crop fits the track alone.
+    keep_biggest_blobs(&mut white, width, height, true, 1);
 
     // Crop to the white cells, plus a black margin.
     let mut min = (i64::MAX, i64::MAX);
@@ -220,6 +226,14 @@ fn drivable_area(map: &SlamMap) -> Option<BinaryGrid> {
                 inside && white[index(source_col as u32, source_row as u32)];
         }
     }
+    // After cropping: the black margin makes the outside one blob.
+    keep_biggest_blobs(
+        &mut cropped,
+        cropped_width,
+        cropped_height,
+        false,
+        KEPT_BLACK_BLOBS,
+    );
     Some(BinaryGrid {
         resolution_m: map.resolution_m_per_px,
         origin_x_m: map.origin_x_m + first_col as f64 * map.resolution_m_per_px,
@@ -228,6 +242,51 @@ fn drivable_area(map: &SlamMap) -> Option<BinaryGrid> {
         height: cropped_height,
         white: cropped,
     })
+}
+
+/// Keeps the `keep` biggest blobs of `color` cells in `white` (a `width` x
+/// `height` grid), flipping every other blob of that color - noise islands.
+///
+/// White blobs are 4-connected, like the drivable area's flood fill; black
+/// ones 8-connected, so a one-cell wall running diagonally stays one blob.
+fn keep_biggest_blobs(white: &mut [bool], width: u32, height: u32, color: bool, keep: usize) {
+    let index = |col: u32, row: u32| row as usize * width as usize + col as usize;
+    let mut seen = vec![false; white.len()];
+    let mut blobs: Vec<Vec<usize>> = Vec::new();
+    let mut queue = VecDeque::new();
+    for row in 0..height {
+        for col in 0..width {
+            let start = index(col, row);
+            if seen[start] || white[start] != color {
+                continue;
+            }
+            seen[start] = true;
+            queue.push_back((col, row));
+            let mut blob = Vec::new();
+            while let Some((col, row)) = queue.pop_front() {
+                blob.push(index(col, row));
+                let neighbors: Vec<_> = if color {
+                    neighbors4(col, row, width, height).collect()
+                } else {
+                    neighbors8(col, row, width, height).collect()
+                };
+                for (c, r) in neighbors {
+                    let i = index(c, r);
+                    if !seen[i] && white[i] == color {
+                        seen[i] = true;
+                        queue.push_back((c, r));
+                    }
+                }
+            }
+            blobs.push(blob);
+        }
+    }
+    blobs.sort_by_key(|blob| std::cmp::Reverse(blob.len()));
+    for blob in blobs.iter().skip(keep) {
+        for &i in blob {
+            white[i] = !color;
+        }
+    }
 }
 
 /// The start/finish line through `start`'s position: of the lines through
@@ -480,6 +539,87 @@ mod tests {
         assert!(!is_white(&info, &raster, 0.0, 1.02), "walls are black");
         assert!(!is_white(&info, &raster, 0.0, 3.0));
         assert!(!is_white(&info, &raster, 2.0, 1.3));
+    }
+
+    /// A SLAM map of a ring track between radii 1 and 2 m around the
+    /// origin: free inside, one-cell walls on both borders, unknown
+    /// elsewhere. Trajectory along its middle.
+    fn ring() -> SlamMap {
+        let side = 120u32;
+        let origin = -0.5 * f64::from(side) * RESOLUTION_M;
+        let mut pixels = Vec::with_capacity((side * side) as usize);
+        for row in 0..side {
+            for col in 0..side {
+                let x = origin + (f64::from(col) + 0.5) * RESOLUTION_M;
+                let y = origin + (f64::from(row) + 0.5) * RESOLUTION_M;
+                let radius = x.hypot(y);
+                pixels.push(if (1.0..2.0).contains(&radius) {
+                    SlamMap::FREE
+                } else if (1.0 - RESOLUTION_M..2.0 + RESOLUTION_M).contains(&radius) {
+                    SlamMap::OCCUPIED
+                } else {
+                    SlamMap::UNKNOWN
+                });
+            }
+        }
+        let trajectory = (0..64)
+            .map(|i| {
+                let angle = 2.0 * PI * f64::from(i) / 64.0;
+                [(1.5 * angle.cos()) as f32, (1.5 * angle.sin()) as f32]
+            })
+            .collect();
+        SlamMap {
+            resolution_m_per_px: RESOLUTION_M,
+            origin_x_m: origin,
+            origin_y_m: origin,
+            width_px: side,
+            height_px: side,
+            pixels: pixels.into(),
+            trajectory,
+        }
+    }
+
+    #[test]
+    fn noise_islands_are_removed() {
+        let mut map = ring();
+        // A wall speck in the middle of the track...
+        set(&mut map, 1.5, 0.0, SlamMap::OCCUPIED);
+        // ... and a small walled-off free pocket in the infield the
+        // trajectory strayed into.
+        for (dx, dy) in [
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ] {
+            for k in 0..2 {
+                let (x, y) = (f64::from(dx * (2 + k)), f64::from(dy * (2 + k)));
+                set(
+                    &mut map,
+                    x * RESOLUTION_M,
+                    y * RESOLUTION_M,
+                    if k == 0 {
+                        SlamMap::FREE
+                    } else {
+                        SlamMap::OCCUPIED
+                    },
+                );
+            }
+        }
+        set(&mut map, 0.0, 0.0, SlamMap::FREE);
+        map.trajectory.push([0.0, 0.0]);
+
+        let (info, raster) = export(&map, Pose2::new(1.5, 0.3, PI / 2.0)).unwrap();
+
+        assert!(is_white(&info, &raster, 1.5, 0.0), "the speck is white");
+        assert!(!is_white(&info, &raster, 0.0, 0.0), "the pocket is black");
+        assert!(is_white(&info, &raster, -1.5, 0.0));
+        assert!(!is_white(&info, &raster, 0.5, 0.0), "the infield stays");
+        assert!(!is_white(&info, &raster, 2.5, 0.0), "the outside stays");
     }
 
     #[test]
