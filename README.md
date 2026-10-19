@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <img src="documentation/images/animations/aurorus_in_the_real_world.gif" alt="The real car driving autonomously with AuRoRus on an outdoor track bounded by black tubes" width="270">
+  <br>
+  <em>AuRoRus driving the real car</em>
+</p>
+
+<p align="center">
   <img src="documentation/images/animations/frenet_overtaking_simulating_to_race_at_vienna_quali.gif" alt="The web GUI simulating the Frenet overtaking racing on the Vienna 2026 qualifying map, with its lateral error plotted below">
   <br>
   <em>The Frenet overtaking racing in simulation on the Vienna 2026 qualifying map</em>
