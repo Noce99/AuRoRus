@@ -251,7 +251,7 @@ complete algorithm that tells the car to stand still.
 
 ```rust
 //! Tutorial pure pursuit: follows the race line by steering toward a point a
-//! fixed distance ahead on it. See `tutorial/02_pure_pursuit.md`.
+//! fixed distance ahead on it. See `tutorials/02_pure_pursuit.md`.
 
 use crate::autonomous_control::{AutonomousControlExt, Instance};
 use crate::topics::{AutonomousAlgorithmInfo, VescCommand};
@@ -1094,7 +1094,7 @@ cargo test my_pure_pursuit
 
 ```rust
 //! Tutorial pure pursuit: follows the race line by steering toward a point a
-//! fixed distance ahead on it. See `tutorial/02_pure_pursuit.md`.
+//! fixed distance ahead on it. See `tutorials/02_pure_pursuit.md`.
 
 use crate::autonomous_control::{
     AutonomousControlExt, Instance, ParameterTuner, load_config, report_message,

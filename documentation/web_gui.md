@@ -243,7 +243,7 @@ Picks the algorithm that drives, and tunes it.
 The screenshot shows pure pursuit driving: the purple dot on the race line is
 the target point it draws. See
 [Autonomous algorithms](autonomous_algorithms.md) for every algorithm, and
-the [tutorials](../tutorial/README.md) for writing one.
+the [tutorials](../tutorials/README.md) for writing one.
 
 ### Mapping
 

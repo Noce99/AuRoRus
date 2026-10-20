@@ -238,7 +238,7 @@ loaded at startup.
 | [Replay web GUI](documentation/replay_web_gui.md) | Playing back a recorded debug session: the map, the timeline, and how it works |
 | [Benchmark viewer](documentation/benchmark_viewer.md) | Filtering, comparing and replaying benchmark runs |
 | [Autonomous algorithms](documentation/autonomous_algorithms.md) | How driving algorithms are structured, selected and tuned live, and how to add one |
-| [Tutorials](tutorial/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
+| [Tutorials](tutorials/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
 | [Mapping lab](documentation/mapping_lab.md) | Recording mapping sessions and building their maps again offline with other parameters |

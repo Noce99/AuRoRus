@@ -245,7 +245,7 @@ a complete algorithm that does nothing: it tells the car to stand still.
 
 ```rust
 //! Tutorial gap follower: steers toward the middle of the widest free gap
-//! the LIDAR sees. See `tutorial/01_gap_follower.md`.
+//! the LIDAR sees. See `tutorials/01_gap_follower.md`.
 
 use crate::autonomous_control::{AutonomousControlExt, Instance};
 use crate::topics::{AutonomousAlgorithmInfo, VescCommand};
@@ -1017,7 +1017,7 @@ nothing to the real program.
 
 ```rust
 //! Tutorial gap follower: steers toward the middle of the widest free gap
-//! the LIDAR sees. See `tutorial/01_gap_follower.md`.
+//! the LIDAR sees. See `tutorials/01_gap_follower.md`.
 
 use crate::autonomous_control::{AutonomousControlExt, Instance, ParameterTuner, load_config};
 use crate::topics::{
