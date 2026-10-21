@@ -4,7 +4,7 @@
 //! queued many of them at once (see [`crate::sweep`]).
 
 use crate::sweep::{self, Axis, AxisSpec, CsvRow};
-use aurorus::localization::mapping_session::{MAPPING_SESSION_EXTENSION, MappingSession};
+use aurorus::localization::session::{self, Session, SessionKind};
 use aurorus::localization::{
     RebuildOutcome, Scores, SlamConfig, map_walls, rebuild, score, slam_tunable_parameters,
 };
@@ -26,13 +26,13 @@ pub struct Loaded {
     pub name: String,
     /// Where it was read from.
     pub path: PathBuf,
-    pub session: MappingSession,
+    pub session: Session,
     /// `config/localization/slam.toml` with the session's recorded parameter
     /// values applied: what every run starts from.
     pub base: SlamConfig,
     /// The value of every tunable parameter in `base`.
     pub baseline: BTreeMap<String, f64>,
-    /// Where SLAM's frame sat in the world - see [`MappingSession::anchor`].
+    /// Where SLAM's frame sat in the world - see [`Session::anchor`].
     pub anchor: StartState,
     /// The walls of the map the session was recorded on, if it names one
     /// that loads - in simulation, the true map.
@@ -270,23 +270,7 @@ impl Lab {
     /// The `.mapping` files under [`Self::sessions_root`], by name, with
     /// their sizes in bytes - newest first.
     pub fn session_files(&self) -> Vec<(String, u64)> {
-        let Ok(entries) = std::fs::read_dir(&self.sessions_root) else {
-            return Vec::new();
-        };
-        let mut files: Vec<_> = entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let metadata = entry.metadata().ok()?;
-                (metadata.is_file() && name.ends_with(MAPPING_SESSION_EXTENSION))
-                    .then(|| (name, metadata.len(), metadata.modified().ok()))
-            })
-            .collect();
-        files.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
-        files
-            .into_iter()
-            .map(|(name, size, _)| (name, size))
-            .collect()
+        session::list(&self.sessions_root, SessionKind::Mapping)
     }
 
     /// Loads the session file `name` under [`Self::sessions_root`] - or the
@@ -333,18 +317,25 @@ impl Lab {
                 self.sessions_root.join(name)
             }
         };
-        let session = MappingSession::load(&path)?;
+        let session = Session::load(&path)?;
         let file_config = aurorus::config::load::<SlamConfig>(&self.slam_config_path())
             .unwrap_or_else(|_| SlamConfig::default());
         let base = file_config
             .with_parameters(&session.info.slam_parameters)
             .map_err(|err| format!("the session's parameters can't be run: {err}"))?;
-        let (true_walls, true_map_error) = match &session.info.map {
-            Some(map) => match map_walls(Path::new(map)) {
+        // The map embedded in the session, or the one it names if it
+        // predates embedding.
+        let (true_walls, true_map_error) = match session.map_folder() {
+            Ok(Some(folder)) => match map_walls(&folder) {
                 Ok(walls) => (Some(walls), None),
                 Err(err) => (None, Some(err)),
             },
-            None => (None, None),
+            Ok(None) if session.info.map.is_some() => (
+                None,
+                Some("not embedded in the session, and no longer in maps/".to_string()),
+            ),
+            Ok(None) => (None, None),
+            Err(err) => (None, Some(err)),
         };
         Ok(Loaded {
             name: path
@@ -801,7 +792,7 @@ mod tests {
         lab.install(Loaded {
             name: "lap.mapping".to_string(),
             path: root.join("lap.mapping"),
-            session: MappingSession::default(),
+            session: Session::default(),
             baseline: values_of(&base),
             base,
             anchor: StartState::default(),

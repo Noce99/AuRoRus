@@ -383,7 +383,8 @@ scans and the same odometry.
 
 **What's recorded.** A session is a `.debug` file (the format
 `replay_web_gui` reads) holding only these topics, named `<name>.mapping`
-under `mapping_sessions/` (`web_gui --mapping-sessions-root` to change it):
+under `mapping_sessions/` (`web_gui --mapping-sessions-root` to change it).
+Both kinds of session are read by `src/localization/session.rs`.
 
 | Topic | Why |
 |---|---|
@@ -396,11 +397,19 @@ under `mapping_sessions/` (`web_gui --mapping-sessions-root` to change it):
 
 A topic still holding the value it was registered with (never written) is
 not recorded, as in a debug recording. The file starts with a
-`mapping_session_info` record, JSON rather than bincode so it stays readable
-as fields are added: the car (none in simulation), the selected map (in
-simulation, the true map), the value of every tunable SLAM parameter when
-recording started (the baseline for offline runs), and SLAM's `anchor`, to
-place the map in the world.
+`session_info` record, JSON rather than bincode so it stays readable as
+fields are added: the session's kind (`mapping`), the car (none in
+simulation), the selected map (in simulation, the true map), the value of
+every tunable SLAM parameter when recording started (the baseline for
+offline runs), and SLAM's `anchor`, to place the map in the world.
+
+**The map is embedded.** When a map is selected, a `session_map` record
+follows with a copy of its files: `info.json`, `map.tiff` and every race
+line in `race_lines/`. A session stays usable after its map is regenerated,
+renamed or deleted; reading it back extracts the copy into a folder of the
+system's temporary folder, named by its hash. A session recorded before
+this has no copy, and falls back to the folder its info names, if that
+still exists.
 
 **One session, one map.** `web_gui` watches `slam_status` (see
 `src/web/gui/mapping_session_api.rs`), so every way mapping starts or ends is
@@ -433,7 +442,7 @@ the scans).
 
 `aurorus::localization::rebuild(&session, &config, progress)` builds a
 session's map again with any `SlamConfig`, after
-`MappingSession::load(path)` has read it (see
+`Session::load(path)` has read it (see
 `src/localization/slam/rebuild.rs`). `SlamConfig::with_parameters` applies
 parameter values by name, e.g. the session's own baseline.
 

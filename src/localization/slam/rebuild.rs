@@ -1,5 +1,5 @@
 //! [`rebuild`]: builds a map again, offline, from a recorded
-//! [`MappingSession`] - with other parameters than it was recorded with, to
+//! [`Session`] - with other parameters than it was recorded with, to
 //! compare the results on the very same drive.
 //!
 //! The session's writes are replayed in the order they were written,
@@ -13,7 +13,7 @@
 use super::pose::Pose2;
 use super::{SlamConfig, State, localizer, save_map};
 use crate::environment::Map;
-use crate::localization::mapping_session::MappingSession;
+use crate::localization::session::Session;
 use crate::topics::{
     Color, Drawing, LidarScan, Odometry, SelectedMap, Shape, SlamCommand, SlamMap, SlamState,
     StartState, VehicleGeometry,
@@ -58,7 +58,7 @@ pub struct ProcessedScan {
 #[derive(Debug, Clone)]
 pub struct RebuildOutcome {
     /// The map at the end of the session, in SLAM's frame - placed in the
-    /// world by [`MappingSession::anchor`].
+    /// world by [`Session::anchor`].
     pub map: SlamMap,
     /// Every scan the map is built from, oldest first.
     pub kept: Vec<KeptScan>,
@@ -89,7 +89,7 @@ impl RebuildOutcome {
 
     /// What live SLAM draws of this map - the map, its trajectory, its loop
     /// closures and the vehicle at the last kept scan - with SLAM's frame
-    /// placed at `anchor` (see [`MappingSession::anchor`]).
+    /// placed at `anchor` (see [`Session::anchor`]).
     pub fn drawing(&self, anchor: &StartState) -> Drawing {
         let pose = |p: [f64; 3]| Pose2::new(p[0], p[1], p[2]);
         let loop_edges: Vec<_> = self
@@ -209,7 +209,7 @@ impl Event<'_> {
 /// `progress` is called every few scans with how far the rebuild got, from
 /// `0` to `1`; [`ControlFlow::Break`] stops it, and `None` is returned.
 pub fn rebuild(
-    session: &MappingSession,
+    session: &Session,
     config: &SlamConfig,
     mut progress: impl FnMut(f64) -> ControlFlow<()>,
 ) -> Option<RebuildOutcome> {
@@ -345,16 +345,16 @@ fn pending_t_us(state: &State, started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::localization::mapping_session::MappingSessionInfo;
+    use crate::localization::session::SessionInfo;
     use crate::localization::slam::scan_matcher::tests::room_scan;
 
     /// A session driving `steps` 5 cm steps along +x through the test room,
     /// a scan every 25 ms between odometry at 100 Hz, odometry drifting
     /// sideways so matching has something to correct.
-    fn driving_session(steps: usize) -> MappingSession {
-        let mut session = MappingSession {
-            info: MappingSessionInfo::default(),
-            ..MappingSession::default()
+    fn driving_session(steps: usize) -> Session {
+        let mut session = Session {
+            info: SessionInfo::default(),
+            ..Session::default()
         };
         let true_pose = |t_us: u64| Pose2::new(-1.0 + t_us as f64 * 2e-6, 0.0, 0.0);
         let end_us = steps as u64 * 25_000;

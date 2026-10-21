@@ -13,7 +13,7 @@
 
 use super::pose::{Pose2, wrap_to_pi};
 use super::rebuild::{KeptScan, RebuildOutcome};
-use crate::localization::mapping_session::MappingSession;
+use crate::localization::session::Session;
 use crate::topics::{SlamMap, StartState};
 use std::collections::HashMap;
 
@@ -87,7 +87,7 @@ pub struct Scores {
 /// truth (if recorded) and `true_walls` - the walls of the map driven on,
 /// as [`super::rebuild::map_walls`] reads them - if known.
 pub fn score(
-    session: &MappingSession,
+    session: &Session,
     outcome: &RebuildOutcome,
     true_walls: Option<&[[f32; 2]]>,
 ) -> Scores {
@@ -135,7 +135,7 @@ fn mean(values: &[f64]) -> Option<f64> {
 /// `anchor`, against the session's true pose at the same instants. `None`
 /// without ground truth, or without poses.
 fn trajectory_error(
-    session: &MappingSession,
+    session: &Session,
     anchor: &StartState,
     poses: impl Iterator<Item = (u64, [f64; 3])>,
 ) -> Option<TrajectoryError> {
@@ -166,7 +166,7 @@ fn trajectory_error(
 /// The session's true pose at `t_us`, interpolated between the two samples
 /// around it - the nearest one past either end. `None` without ground
 /// truth.
-fn true_pose_at(session: &MappingSession, t_us: u64) -> Option<Pose2> {
+fn true_pose_at(session: &Session, t_us: u64) -> Option<Pose2> {
     let truth = &session.ground_truth;
     let pose = |i: usize| {
         let (_, status) = &truth[i];
@@ -303,7 +303,7 @@ fn wall_thickness(map: &SlamMap) -> Option<f64> {
 }
 
 /// The median time between two of `session`'s scans, in milliseconds.
-fn median_period_ms(session: &MappingSession) -> Option<f64> {
+fn median_period_ms(session: &Session) -> Option<f64> {
     let mut periods: Vec<u64> = session
         .scans
         .windows(2)
@@ -322,8 +322,8 @@ mod tests {
     use super::*;
     use crate::topics::VehicleStatus;
 
-    fn truth(samples: &[(u64, f64, f64, f64)]) -> MappingSession {
-        MappingSession {
+    fn truth(samples: &[(u64, f64, f64, f64)]) -> Session {
+        Session {
             ground_truth: samples
                 .iter()
                 .map(|&(t, x_m, y_m, heading_rad)| {
@@ -338,7 +338,7 @@ mod tests {
                     )
                 })
                 .collect(),
-            ..MappingSession::default()
+            ..Session::default()
         }
     }
 
@@ -350,7 +350,7 @@ mod tests {
         // Across the wrap: halfway from 3 to -3 rad is pi, not 0.
         assert!(wrap_to_pi(pose.heading_rad - std::f64::consts::PI).abs() < 1e-9);
         assert_eq!(true_pose_at(&session, 500).unwrap().x_m, 1.0);
-        assert!(true_pose_at(&MappingSession::default(), 0).is_none());
+        assert!(true_pose_at(&Session::default(), 0).is_none());
     }
 
     #[test]

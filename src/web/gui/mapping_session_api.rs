@@ -1,7 +1,7 @@
 //! The Mapping panel's session recording: a toggle that, while on, records
 //! every map built into a mapping session (see
-//! [`crate::localization::mapping_session`]) under the mapping sessions
-//! folder - and the endpoints for it.
+//! [`crate::localization::session`]) under the mapping sessions folder -
+//! and the endpoints for it.
 //!
 //! Recordings are started and stopped by [`run_controller`], watching
 //! `slam_status`, rather than by the endpoints driving SLAM, so every way
@@ -11,8 +11,8 @@
 //! map succeeds, when odometry is reset, or when the toggle is turned off.
 //! Pause, and a save that failed, keep recording.
 
-use crate::localization::mapping_session::{
-    self, MAPPING_SESSION_EXTENSION, MAPPING_SESSION_FREQUENCY_HZ, MappingSessionInfo,
+use crate::localization::session::{
+    self, EmbeddedMap, SESSION_FREQUENCY_HZ, SessionInfo, SessionKind,
 };
 use crate::topics::{
     MAP_SELECTION_TOPIC_NAME, MapSelection, ODOMETRY_TOPIC_NAME, Odometry, SLAM_STATUS_TOPIC_NAME,
@@ -20,7 +20,7 @@ use crate::topics::{
 };
 use crate::web::{bad_request, json_response, read_json};
 use crate::{Captain, DebugRecorder, DebugState, DebugStatus};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tiny_http::{Request, ResponseBox};
@@ -54,7 +54,7 @@ impl MappingSession {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            recorder: mapping_session::recorder(),
+            recorder: session::recorder(SessionKind::Mapping),
             control: Arc::default(),
         }
     }
@@ -148,27 +148,30 @@ fn start(
     car_name: Option<&str>,
 ) -> Option<()> {
     let name = session.control().name.clone();
-    let started = mapping_session::file_name(&name).and_then(|file_name| {
-        let path = unused_path(&session.root, &file_name);
-        let info = MappingSessionInfo {
+    let started = session::file_name(SessionKind::Mapping, &name).and_then(|file_name| {
+        let path = session::unused_path(&session.root, SessionKind::Mapping, &file_name);
+        let map = captain
+            .try_topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME)
+            .and_then(|topic| topic.read().into_value().path);
+        let info = SessionInfo {
+            kind: SessionKind::Mapping,
             car: car_name.map(str::to_string),
-            map: captain
-                .try_topic::<MapSelection>(MAP_SELECTION_TOPIC_NAME)
-                .and_then(|topic| topic.read().into_value().path)
-                .map(|path| path.display().to_string()),
+            map: map.as_ref().map(|path| path.display().to_string()),
             slam_parameters: status
                 .parameters
                 .iter()
                 .map(|parameter| (parameter.name.clone(), parameter.value))
                 .collect(),
             anchor: Some(status.anchor),
+            localization: None,
         };
-        session.recorder.start_with(
-            captain,
-            path,
-            MAPPING_SESSION_FREQUENCY_HZ,
-            vec![info.preamble()],
-        )
+        let mut preamble = vec![info.preamble()];
+        if let Some(map) = &map {
+            preamble.push(EmbeddedMap::read(map)?.preamble());
+        }
+        session
+            .recorder
+            .start_with(captain, path, SESSION_FREQUENCY_HZ, preamble)
     });
     let mut control = session.control();
     match started {
@@ -182,22 +185,6 @@ fn start(
             None
         }
     }
-}
-
-/// `root/file_name`, or - if that's taken, e.g. by the previous session
-/// recorded under the same name - `root/<stem>_2.mapping`, `_3`, ...
-fn unused_path(root: &Path, file_name: &str) -> PathBuf {
-    let path = root.join(file_name);
-    if !path.exists() {
-        return path;
-    }
-    let stem = file_name
-        .strip_suffix(MAPPING_SESSION_EXTENSION)
-        .unwrap_or(file_name);
-    (2..)
-        .map(|n| root.join(format!("{stem}_{n}{MAPPING_SESSION_EXTENSION}")))
-        .find(|path| !path.exists())
-        .expect("some suffix is free")
 }
 
 #[derive(serde::Serialize)]
@@ -252,7 +239,7 @@ pub fn arm(request: &mut Request, session: &MappingSession) -> ResponseBox {
         Ok(body) => body,
         Err(response) => return response,
     };
-    if let Err(err) = mapping_session::file_name(&body.name) {
+    if let Err(err) = session::file_name(SessionKind::Mapping, &body.name) {
         return bad_request(&err);
     }
     let mut control = session.control();
@@ -260,30 +247,4 @@ pub fn arm(request: &mut Request, session: &MappingSession) -> ResponseBox {
     control.name = body.name.trim().to_string();
     control.error = None;
     json_response(&(), 200)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_taken_name_gets_a_suffix() {
-        let root = std::env::temp_dir().join(format!(
-            "aurorus_mapping_session_api_tests_{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        assert_eq!(unused_path(&root, "lap.mapping"), root.join("lap.mapping"));
-        std::fs::write(root.join("lap.mapping"), b"").unwrap();
-        assert_eq!(
-            unused_path(&root, "lap.mapping"),
-            root.join("lap_2.mapping")
-        );
-        std::fs::write(root.join("lap_2.mapping"), b"").unwrap();
-        assert_eq!(
-            unused_path(&root, "lap.mapping"),
-            root.join("lap_3.mapping")
-        );
-        std::fs::remove_dir_all(&root).unwrap();
-    }
 }

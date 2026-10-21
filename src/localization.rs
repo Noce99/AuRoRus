@@ -4,13 +4,14 @@
 //! [`crate::topics::Odometry`] - the motion input the localization and
 //! mapping algorithms here build on, starting with [`Slam`], which corrects
 //! it against lidar scans while building a map. [`VehiclePose`] then puts
-//! together the best pose available, for drawing. [`mapping_session`]
-//! records what SLAM maps from, to build the map again offline.
+//! together the best pose available, for drawing. [`session`] records what
+//! SLAM maps from and what localization runs from, to run them again
+//! offline.
 
 mod dead_reckoning;
-pub mod mapping_session;
 mod particle_filter;
 pub(crate) mod pose_source;
+pub mod session;
 mod slam;
 mod vehicle_pose;
 

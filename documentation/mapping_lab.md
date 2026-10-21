@@ -42,7 +42,8 @@ finds `mapping_sessions/`, `maps/` and `config/`.
 **Session (left).** Pick a session and **Load** it. Loading another one
 forgets every run of the current one. The details show how long it is, how
 many scans it has, whether it was recorded on the car or in simulation (with
-ground truth), and the map it was recorded on.
+ground truth), and the map it was recorded on - the copy embedded in the
+session, so it's there even if the map was regenerated or deleted since.
 
 **Parameters (right).** The draft: the parameters the next run is built
 with, as sliders - the same 35 as `web_gui`'s Mapping panel. It starts as
@@ -148,7 +149,7 @@ wrong, so look at it too.
 
 ```mermaid
 flowchart LR
-    F["mapping_sessions/*.mapping"] -- "MappingSession::load" --> L["Lab\n(session, draft, runs)"]
+    F["mapping_sessions/*.mapping"] -- "Session::load" --> L["Lab\n(session, draft, runs)"]
     L -- "queued runs" --> W["Worker threads\nslam::rebuild"]
     W -- "maps + scores" --> L
     L -- "finished sweeps" --> C["mapping_sessions/*.sweeps/*.csv"]
