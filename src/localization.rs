@@ -6,9 +6,11 @@
 //! it against lidar scans while building a map. [`VehiclePose`] then puts
 //! together the best pose available, for drawing. [`session`] records what
 //! SLAM maps from and what localization runs from, to run them again
-//! offline.
+//! offline - [`evaluation`] localizes a session again with any algorithm and
+//! scores it.
 
 mod dead_reckoning;
+pub mod evaluation;
 mod particle_filter;
 pub(crate) mod pose_source;
 pub mod session;
@@ -16,6 +18,7 @@ mod slam;
 mod vehicle_pose;
 
 pub use dead_reckoning::{DeadReckoning, DeadReckoningConfig, Integration};
+pub use evaluation::{Evaluation, OdometrySource, Pipeline, evaluate};
 pub use particle_filter::{
     ParticleFilterConfig, save_parameters as save_particle_filter_parameters,
     saved_values as saved_particle_filter_values,

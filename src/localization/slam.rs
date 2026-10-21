@@ -24,6 +24,7 @@
 //! backend is doing on [`LOCALIZATION_STATUS_TOPIC_NAME`].
 
 mod correlation_grid;
+pub(super) mod localize;
 mod localizer;
 mod map_saver;
 mod mapper;

@@ -655,6 +655,40 @@ panel warns, before and while recording, and the session records it. Drive
 by hand or on the ground truth (`pose_source` 1) instead. On the car there
 is no ground truth, so no warning.
 
+### Localizing a session offline
+
+`aurorus::localization::evaluate(&session, &map, &pipeline, progress)`
+localizes a session again (see `src/localization/evaluation.rs` and
+`src/localization/slam/localize.rs`). A `Pipeline` is an odometry - the
+recorded one, or the recorded IMU integrated again with a
+`DeadReckoningConfig` - and an algorithm, scan matching or the particle
+filter, with their parameters, or none to score odometry alone.
+
+- **The same code as live.** Odometry and scans are replayed in the order
+  they were written through `slam.rs`'s `State`, as a rebuild does, and
+  odometry is integrated by the same `step` as `DeadReckoning`'s.
+- **The pose a driving algorithm reads** is what's kept: odometry composed
+  onto the latest `map_to_odom`, at every odometry sample. A correction
+  only applies once its scan would have been processed live, its
+  processing time after the scan was taken, so a slower algorithm lags.
+- **The start:** odometry's frame is placed from the true pose at the first
+  odometry sample in simulation; on the car, where live localization had it
+  when recording started, else at the session's anchor.
+- **Scoring** (`evaluation::{Laps, errors, score}`) is against a reference
+  trajectory - the ground truth in simulation - placed on a race line to
+  count laps: lap 0 runs up to the first forward crossing of the
+  start/finish line. At every pose: the position error, split along and
+  across the reference's heading, the heading error, and the drift (how
+  wrong the motion over the last 5 m driven is, the score that tells
+  odometry settings apart). Per lap and for the whole drive: RMS, 95th
+  percentile and worst error, time lost (0.5 m off or more), and the time
+  per scan against the lidar's period.
+
+On a 75 s simulated session (3,002 scans, about 2.6 laps of Vienna's
+qualifying track), in a release build: odometry alone 0.13 m RMS, scan
+matching 0.015 m at 16 ms a scan (localized in 49 s), the particle filter
+0.05 m at 2.3 ms a scan (7 s).
+
 ## What's next
 
 - **Drift in tight turns.** On a recorded 62 s simulated drive on

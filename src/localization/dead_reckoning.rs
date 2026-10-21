@@ -219,6 +219,43 @@ impl Executor for DeadReckoning {
     }
 }
 
+/// Dead reckoning offline: every reading of `imu` (written at its
+/// timestamp, in microseconds) integrated as [`DeadReckoning`] does live -
+/// one [`Odometry`] per reading, at the reading's timestamp - starting from
+/// `seed`, the odometry when the first reading was written. As live, a
+/// reading after a gap longer than [`MAX_INTEGRATION_GAP`] only restarts the
+/// clock, and so does the first.
+pub(crate) fn integrate_offline(
+    imu: &[(u64, ImuReading)],
+    seed: Odometry,
+    config: &DeadReckoningConfig,
+    rear_axle_to_cg_m: f64,
+) -> Vec<(u64, Odometry)> {
+    let max_gap_us = MAX_INTEGRATION_GAP.as_micros() as u64;
+    let mut odometry = seed;
+    let mut last_t_us: Option<u64> = None;
+    imu.iter()
+        .map(|(t_us, reading)| {
+            if let Some(previous) = last_t_us {
+                let dt_us = t_us.saturating_sub(previous);
+                if dt_us > 0 && dt_us <= max_gap_us {
+                    odometry = step(
+                        odometry,
+                        reading,
+                        dt_us as f64 / 1e6,
+                        config,
+                        rear_axle_to_cg_m,
+                    );
+                }
+            }
+            last_t_us = Some(*t_us);
+            odometry.ax_mps2 = reading.ax_mps2;
+            odometry.ay_mps2 = reading.ay_mps2;
+            (*t_us, odometry)
+        })
+        .collect()
+}
+
 /// `odometry` advanced by one `dt_s` interval under `reading`'s wheel speed
 /// and yaw rate (held constant across it), its covariance propagated as
 /// `P' = F P F^T + G Q G^T` - `F` the pose Jacobian, `G` the Jacobian with
@@ -453,6 +490,34 @@ mod tests {
         (0..steps).fold(Odometry::default(), |odometry, _| {
             step(odometry, &reading, dt_s, config, 0.0)
         })
+    }
+
+    #[test]
+    fn offline_integration_steps_between_readings_and_restarts_after_a_gap() {
+        let seed = Odometry {
+            x_m: 1.0,
+            reset_count: 3,
+            ..Odometry::default()
+        };
+        // 1 m/s straight: 10 ms steps, then a 1 s gap, then one more step.
+        let imu: Vec<_> = [0, 10_000, 20_000, 1_020_000, 1_030_000]
+            .map(|t| (t, reading(1.0, 0.0)))
+            .to_vec();
+        let odometry = integrate_offline(&imu, seed, &config(Integration::Euler), 0.0);
+        let x: Vec<_> = odometry.iter().map(|(t, o)| (*t, o.x_m)).collect();
+        let expected = [
+            (0, 1.0),
+            (10_000, 1.01),
+            (20_000, 1.02),
+            // The gap only restarts the clock.
+            (1_020_000, 1.02),
+            (1_030_000, 1.03),
+        ];
+        for ((t, x), (expected_t, expected_x)) in x.iter().zip(expected) {
+            assert_eq!(*t, expected_t);
+            assert!((x - expected_x).abs() < 1e-12, "{x} at {t}");
+        }
+        assert!(odometry.iter().all(|(_, o)| o.reset_count == 3));
     }
 
     #[test]
