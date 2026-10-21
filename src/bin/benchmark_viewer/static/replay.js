@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------
 // benchmark_viewer's frontend, part 2: replaying the selected runs on the
 // map - one track at a time (runs on the exact same map files), each run
-// a ghost vehicle in its color at the playback time, with its trail - and
+// a ghost vehicle in its color at the playback time, with its trail, and
+// where localization believed it was, for runs it ran in - and
 // the transport bar driving the shared `PlaybackClock` (/playback_clock.js).
 //
 // Nothing here fetches drawings from a server: every frame's shapes are
@@ -105,6 +106,21 @@ function prepareRun(run, { trajectory, lines }) {
   const t = trajectory.t_s;
   const trail = [];
   for (let i = 0; i < t.length; i += TRAIL_FULL_STRIDE) trail.push([trajectory.x_m[i], trajectory.y_m[i]]);
+  // Localization's estimated path, broken where it had no estimate.
+  const estimateTrails = [];
+  if (TrackMath.hasEstimate(trajectory)) {
+    let current = null;
+    for (let i = 0; i < t.length; i += TRAIL_FULL_STRIDE) {
+      const x = trajectory.est_x_m[i];
+      const y = trajectory.est_y_m[i];
+      if (x == null || y == null) {
+        current = null;
+        continue;
+      }
+      if (!current) estimateTrails.push((current = []));
+      current.push([x, y]);
+    }
+  }
   // The car's geometry since it was recorded; before, the model's own
   // axle distances were among its parameters.
   const { parameters: params, geometry, body_length_m: length } = run.summary.vehicle;
@@ -117,6 +133,7 @@ function prepareRun(run, { trajectory, lines }) {
     starts: TrackMath.lapStarts(trajectory),
     end: t.length ? t[t.length - 1] : 0,
     trail,
+    estimateTrails,
     axles: { front: front ?? 0.4 * length, rear: rear ?? 0.4 * length },
   };
 }
@@ -263,6 +280,30 @@ function layersAt() {
           front_axle_m: run.axles.front,
           rear_axle_m: run.axles.rear,
           color: hexColor(run.color),
+        },
+      });
+    }
+    const estimate = layerSwitches.estimates ? TrackMath.estimateAt(run.trajectory, t) : null;
+    if (layerSwitches.estimates) {
+      // Thinner and fainter than the true path, so the gap between the two
+      // is what stands out.
+      for (const points of run.estimateTrails) {
+        runShapes.push({ polyline: { points, closed: false, width_px: 1, color: hexColor(run.color, 200) } });
+      }
+    }
+    if (estimate && layerSwitches.ghosts) {
+      runShapes.push({
+        vehicle: {
+          x_m: estimate.x,
+          y_m: estimate.y,
+          heading_rad: estimate.heading,
+          speed_mps: 0,
+          steering_rad: 0,
+          length_m: run.summary.vehicle.body_length_m,
+          width_m: run.summary.vehicle.body_width_m,
+          front_axle_m: run.axles.front,
+          rear_axle_m: run.axles.rear,
+          color: hexColor(run.color, 90),
         },
       });
     }

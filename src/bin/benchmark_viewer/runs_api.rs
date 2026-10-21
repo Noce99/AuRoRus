@@ -107,7 +107,8 @@ pub fn route(root: &Path, rest: &str) -> ResponseBox {
 }
 
 /// A trajectory column by column - about half the size of one object per
-/// row. The localization estimate's columns are left out when it never ran.
+/// row. The localization estimate's columns, and its timing and quality,
+/// are left out when it never ran.
 #[derive(Debug, Default, PartialEq, serde::Serialize)]
 struct Columns {
     t_s: Vec<f64>,
@@ -126,6 +127,10 @@ struct Columns {
     est_y_m: Option<Vec<Option<f64>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     est_heading_rad: Option<Vec<Option<f64>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    loc_ms: Option<Vec<Option<f64>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    loc_quality: Option<Vec<Option<f64>>>,
 }
 
 fn columns(rows: &[aurorus::benchmark::TrajectoryRow]) -> Columns {
@@ -146,6 +151,10 @@ fn columns(rows: &[aurorus::benchmark::TrajectoryRow]) -> Columns {
         columns.est_x_m = Some(rows.iter().map(|row| row.est_x_m).collect());
         columns.est_y_m = Some(rows.iter().map(|row| row.est_y_m).collect());
         columns.est_heading_rad = Some(rows.iter().map(|row| row.est_heading_rad).collect());
+    }
+    if rows.iter().any(|row| row.loc_ms.is_some()) {
+        columns.loc_ms = Some(rows.iter().map(|row| row.loc_ms).collect());
+        columns.loc_quality = Some(rows.iter().map(|row| row.loc_quality).collect());
     }
     columns
 }
@@ -272,6 +281,7 @@ mod tests {
                 limits: BTreeMap::new(),
                 geometry: None,
             },
+            localization: None,
             results: None,
             laps: Vec::new(),
         }
@@ -292,6 +302,8 @@ mod tests {
             est_x_m: estimate,
             est_y_m: estimate,
             est_heading_rad: estimate,
+            loc_ms: estimate.map(|_| 2.0),
+            loc_quality: estimate.map(|_| 0.05),
         }
     }
 
@@ -333,8 +345,13 @@ mod tests {
         let json = serde_json::to_value(&without).unwrap();
         assert!(json.get("est_x_m").is_none());
 
+        assert_eq!(without.loc_ms, None);
+        assert!(json.get("loc_ms").is_none());
+
         let with = columns(&[row(0.0, None), row(0.025, Some(1.0))]);
         assert_eq!(with.est_x_m, Some(vec![None, Some(1.0)]));
+        assert_eq!(with.loc_ms, Some(vec![None, Some(2.0)]));
+        assert_eq!(with.loc_quality, Some(vec![None, Some(0.05)]));
     }
 
     #[test]

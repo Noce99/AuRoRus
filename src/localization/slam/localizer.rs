@@ -91,6 +91,12 @@ impl Localizer {
         self.map_to_odom
     }
 
+    /// Moves the `odom` frame's origin to `map_to_odom` - restarting from a
+    /// pose given on the map. The pose follows on the next scan.
+    pub fn set_map_to_odom(&mut self, map_to_odom: Pose2) {
+        self.map_to_odom = map_to_odom;
+    }
+
     /// Places `scan` on the map: odometry's pose, moved by the current
     /// correction, then matched against the walls. A trusted match updates
     /// the correction.

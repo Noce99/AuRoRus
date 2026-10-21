@@ -16,7 +16,7 @@ pub mod trajectory;
 
 pub use layout::{ScanOutcome, ScannedRun, scan, scan_all};
 pub use summary::{
-    AlgorithmRecord, BenchmarkSummary, CodeVersion, FORMAT_VERSION, LapResult, MapRecord,
-    RaceLineRecord, Results, RunStatus, VehicleRecord,
+    AlgorithmRecord, BenchmarkSummary, CodeVersion, FORMAT_VERSION, LapResult, LocalizationRecord,
+    MapRecord, RaceLineRecord, Results, RunStatus, VehicleRecord,
 };
 pub use trajectory::{TrajectoryRow, TrajectoryWriter, read_trajectory};

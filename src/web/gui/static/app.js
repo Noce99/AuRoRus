@@ -428,6 +428,23 @@ const localizationStateEl = document.getElementById("localization-state");
 const localizationDetailsEl = document.getElementById("localization-details");
 const localizationStartBtn = document.getElementById("localization-start-btn");
 const localizationPauseBtn = document.getElementById("localization-pause-btn");
+const localizationAlgorithmEl = document.getElementById("localization-algorithm");
+const localizationSetPoseBtn = document.getElementById("localization-set-pose-btn");
+const localizationRelocalizeBtn = document.getElementById("localization-relocalize-btn");
+const localizationErrorEl = document.getElementById("localization-error");
+const particleFilterSettingsEl = document.getElementById("particle-filter-settings");
+
+const syncParticleFilterParameters = createParameterPanel({
+  containerEl: document.getElementById("particle-filter-parameters"),
+  saveEl: document.getElementById("particle-filter-save"),
+  setUrl: "/api/particle_filter_parameter",
+  saveUrl: "/api/particle_filter_parameters_save",
+  loadUrl: "/api/particle_filter_parameters_load",
+});
+
+/** The algorithm this tab last picked, until `localization_status`
+ *  reports it - so a poll in between doesn't flip the selector back. */
+let pendingLocalizationAlgorithm = null;
 
 for (const button of [...slamButtons, localizationStartBtn, localizationPauseBtn]) {
   button.addEventListener("click", () => {
@@ -440,6 +457,46 @@ for (const button of [...slamButtons, localizationStartBtn, localizationPauseBtn
       .catch((err) => console.error(err));
   });
 }
+
+/** Shows why a localization request was refused, or clears it given null. */
+function showLocalizationError(message) {
+  localizationErrorEl.textContent = message ?? "";
+}
+
+// The algorithm only changes while not localizing: the server refuses a
+// switch (409) while another one runs.
+localizationAlgorithmEl.addEventListener("change", () => {
+  const algorithm = localizationAlgorithmEl.value;
+  pendingLocalizationAlgorithm = algorithm;
+  showLocalizationError(null);
+  particleFilterSettingsEl.hidden = algorithm !== "particle_filter";
+  fetchJSON("/api/localization_algorithm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ algorithm }),
+  })
+    .catch((err) => {
+      pendingLocalizationAlgorithm = null;
+      showLocalizationError(`Couldn't switch: ${err.message}`);
+    })
+    .finally(() => pollSlam().catch((err) => console.error(err)));
+});
+
+localizationRelocalizeBtn.addEventListener("click", () => {
+  showLocalizationError(null);
+  fetchJSON("/api/localization_relocalize", { method: "POST" })
+    .then(() => pollSlam())
+    .catch((err) => showLocalizationError(`Couldn't relocalize: ${err.message}`));
+});
+
+localizationSetPoseBtn.addEventListener("click", () => {
+  if (placePose.stage !== "idle") {
+    disarmPlacePose();
+    return;
+  }
+  showLocalizationError(null);
+  armPlacePose(localizationSetPoseBtn, "/api/localization_set_pose");
+});
 
 // SLAM saves on its own thread: the POST only files the request, and the
 // outcome shows up on `slam_status` under the returned request number.
@@ -548,7 +605,10 @@ function showSlamSaveOutcome(outcome) {
 // actually in - whoever asked for it, this tab or another - and how far the
 // map has got.
 async function pollSlam() {
-  const response = await fetchJSON("/api/slam");
+  const [response, localization] = await Promise.all([
+    fetchJSON("/api/slam"),
+    fetchJSON("/api/localization"),
+  ]);
   const status = response.value;
   const stale = response.age_ms === null || response.age_ms > SLAM_STATUS_STALE_MS;
 
@@ -557,7 +617,7 @@ async function pollSlam() {
   for (const button of slamButtons) {
     button.disabled = !stale && button.dataset.state === status.state;
   }
-  renderLocalization(status, stale);
+  renderLocalization(status, stale, localization.value);
   syncSlamParameters("slam", stale ? [] : status.parameters);
 
   if (!stale) showSlamSaveOutcome(status.last_save);
@@ -585,13 +645,35 @@ async function pollSlam() {
   slamDetailsEl.textContent = parts.join(" ") + ".";
 }
 
-// Localization panel - the localization half of `slam_status`. Start is
-// only offered with a map selected, and never over a map SLAM is building:
-// that one has to be cleared or saved first.
-function renderLocalization(status, stale) {
+const LOCALIZATION_ALGORITHM_LABELS = {
+  scan_matching: "Scan matching",
+  particle_filter: "Particle filter",
+};
+
+// Localization panel - the localization half of `slam_status`, and
+// `localization_status` for the algorithm. Start is only offered with a map
+// selected, and never over a map SLAM is building: that one has to be
+// cleared or saved first.
+function renderLocalization(status, stale, localization) {
   const localizing = !stale && status.state === "localizing";
   const paused = !stale && status.state === "localization_paused";
   const hasSlamMap = !stale && status.scans > 0;
+
+  // The selector shows the algorithm running (or that will), once any
+  // switch this tab asked for has landed.
+  if (pendingLocalizationAlgorithm === localization.algorithm) pendingLocalizationAlgorithm = null;
+  if (pendingLocalizationAlgorithm === null && document.activeElement !== localizationAlgorithmEl) {
+    localizationAlgorithmEl.value = localization.algorithm;
+  }
+  localizationAlgorithmEl.disabled = localizing;
+  localizationAlgorithmEl.title = localizing
+    ? "Pause localization to switch algorithm"
+    : "The algorithm that localizes the car on the selected map";
+  const particleFilter = localizationAlgorithmEl.value === "particle_filter";
+  particleFilterSettingsEl.hidden = !particleFilter;
+  syncParticleFilterParameters("particle_filter", stale ? [] : localization.particle_filter_parameters);
+  localizationSetPoseBtn.disabled = !localizing;
+  localizationRelocalizeBtn.disabled = !(localizing && localization.active && localization.algorithm === "particle_filter");
 
   localizationStateEl.className = stale ? "stale" : status.state;
   localizationStateEl.textContent = stale
@@ -614,14 +696,22 @@ function renderLocalization(status, stale) {
   } else if ((localizing || paused) && status.pose !== null) {
     const [x, y, heading] = status.pose;
     const parts = [
-      `On ${liveMapName} at (${x.toFixed(2)}, ${y.toFixed(2)}) m,`,
+      `${LOCALIZATION_ALGORITHM_LABELS[localization.algorithm]} on ${liveMapName}`,
+      `at (${x.toFixed(2)}, ${y.toFixed(2)}) m,`,
       `heading ${((heading * 180) / Math.PI).toFixed(1)}°.`,
     ];
-    if (status.last_match_response !== null) {
+    if (localization.algorithm === "particle_filter" && localization.quality !== null) {
+      if (localization.relocalizing) parts.push("Relocalizing...");
+      parts.push(
+        `Spread ${(localization.quality * 100).toFixed(1)} cm,`,
+        `${((localization.particle_spread_rad * 180) / Math.PI).toFixed(1)}°;`,
+        `${Math.round(localization.effective_sample_size)} of ${localization.particles} particles effective`
+      );
+    } else if (status.last_match_response !== null) {
       parts.push(`Last match: ${(status.last_match_response * 100).toFixed(0)}%`);
     }
-    if (status.last_process_ms !== null) {
-      parts.push(`in ${status.last_process_ms.toFixed(1)} ms.`);
+    if (localization.last_process_ms !== null) {
+      parts.push(`in ${localization.last_process_ms.toFixed(1)} ms.`);
     }
     localizationDetailsEl.textContent = parts.join(" ");
   } else if (localizing || paused) {
@@ -2108,8 +2198,16 @@ const PLACE_POSE_MIN_ARROW_PX = 5;
 const PLACE_POSE_COLOR = "#ff8ae8";
 
 /** `"idle"`, `"position"` (waiting for the first click) or `"heading"`
- *  (waiting for the second), plus the world points picked so far. */
-const placePose = { stage: "idle", start: null, current: null };
+ *  (waiting for the second), plus the world points picked so far - and
+ *  the button that armed the tool and the endpoint the pose goes to: the
+ *  vehicle's placement, or the Localization panel's Set pose. */
+const placePose = {
+  stage: "idle",
+  start: null,
+  current: null,
+  button: placePoseBtn,
+  url: "/api/place_at_start",
+};
 
 const placePoseTool = {
   cursor: "crosshair",
@@ -2128,12 +2226,16 @@ const placePoseTool = {
     // Same axes as the `vehicle` painter, which rotates by the heading
     // straight in screen space.
     const pose = { x_m: start.x, y_m: start.y, heading_rad: Math.atan2(world.y - start.y, world.x - start.x) };
+    const { url } = placePose;
     disarmPlacePose();
-    fetch("/api/place_at_start", {
+    fetchJSON(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(pose),
-    }).catch((err) => console.error(err));
+    }).catch((err) => {
+      if (url === "/api/localization_set_pose") showLocalizationError(`Couldn't set the pose: ${err.message}`);
+      else console.error(err);
+    });
   },
 
   onMove(world) {
@@ -2184,7 +2286,7 @@ function resetPlacePose() {
   placePose.stage = "idle";
   placePose.start = null;
   placePose.current = null;
-  placePoseBtn.classList.remove("active");
+  placePose.button.classList.remove("active");
 }
 
 function disarmPlacePose() {
@@ -2192,16 +2294,23 @@ function disarmPlacePose() {
   MapView.setPointerTool(null);
 }
 
+/** Arms the pose tool from `button`, sending the pose picked to `url`. */
+function armPlacePose(button, url) {
+  resetStartLine();
+  showMapToolsStatus(null);
+  placePose.stage = "position";
+  placePose.button = button;
+  placePose.url = url;
+  button.classList.add("active");
+  MapView.setPointerTool(placePoseTool);
+}
+
 placePoseBtn.addEventListener("click", () => {
   if (placePose.stage !== "idle") {
     disarmPlacePose();
     return;
   }
-  resetStartLine();
-  showMapToolsStatus(null);
-  placePose.stage = "position";
-  placePoseBtn.classList.add("active");
-  MapView.setPointerTool(placePoseTool);
+  armPlacePose(placePoseBtn, "/api/place_at_start");
 });
 
 // ---------------------------------------------------------------------

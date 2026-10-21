@@ -5,29 +5,31 @@
 //! two share.
 
 use super::benchmark_api::{Benchmark, Plan, Progress, RunOutcome, RunSpec, Stage};
+use super::localization_api::write_algorithm;
 use super::opponents_api::{self, line_up};
-use super::slam_api::stop_mapping;
+use super::slam_api::{stop_mapping, write_slam_command};
 use super::{BenchmarkSetup, WebGuiConfig};
 use crate::benchmark::layout::{
     SUMMARY_FILE_NAME, TRAJECTORY_FILE_NAME, copy_track, create_run_folder,
 };
 use crate::benchmark::{
-    AlgorithmRecord, BenchmarkSummary, CodeVersion, FORMAT_VERSION, LapResult, MapRecord,
-    RaceLineRecord, Results, RunStatus, TrajectoryRow, TrajectoryWriter, VehicleRecord,
+    AlgorithmRecord, BenchmarkSummary, CodeVersion, FORMAT_VERSION, LapResult, LocalizationRecord,
+    MapRecord, RaceLineRecord, Results, RunStatus, TrajectoryRow, TrajectoryWriter, VehicleRecord,
 };
 use crate::environment::{CENTERLINE_FILE_NAME, map_folder, race_lines};
 use crate::geometry::{Line, Pose};
-use crate::localization::pose_source::localization_pose;
+use crate::localization::{self, pose_source::localization_pose};
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_ALGORITHM_STATUS_TOPIC_NAME,
     AUTONOMOUS_VESC_COMMAND_TOPIC_NAME, ActuatorLimits, AlgorithmParameter,
     AutonomousAlgorithmSelection, AutonomousAlgorithmStatus, HUMAN_VESC_COMMAND_TOPIC_NAME,
-    JOYSTICK_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LapTelemetry,
-    MAP_SELECTION_TOPIC_NAME, MAP_TOPIC_NAME, MapSelection, OpponentRequest,
-    RACE_LINE_SELECTION_TOPIC_NAME, RACE_LINE_TOPIC_NAME, RaceLineSelection, Racer, SelectedMap,
-    SelectedRaceLine, VEHICLE_MODEL_SELECTION_TOPIC_NAME, VEHICLE_MODEL_STATUS_TOPIC_NAME,
-    VEHICLE_STATUS_TOPIC_NAME, VehicleGeometry, VehicleModelSelection, VehicleModelStatus,
-    VehicleStatus, VehicleTopics, VescCommand, now_ms,
+    JOYSTICK_VESC_COMMAND_TOPIC_NAME, LAP_TELEMETRY_TOPIC_NAME, LOCALIZATION_STATUS_TOPIC_NAME,
+    LapTelemetry, LocalizationAlgorithm, LocalizationStatus, MAP_SELECTION_TOPIC_NAME,
+    MAP_TOPIC_NAME, MapSelection, OpponentRequest, RACE_LINE_SELECTION_TOPIC_NAME,
+    RACE_LINE_TOPIC_NAME, RaceLineSelection, Racer, SLAM_STATUS_TOPIC_NAME, SelectedMap,
+    SelectedRaceLine, SlamState, SlamStatus, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
+    VEHICLE_MODEL_STATUS_TOPIC_NAME, VEHICLE_STATUS_TOPIC_NAME, VehicleGeometry,
+    VehicleModelSelection, VehicleModelStatus, VehicleStatus, VehicleTopics, VescCommand, now_ms,
 };
 use crate::{Captain, DebugRecorder, DebugState, Stamped, Ticker, autonomous_control, simulation};
 use std::collections::BTreeMap;
@@ -136,6 +138,11 @@ fn run_plan(ctx: &Orchestrator, plan: &Plan) {
             break;
         }
     }
+    // Localization started for the benchmark stays on the last run's map,
+    // paused.
+    if plan.localization.is_some() {
+        write_slam_command(ctx.captain, ctx.id, SlamState::LocalizationPaused);
+    }
 }
 
 /// One run, from the soft reset to its files, filling in `outcome`. An
@@ -150,6 +157,13 @@ fn run_one(
     let folder = map_folder(ctx.maps_root, &spec.map)
         .ok_or_else(|| Halt::Failed(format!("invalid map name {:?}", spec.map)))?;
     soft_reset(ctx, plan, spec, &folder)?;
+    let localization = match plan.localization {
+        Some(algorithm) => {
+            start_localization(ctx, algorithm)?;
+            Some(localization_record(ctx, algorithm))
+        }
+        None => None,
+    };
 
     // What's about to run, exactly.
     let centerline = race_lines::read(&folder, CENTERLINE_FILE_NAME)
@@ -204,6 +218,7 @@ fn run_one(
         },
         algorithm,
         vehicle,
+        localization,
         results: None,
         laps: Vec::new(),
     };
@@ -331,13 +346,20 @@ fn drive(
     let go_at = Instant::now() + Duration::from_millis(go_at_ms.saturating_sub(now_ms()));
     // Held on the grid until the "Go!" whatever it commands.
     select_algorithm(ctx, &plan.algorithm, true);
+    let ego = VehicleTopics::ego();
+    // Lining up resets odometry, and with it localization: it restarts from
+    // the grid, before the "Go!" if it can.
+    if plan.localization.is_some() {
+        wait_until(ctx, "localization to restart on the grid", || {
+            localization_pose(captain, &ego).is_ok()
+        })?;
+    }
     ctx.benchmark.set_progress(|progress| {
         progress.stage = Stage::Countdown;
         progress.go_at_ms = Some(go_at_ms);
         progress.lap_timeout_s = Some(lap_timeout_s);
     });
 
-    let ego = VehicleTopics::ego();
     // Laps are scored against the simulator's ground truth, which a real car
     // (`web_gui` on a car) doesn't have.
     let status_topic = captain
@@ -436,6 +458,7 @@ fn drive(
             .map(|topic| topic.read().into_value())
             .unwrap_or_default();
         let estimate = localization_pose(captain, &ego).ok();
+        let localization = localization_status(captain).filter(|status| status.active);
         let row = TrajectoryRow {
             t_s: elapsed_s,
             lap,
@@ -450,12 +473,74 @@ fn drive(
             est_x_m: estimate.map(|pose| pose.x_m),
             est_y_m: estimate.map(|pose| pose.y_m),
             est_heading_rad: estimate.map(|pose| pose.heading_rad),
+            loc_ms: localization
+                .as_ref()
+                .and_then(|status| status.last_process_ms),
+            loc_quality: localization.as_ref().and_then(|status| status.quality),
         };
         if let Err(err) = trajectory.write(&row) {
             return Err(Halt::Failed(format!(
                 "couldn't write the trajectory: {err}"
             )));
         }
+    }
+}
+
+/// Starts localizing on the map just loaded with `algorithm`: anything SLAM
+/// was doing is stopped first (localizing is refused over a map it's
+/// building), then localization is started and confirmed on its topics.
+fn start_localization(ctx: &Orchestrator, algorithm: LocalizationAlgorithm) -> Result<(), Halt> {
+    let captain = ctx.captain;
+    let slam_state = || {
+        captain
+            .try_topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME)
+            .map(|topic| topic.read().state)
+    };
+    write_slam_command(captain, ctx.id, SlamState::Off);
+    wait_until(ctx, "SLAM to stop", || slam_state() == Some(SlamState::Off))?;
+    write_algorithm(captain, ctx.id, algorithm)
+        .map_err(|_| Halt::Failed("couldn't pick the localization algorithm".to_string()))?;
+    write_slam_command(captain, ctx.id, SlamState::Localizing);
+    wait_until(ctx, "localization to start", || {
+        slam_state() == Some(SlamState::Localizing)
+            && localization_status(captain)
+                .is_some_and(|status| status.active && status.algorithm == algorithm)
+    })
+}
+
+/// What the localization backend reports, if anything does.
+fn localization_status(captain: &Captain) -> Option<LocalizationStatus> {
+    captain
+        .try_topic::<LocalizationStatus>(LOCALIZATION_STATUS_TOPIC_NAME)
+        .map(|topic| topic.read().into_value())
+}
+
+/// `algorithm`'s parameters it's running with now: the particle filter's,
+/// or SLAM's for scan matching.
+fn localization_record(ctx: &Orchestrator, algorithm: LocalizationAlgorithm) -> LocalizationRecord {
+    let (parameters, saved) = match algorithm {
+        LocalizationAlgorithm::ParticleFilter => {
+            let parameters = localization_status(ctx.captain)
+                .map(|status| status.particle_filter_parameters)
+                .unwrap_or_default();
+            let saved = localization::saved_particle_filter_values(&parameters);
+            (parameters, saved)
+        }
+        LocalizationAlgorithm::ScanMatching => {
+            let parameters = ctx
+                .captain
+                .try_topic::<SlamStatus>(SLAM_STATUS_TOPIC_NAME)
+                .map(|topic| topic.read().into_value().parameters)
+                .unwrap_or_default();
+            let saved = localization::saved_slam_values(&parameters);
+            (parameters, saved)
+        }
+    };
+    let parameters = values(&parameters);
+    LocalizationRecord {
+        algorithm: algorithm.api_str().to_string(),
+        saved_to_config: matches_saved(&parameters, saved),
+        parameters,
     }
 }
 

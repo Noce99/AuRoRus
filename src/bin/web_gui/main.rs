@@ -2,7 +2,9 @@ use aurorus::actuators::{Vesc, VescConfig};
 use aurorus::autonomous_control::{self, AutonomousControlsHandler};
 use aurorus::calibration::CarCalibration;
 use aurorus::environment::{MapServer, MapServerConfig};
-use aurorus::localization::{DeadReckoning, DeadReckoningConfig, Slam, SlamConfig};
+use aurorus::localization::{
+    DeadReckoning, DeadReckoningConfig, ParticleFilterConfig, Slam, SlamConfig,
+};
 use aurorus::perception::{UbmDetector, UbmDetectorConfig};
 use aurorus::planning::{Planner, PlanningConfig};
 use aurorus::sensors::{HokuyoLidar, HokuyoLidarConfig, Joystick, JoystickConfig, LidarMounting};
@@ -77,6 +79,9 @@ fn main() {
             .unwrap_or_else(|_| DeadReckoningConfig::default());
     let slam_config = aurorus::config::load(&config.config_dir.join("localization/slam.toml"))
         .unwrap_or_else(|_| SlamConfig::default());
+    let particle_filter_config =
+        aurorus::config::load(&config.config_dir.join("localization/particle_filter.toml"))
+            .unwrap_or_else(|_| ParticleFilterConfig::default());
     let vesc_config = aurorus::config::load(&config.config_dir.join("actuators/vesc.toml"))
         .unwrap_or_else(|_| VescConfig::default());
     let vehicle_config = aurorus::config::load(&config.config_dir.join("simulation/vehicle.toml"))
@@ -136,7 +141,11 @@ fn main() {
         runner.add_executor(SimulatedImu::new("SimulatedImu", simulated_imu_config).boxed());
     }
     runner.add_executor(DeadReckoning::new("DeadReckoning", dead_reckoning_config).boxed());
-    runner.add_executor(Slam::new("Slam", config.maps_root, slam_config).boxed());
+    runner.add_executor(
+        Slam::new("Slam", config.maps_root, slam_config)
+            .with_particle_filter(particle_filter_config)
+            .boxed(),
+    );
     runner.add_executor(Planner::new("Planner", planning_config).boxed());
     runner.add_executor(UbmDetector::new("UbmDetector", detector_config).boxed());
     // Opponents copy the ego vehicle's configs - see `OpponentsManager`.

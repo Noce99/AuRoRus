@@ -328,6 +328,7 @@ input[type="date"] {
 /* ---------- compare & parameters panels ---------- */
 
 #lap-table-wrap,
+#loc-table-wrap,
 #param-table-wrap {
   overflow-x: auto;
 }
@@ -532,7 +533,8 @@ input[type="date"] {
   padding: 8px 12px 10px;
 }
 
-#reference-row {
+#reference-row,
+#loc-metric-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -540,11 +542,30 @@ input[type="date"] {
   color: #9aa4b2;
 }
 
-#reference-row[hidden] {
+#reference-row[hidden],
+#loc-metric-row[hidden] {
   display: none;
 }
 
 #chart-wrap {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* ---------- localization comparison ---------- */
+
+#loc-compare[hidden] {
+  display: none;
+}
+
+#loc-compare h2 {
+  margin: 14px 0 4px;
+  font-size: 14px;
+}
+
+.lap-table tr.section th {
+  text-align: left;
+  color: #9aa4b2;
+  font-weight: 600;
+  padding-top: 8px;
 }

@@ -28,9 +28,10 @@
 </p>
 
 It covers the whole pipeline in one crate (`aurorus`): a vehicle and LIDAR
-simulator with a random track generator, SLAM mapping and localization,
-race-line planning, opponent detection, a set of autonomous driving
-algorithms, and the drivers for the real car (VESC, Hokuyo LIDAR, joystick).
+simulator with a random track generator, SLAM mapping, localization by scan
+matching or a particle filter, race-line planning, opponent detection, a set
+of autonomous driving algorithms, and the drivers for the real car (VESC,
+Hokuyo LIDAR, joystick).
 Everything is driven from a browser GUI, and the same code runs in simulation
 on a laptop and on the car.
 
@@ -240,7 +241,7 @@ loaded at startup.
 | [Autonomous algorithms](documentation/autonomous_algorithms.md) | How driving algorithms are structured, selected and tuned live, and how to add one |
 | [Tutorials](tutorials/README.md) | Writing an autonomous algorithm from an empty file, step by step: a gap follower and a pure pursuit |
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
-| [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map |
+| [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map, by scan matching or with a particle filter |
 | [Mapping lab](documentation/mapping_lab.md) | Recording mapping sessions and building their maps again offline with other parameters |
 | [Detector](documentation/detector.md) | Finding and tracking an opponent by comparing the LIDAR scan with the map |
 | [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |

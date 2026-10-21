@@ -60,7 +60,8 @@ The Runs panel (in the overview above) lists every run found, and is where
 runs are picked.
 
 **A run's row** shows its algorithm and vehicle model, its status
-(Completed, Timeout or Aborted), its map, race line and date, how many laps
+(Completed, Timeout or Aborted), its map, race line, the localization that
+ran with it if any, and date, how many laps
 it completed with its best lap and total time, and "unsaved parameters" when
 it ran with values tuned in the GUI but not saved to the config files.
 
@@ -77,6 +78,7 @@ with how many runs have each:
 | Algorithm | The algorithm that drove |
 | Vehicle model | The physics model simulated |
 | Race line | The method of the line followed, or "none" for an algorithm that follows no line |
+| Localization | The localization that ran (scan matching, particle filter), or "none" |
 | Status | Completed, Timeout, Aborted |
 | Parameters | Whether the run used the saved config values or values tuned live |
 | Code | The git commit the run was made with, and whether there were uncommitted changes |
@@ -120,8 +122,11 @@ Only runs driven on the same track are shown together.
 ![Layers panel, with the steering chart](images/benchmark_viewer/layers.jpg)
 
 Switches for what the map shows: the map image, the centerline, the race
-lines, the vehicles, their `#n` labels, and how much of each trail is drawn
-(the full path plus the last 3 seconds, only the last 3 seconds, or none).
+lines, the vehicles, their `#n` labels, how much of each trail is drawn
+(the full path plus the last 3 seconds, only the last 3 seconds, or none),
+and the localization estimate: for a run localization ran in, its estimated
+path as a thin line in the run's color, and a faint vehicle where it
+believed the car was.
 
 ## Charts
 
@@ -136,6 +141,7 @@ first run's race line, for a track without one).
 | **Δ time** | Time lost or gained against a reference run, picked next to the tabs. Positive means behind the reference. A rising line is a stretch where the run loses time. |
 | **Lateral** | Distance from the run's own race line |
 | **Steering** | The commanded steering angle |
+| **Localization** | How far each run's localized pose was from the true one, picked next to the tabs: position error, heading error, time per scan, or the algorithm's own quality figure (scan matching's match response, 0 to 1; the particle filter's spread, in meters). Runs without localization aren't drawn, and are named above the chart. |
 
 - The small triangles above the chart mark where each run is at the playback
   time.
@@ -157,12 +163,31 @@ The lap times of the selected runs:
   consistent run. A drifting one is an algorithm that changes behaviour over
   the laps.
 
+### Localization
+
+For runs localization ran in, a second table compares it, on the lap the
+charts show and over all laps: the mean, RMS and largest position error,
+the largest heading error, the mean and 95th percentile time per scan, and
+the coverage (the share of samples that had an estimate). The best value of
+each column is highlighted. Only the runs on the track shown are listed:
+their trajectories are the ones loaded.
+
+Two kinds of runs answer different questions, and the summary tells them
+apart (the algorithm's `pose_source` parameter and `[localization]`):
+
+- **Passive:** the algorithm drives on the ground truth (`pose_source` 1),
+  and localization only watches. The comparison is the estimate alone.
+- **Closed loop:** the algorithm drives on the localized pose
+  (`pose_source` 0). An error changes how the car drives, so the lap times
+  belong to the comparison too.
+
 ## Parameters
 
 ![Parameters panel, with the lateral chart](images/benchmark_viewer/parameters.jpg)
 
-The selected runs side by side, one column per run: the map, race line and
-code version, then every parameter of the algorithm and of the vehicle model.
+The selected runs side by side, one column per run: the map, race line,
+localization and code version, then every parameter of the algorithm, of
+the vehicle model, and of the localization when one ran.
 
 By default only the parameters that **differ** between the runs are listed,
 which answers "what did I change between these two runs?" directly. The
@@ -213,12 +238,16 @@ flowchart LR
 | `[race_line]` | The file, its method, whether the algorithm followed it, its hash and length |
 | `[algorithm]` | Its name, every parameter's value, and whether those are the saved ones |
 | `[vehicle]` | The model, its parameters and limits |
+| `[localization]` | Only when one ran: the algorithm (`scan_matching`, `particle_filter`), every parameter's value, and whether those are the saved ones |
 | `[results]`, `[[laps]]` | Total time, best, mean and spread of the lap times, then each lap |
 
 `trajectory.csv` has one row per sample (40 Hz by default), with the columns
 `t_s`, `lap`, `x_m`, `y_m`, `heading_rad`, `speed_mps`, `steering_cmd_rad`,
-`speed_cmd_mps`, `s_m` (distance along the race line), `lateral_m`, and the
-estimated pose `est_x_m`, `est_y_m`, `est_heading_rad`.
+`speed_cmd_mps`, `s_m` (distance along the race line), `lateral_m`, the
+estimated pose `est_x_m`, `est_y_m`, `est_heading_rad`, and localization's
+time per scan `loc_ms` and quality `loc_quality` (see
+[`localization_status`](slam.md#architecture)). Runs recorded before the last
+two columns existed still read.
 
 ### HTTP API
 

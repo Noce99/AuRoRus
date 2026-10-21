@@ -15,6 +15,13 @@
 //! [`PLACE_AT_START_TOPIC_NAME`] request placed the vehicle at (see
 //! [`Placement`]) - so it overlays the true map. Its parameters are tuned
 //! live through [`SLAM_PARAMETERS_TOPIC_NAME`].
+//!
+//! Localization runs one of two backends, picked on
+//! [`LOCALIZATION_COMMAND_TOPIC_NAME`]: the scan matcher ([`localizer`]) or
+//! the particle filter ([`crate::localization::particle_filter`], tuned
+//! through [`PARTICLE_FILTER_PARAMETERS_TOPIC_NAME`]). Both report the
+//! same pose and `map_to_odom` on [`SLAM_STATUS_TOPIC_NAME`], and what the
+//! backend is doing on [`LOCALIZATION_STATUS_TOPIC_NAME`].
 
 mod correlation_grid;
 mod localizer;
@@ -24,7 +31,7 @@ mod matrix3;
 mod occupancy_grid;
 mod odometry_buffer;
 mod optimizer;
-mod pose;
+pub(super) mod pose;
 mod pose_graph;
 mod rebuild;
 mod scan;
@@ -34,14 +41,17 @@ mod scores;
 pub use rebuild::{KeptScan, ProcessedScan, RebuildOutcome, map_walls, rebuild};
 pub use scores::{Scores, TrajectoryError, WallError, score};
 
+use super::particle_filter::{self, ParticleFilter, ParticleFilterConfig, Start};
 use crate::environment;
 use crate::topics::{
-    AlgorithmParameter, Color, Drawing, DrawingExt, LIDAR_SCAN_TOPIC_NAME, LidarScan,
-    MAP_TOPIC_NAME, ODOMETRY_TOPIC_NAME, Odometry, Placement, PlacementTopics,
-    SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
-    SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape, SlamCommand, SlamMap, SlamParameters,
-    SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus, StartState, VehicleGeometry,
-    VehicleTopics,
+    AlgorithmParameter, Color, Drawing, DrawingExt, LIDAR_SCAN_TOPIC_NAME,
+    LOCALIZATION_COMMAND_TOPIC_NAME, LOCALIZATION_STATUS_TOPIC_NAME, LidarScan,
+    LocalizationAlgorithm, LocalizationCommand, LocalizationStatus, MAP_TOPIC_NAME,
+    ODOMETRY_TOPIC_NAME, Odometry, PARTICLE_FILTER_PARAMETERS_TOPIC_NAME, ParticleFilterParameters,
+    Placement, PlacementTopics, SLAM_COMMAND_TOPIC_NAME, SLAM_MAP_TOPIC_NAME,
+    SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME, SLAM_STATUS_TOPIC_NAME, SelectedMap, Shape,
+    SlamCommand, SlamMap, SlamParameters, SlamSaveOutcome, SlamSaveRequest, SlamState, SlamStatus,
+    StartState, VehicleGeometry, VehicleTopics,
 };
 use crate::{Captain, Executor, Ticker};
 use localizer::{Localizer, LocalizerParams};
@@ -443,6 +453,10 @@ pub fn saved_values(
 const DRAWN_COLOR: Color = Color::GREEN.with_alpha(170);
 /// The vehicle localized on a known map, told apart from mapping's.
 const LOCALIZED_COLOR: Color = Color::BLUE.with_alpha(190);
+/// The particle filter's particles: the localized vehicle's blue, fainter.
+const PARTICLE_COLOR: Color = Color::BLUE.with_alpha(110);
+/// Length of the tick drawn along each particle's heading, in meters.
+const PARTICLE_TICK_M: f64 = 0.15;
 /// Loop-closure edges stand out from the trajectory.
 const LOOP_EDGE_COLOR: Color = Color::AMBER;
 /// Radius of the circle marking where a loop was closed, in meters.
@@ -466,14 +480,24 @@ const DRAWN_Z_INDEX: i32 = -50;
 /// and the map is never changed. That's refused while SLAM has a map of its
 /// own in memory: clear or save it first.
 ///
-/// Applies whatever [`SlamParameters`] asks for before its next tick,
-/// keeping the map, and reports the values in effect in
-/// [`SlamStatus::parameters`].
+/// [`LocalizationCommand::algorithm`] picks the backend that localizes:
+/// the scan matcher or the particle filter. Switching takes effect when not
+/// [`SlamState::Localizing`], restarting from where the old backend had the
+/// vehicle. [`LocalizationCommand::set_pose_requested`] restarts either
+/// from a pose given on the map, and
+/// [`LocalizationCommand::relocalize_requested`] the particle filter from
+/// anywhere on the map.
+///
+/// Applies whatever [`SlamParameters`] and [`ParticleFilterParameters`] ask
+/// for before its next tick, keeping the map and the pose, and reports the
+/// values in effect in [`SlamStatus::parameters`] and
+/// [`LocalizationStatus::particle_filter_parameters`].
 pub struct Slam {
     id: u16,
     name: String,
     maps_root: PathBuf,
     config: SlamConfig,
+    particle_filter_config: ParticleFilterConfig,
 }
 
 impl Slam {
@@ -484,7 +508,47 @@ impl Slam {
             name: name.into(),
             maps_root: maps_root.into(),
             config,
+            particle_filter_config: ParticleFilterConfig::default(),
         }
+    }
+
+    /// Runs the particle filter, when picked, with `config` - the checked-in
+    /// one otherwise.
+    pub fn with_particle_filter(mut self, config: ParticleFilterConfig) -> Self {
+        self.particle_filter_config = config;
+        self
+    }
+
+    /// Applies any new [`ParticleFilterParameters`]. Returns whether the
+    /// config changed.
+    fn apply_particle_filter_parameters(
+        &mut self,
+        captain: &Captain,
+        seen_write_count: &mut u64,
+    ) -> bool {
+        let Some(requests) =
+            captain.try_topic::<ParticleFilterParameters>(PARTICLE_FILTER_PARAMETERS_TOPIC_NAME)
+        else {
+            return false;
+        };
+        let write_count = requests.meta().write_count;
+        if write_count == *seen_write_count {
+            return false;
+        }
+        *seen_write_count = write_count;
+        let wanted = requests.read().into_value().values;
+        crate::config::apply_parameters(
+            &mut self.particle_filter_config,
+            &particle_filter::tunable_parameters(),
+            &wanted,
+        )
+    }
+
+    /// The particle filter's tunable parameters with the values in effect.
+    fn particle_filter_parameters(&self) -> Vec<AlgorithmParameter> {
+        let mut parameters = particle_filter::tunable_parameters();
+        crate::config::refresh_parameter_values(&mut parameters, &self.particle_filter_config);
+        parameters
     }
 
     /// Applies any new [`SlamParameters`] to the config, refusing values it
@@ -530,6 +594,11 @@ impl Executor for Slam {
     fn claim_writing_topics(&mut self, captain: &Captain) {
         captain.claim_writer::<SlamStatus>(SLAM_STATUS_TOPIC_NAME, self.id, SlamStatus::default);
         captain.claim_writer::<SlamMap>(SLAM_MAP_TOPIC_NAME, self.id, SlamMap::default);
+        captain.claim_writer::<LocalizationStatus>(
+            LOCALIZATION_STATUS_TOPIC_NAME,
+            self.id,
+            LocalizationStatus::default,
+        );
         if self.config.draw {
             captain.claim_drawing(self.id);
         }
@@ -539,6 +608,10 @@ impl Executor for Slam {
         let lidar_topic = captain.topic::<LidarScan>(LIDAR_SCAN_TOPIC_NAME);
         let odometry_topic = captain.topic::<Odometry>(ODOMETRY_TOPIC_NAME);
         let command_topic = captain.topic::<SlamCommand>(SLAM_COMMAND_TOPIC_NAME);
+        let localization_command_topic =
+            captain.topic::<LocalizationCommand>(LOCALIZATION_COMMAND_TOPIC_NAME);
+        let localization_status_topic =
+            captain.topic::<LocalizationStatus>(LOCALIZATION_STATUS_TOPIC_NAME);
         let save_topic = captain.topic::<SlamSaveRequest>(SLAM_SAVE_TOPIC_NAME);
         let selected_map_topic = captain.topic::<SelectedMap>(MAP_TOPIC_NAME);
         let placement_topics = PlacementTopics::new(captain);
@@ -572,6 +645,14 @@ impl Executor for Slam {
         let mut ticker = Ticker::new(self.config.rate_hz);
         let mut seen_parameters = 0;
         let mut parameters = self.parameters();
+        let mut seen_particle_filter_parameters = 0;
+        let mut particle_filter_parameters = self.particle_filter_parameters();
+        // Requests left over from before this executor started aren't
+        // applied.
+        let initial_command = localization_command_topic.read().into_value();
+        let mut applied_set_pose = initial_command.set_pose_requested;
+        let mut applied_relocalize = initial_command.relocalize_requested;
+        let mut last_effective_state = SlamState::Off;
 
         while captain.is_running(self.id) {
             let rate_hz = self.config.rate_hz;
@@ -582,6 +663,11 @@ impl Executor for Slam {
                     ticker = Ticker::new(self.config.rate_hz);
                 }
                 parameters = self.parameters();
+            }
+            if self.apply_particle_filter_parameters(captain, &mut seen_particle_filter_parameters)
+            {
+                state.set_particle_filter_config(self.particle_filter_config);
+                particle_filter_parameters = self.particle_filter_parameters();
             }
             placement.update(&placement_topics.read(), &VehicleTopics::ego());
             let odometry = odometry_topic.read();
@@ -606,6 +692,14 @@ impl Executor for Slam {
                 } else {
                     command.state
                 };
+            // The backend only changes while not localizing - judged by the
+            // last tick, so a switch written together with Start (both
+            // landing within one tick) still applies.
+            let localization_command = localization_command_topic.read().into_value();
+            if last_effective_state != SlamState::Localizing {
+                state.algorithm = localization_command.algorithm;
+            }
+            last_effective_state = effective_state;
             if effective_state.is_localization() {
                 let selected_map = selected_map_topic.read();
                 state.update_localization(
@@ -613,9 +707,20 @@ impl Executor for Slam {
                     selected_map.meta.write_count,
                     &placement.anchor(),
                     self.config.localizer_params(),
+                    self.particle_filter_config,
                 );
             } else {
                 state.stop_localizing();
+            }
+            if localization_command.set_pose_requested != applied_set_pose {
+                applied_set_pose = localization_command.set_pose_requested;
+                if let Some([x_m, y_m, heading_rad]) = localization_command.set_pose {
+                    state.set_pose(Pose2::new(x_m, y_m, heading_rad));
+                }
+            }
+            if localization_command.relocalize_requested != applied_relocalize {
+                applied_relocalize = localization_command.relocalize_requested;
+                state.relocalize();
             }
 
             let scan = lidar_topic.read();
@@ -645,14 +750,31 @@ impl Executor for Slam {
                 )
                 .expect("lost writer authorization for the slam_status topic");
 
+            localization_status_topic
+                .write(
+                    self.id,
+                    state.localization_status(&particle_filter_parameters),
+                )
+                .expect("lost writer authorization for the localization_status topic");
+
             if let Some(localization) = &state.localization {
                 if state.localization_changed {
                     state.localization_changed = false;
                     if let Some(drawing_topic) = &drawing_topic {
+                        let particles = match &localization.backend {
+                            Backend::ParticleFilter(filter) => {
+                                filter.sample_particles(self.particle_filter_config.draw_particles)
+                            }
+                            Backend::ScanMatching(_) => Vec::new(),
+                        };
                         drawing_topic
                             .write(
                                 self.id,
-                                localized_drawing(localization.localizer.pose(), &geometry()),
+                                localized_drawing(
+                                    localization.backend.pose(),
+                                    &particles,
+                                    &geometry(),
+                                ),
                             )
                             .expect("lost writer authorization for SLAM's drawing topic");
                     }
@@ -695,11 +817,10 @@ impl Executor for Slam {
     }
 
     fn fresh(&self) -> Box<dyn Executor> {
-        Box::new(Slam::new(
-            self.name.clone(),
-            self.maps_root.clone(),
-            self.config,
-        ))
+        Box::new(
+            Slam::new(self.name.clone(), self.maps_root.clone(), self.config)
+                .with_particle_filter(self.particle_filter_config),
+        )
     }
 }
 
@@ -740,6 +861,10 @@ struct State {
     /// Localizing on a known map - `None` unless localizing, or with no map
     /// selected.
     localization: Option<Localization>,
+    /// The backend localization runs (or will) with.
+    algorithm: LocalizationAlgorithm,
+    /// What the particle filter said about the latest scan.
+    last_estimate: Option<particle_filter::Estimate>,
     /// Whether the localized pose changed since it was last drawn.
     localization_changed: bool,
     /// Scans never processed: replaced by a newer one while waiting for
@@ -747,14 +872,47 @@ struct State {
     dropped_scans: usize,
 }
 
-/// A [`Localizer`], and what it was built for: once either changes, it's
-/// rebuilt.
+/// A localization backend, and what it was built for: once any of it
+/// changes, it's rebuilt.
 struct Localization {
-    localizer: Localizer,
+    backend: Backend,
     /// The write of [`MAP_TOPIC_NAME`] whose map it localizes on.
     map_write: u64,
     /// The [`Odometry::reset_count`] its starting pose was taken for.
     odometry_reset_count: Option<u64>,
+}
+
+/// The algorithm localizing - see [`LocalizationAlgorithm`].
+enum Backend {
+    // Both boxed: hundreds of bytes each, carried in `State` while mapping
+    // too.
+    ScanMatching(Box<Localizer>),
+    ParticleFilter(Box<ParticleFilter>),
+}
+
+impl Backend {
+    fn algorithm(&self) -> LocalizationAlgorithm {
+        match self {
+            Backend::ScanMatching(_) => LocalizationAlgorithm::ScanMatching,
+            Backend::ParticleFilter(_) => LocalizationAlgorithm::ParticleFilter,
+        }
+    }
+
+    /// The latest pose, in the map frame.
+    fn pose(&self) -> Option<Pose2> {
+        match self {
+            Backend::ScanMatching(localizer) => localizer.pose(),
+            Backend::ParticleFilter(filter) => filter.estimate().map(|estimate| estimate.pose),
+        }
+    }
+
+    /// Where the `odom` frame's origin sits on the map.
+    fn map_to_odom(&self) -> Option<Pose2> {
+        match self {
+            Backend::ScanMatching(localizer) => Some(localizer.map_to_odom()),
+            Backend::ParticleFilter(filter) => filter.map_to_odom(),
+        }
+    }
 }
 
 impl State {
@@ -770,6 +928,8 @@ impl State {
             map_changed: true,
             last_save: None,
             localization: None,
+            algorithm: LocalizationAlgorithm::default(),
+            last_estimate: None,
             localization_changed: false,
             dropped_scans: 0,
         }
@@ -803,38 +963,70 @@ impl State {
     fn set_config(&mut self, config: &SlamConfig) {
         self.mapper.set_params(config.mapper_params());
         self.odometry.set_capacity(config.odometry_buffer_len);
-        if let Some(localization) = &mut self.localization {
-            localization.localizer.set_params(config.localizer_params());
+        if let Some(Localization {
+            backend: Backend::ScanMatching(localizer),
+            ..
+        }) = &mut self.localization
+        {
+            localizer.set_params(config.localizer_params());
         }
         // The grid may have been rebuilt.
         self.map_changed = true;
     }
 
-    /// Localizes on `map` (the `map_write`th write of [`MAP_TOPIC_NAME`]),
-    /// (re)starting from `start` - where odometry was reset - whenever the
-    /// map or odometry's reset count changed. Stops localizing if no map
-    /// is loaded.
+    /// Runs the particle filter with `config` from the next scan on.
+    fn set_particle_filter_config(&mut self, config: ParticleFilterConfig) {
+        if let Some(Localization {
+            backend: Backend::ParticleFilter(filter),
+            ..
+        }) = &mut self.localization
+        {
+            filter.set_config(config);
+        }
+    }
+
+    /// Localizes on `map` (the `map_write`th write of [`MAP_TOPIC_NAME`])
+    /// with [`Self::algorithm`], (re)starting from `start` - where odometry
+    /// was reset - whenever the map or odometry's reset count changed, and
+    /// from where the old backend had the vehicle when only the algorithm
+    /// did. Stops localizing if no map is loaded.
     fn update_localization(
         &mut self,
         map: &SelectedMap,
         map_write: u64,
         start: &StartState,
         params: LocalizerParams,
+        particle_filter_config: ParticleFilterConfig,
     ) {
         let odometry_reset_count = self.odometry.reset_count();
-        let current = self.localization.as_ref().is_some_and(|localization| {
+        let same_frame = self.localization.as_ref().filter(|localization| {
             localization.map_write == map_write
                 && localization.odometry_reset_count == odometry_reset_count
         });
-        if current {
+        if same_frame.is_some_and(|localization| localization.backend.algorithm() == self.algorithm)
+        {
             return;
         }
-        let rebuilt = map.info.is_some().then(|| Localization {
-            localizer: Localizer::new(
-                params,
-                localizer::wall_points(map),
-                Pose2::new(start.x_m, start.y_m, start.heading_rad),
-            ),
+        // Switching algorithm on the same map and odometry carries the pose
+        // over.
+        let map_to_odom = same_frame
+            .and_then(|localization| localization.backend.map_to_odom())
+            .unwrap_or_else(|| Pose2::new(start.x_m, start.y_m, start.heading_rad));
+        let backend = match self.algorithm {
+            LocalizationAlgorithm::ScanMatching => map.info.is_some().then(|| {
+                Backend::ScanMatching(Box::new(Localizer::new(
+                    params,
+                    localizer::wall_points(map),
+                    map_to_odom,
+                )))
+            }),
+            LocalizationAlgorithm::ParticleFilter => {
+                ParticleFilter::new(particle_filter_config, map, Start::Anchor(map_to_odom))
+                    .map(|filter| Backend::ParticleFilter(Box::new(filter)))
+            }
+        };
+        let rebuilt = backend.map(|backend| Localization {
+            backend,
             map_write,
             odometry_reset_count,
         });
@@ -842,10 +1034,41 @@ impl State {
         self.pending = None;
         self.last_match_response = None;
         self.last_process_ms = None;
+        self.last_estimate = None;
         self.localization = rebuilt;
         self.localization_changed = true;
         // Nothing drawn left over from the old localization, if it's gone.
         self.map_changed = true;
+    }
+
+    /// Restarts localization from `pose` on the map, if localizing.
+    fn set_pose(&mut self, pose: Pose2) {
+        let latest_odometry = self.odometry.latest_pose();
+        match self
+            .localization
+            .as_mut()
+            .map(|localization| &mut localization.backend)
+        {
+            Some(Backend::ScanMatching(localizer)) => {
+                if let Some(odometry) = latest_odometry {
+                    localizer.set_map_to_odom(pose.compose(&odometry.inverse()));
+                }
+            }
+            Some(Backend::ParticleFilter(filter)) => filter.restart(Start::Pose(pose)),
+            None => {}
+        }
+    }
+
+    /// Restarts the particle filter from anywhere on the map, if it's
+    /// localizing - scan matching can't search the whole map.
+    fn relocalize(&mut self) {
+        if let Some(Localization {
+            backend: Backend::ParticleFilter(filter),
+            ..
+        }) = &mut self.localization
+        {
+            filter.restart(Start::Global);
+        }
     }
 
     /// Forgets the localization, if any.
@@ -854,6 +1077,7 @@ impl State {
             self.pending = None;
             self.last_match_response = None;
             self.last_process_ms = None;
+            self.last_estimate = None;
             // Draw the mapping state again, replacing the localized vehicle.
             self.map_changed = true;
         }
@@ -891,22 +1115,25 @@ impl State {
         let started = Instant::now();
 
         if let Some(localization) = &mut self.localization {
-            let threshold_m = localization
-                .localizer
-                .range_threshold_m(f64::from(scan.max_distance));
-            let localized = localization.localizer.process(LocalizedScan::new(
-                &scan,
-                written_at,
-                pose,
-                threshold_m,
-            ));
+            let response = match &mut localization.backend {
+                Backend::ScanMatching(localizer) => {
+                    let threshold_m = localizer.range_threshold_m(f64::from(scan.max_distance));
+                    let localized =
+                        localizer.process(LocalizedScan::new(&scan, written_at, pose, threshold_m));
+                    self.last_match_response = Some(localized.response);
+                    Some(localized.response)
+                }
+                Backend::ParticleFilter(filter) => {
+                    self.last_estimate = Some(filter.process(pose, &scan));
+                    None
+                }
+            };
             let process_ms = started.elapsed().as_secs_f64() * 1000.0;
-            self.last_match_response = Some(localized.response);
             self.last_process_ms = Some(process_ms);
             self.localization_changed = true;
             return Some(ScanProcessing {
                 kept: false,
-                response: Some(localized.response),
+                response,
                 process_ms,
                 loop_closed: false,
             });
@@ -953,8 +1180,8 @@ impl State {
         let as_array = |pose: Pose2| [pose.x_m, pose.y_m, pose.heading_rad];
         let (pose, map_to_odom) = match &self.localization {
             Some(localization) => (
-                localization.localizer.pose(),
-                Some(localization.localizer.map_to_odom()),
+                localization.backend.pose(),
+                localization.backend.map_to_odom(),
             ),
             None => (self.mapper.pose(), self.mapper.map_to_odom()),
         };
@@ -974,6 +1201,33 @@ impl State {
             last_save: self.last_save.clone(),
             parameters: parameters.to_vec(),
             anchor,
+        }
+    }
+
+    fn localization_status(
+        &self,
+        particle_filter_parameters: &[AlgorithmParameter],
+    ) -> LocalizationStatus {
+        let estimate = self.last_estimate;
+        let quality = match self.algorithm {
+            LocalizationAlgorithm::ScanMatching => self.last_match_response,
+            LocalizationAlgorithm::ParticleFilter => estimate.map(|estimate| estimate.spread_m),
+        };
+        let localization = self.localization.as_ref();
+        LocalizationStatus {
+            algorithm: localization.map_or(self.algorithm, |localization| {
+                localization.backend.algorithm()
+            }),
+            active: localization.is_some(),
+            last_process_ms: localization.and(self.last_process_ms),
+            quality: localization.and(quality),
+            particle_spread_rad: estimate.map(|estimate| estimate.spread_rad),
+            effective_sample_size: estimate.map(|estimate| estimate.effective_sample_size),
+            particles: estimate.map(|estimate| estimate.particles),
+            relocalizing: localization.is_some_and(|localization| {
+                matches!(&localization.backend, Backend::ParticleFilter(filter) if filter.relocalizing())
+            }),
+            particle_filter_parameters: particle_filter_parameters.to_vec(),
         }
     }
 
@@ -1101,8 +1355,13 @@ fn drawing(
 }
 
 /// What [`Slam`] draws while localizing: a vehicle the size of `geometry` at
-/// `pose`, already in the map's frame. Empty before the first scan.
-fn localized_drawing(pose: Option<Pose2>, geometry: &VehicleGeometry) -> Drawing {
+/// `pose`, already in the map's frame, and the particle filter's
+/// `particles`, if any. Empty before the first scan.
+fn localized_drawing(
+    pose: Option<Pose2>,
+    particles: &[Pose2],
+    geometry: &VehicleGeometry,
+) -> Drawing {
     let vehicle = pose.map(|pose| Shape::Vehicle {
         x_m: pose.x_m,
         y_m: pose.y_m,
@@ -1116,7 +1375,37 @@ fn localized_drawing(pose: Option<Pose2>, geometry: &VehicleGeometry) -> Drawing
         rear_axle_m: geometry.lr_m(),
         color: LOCALIZED_COLOR,
     });
-    Drawing::default()
+    let mut drawing = Drawing::default();
+    if !particles.is_empty() {
+        // A dot at each particle, and a short tick along its heading.
+        let points = particles
+            .iter()
+            .map(|particle| [particle.x_m as f32, particle.y_m as f32])
+            .collect();
+        let ticks = particles.iter().map(|particle| {
+            let (x, y) = particle.transform_point(PARTICLE_TICK_M, 0.0);
+            Shape::Polyline {
+                points: vec![
+                    [particle.x_m as f32, particle.y_m as f32],
+                    [x as f32, y as f32],
+                ],
+                closed: false,
+                width_px: 1.0,
+                color: PARTICLE_COLOR,
+            }
+        });
+        drawing = drawing.element(
+            "Particles",
+            std::iter::once(Shape::Points {
+                points,
+                radius_px: 2.0,
+                color: PARTICLE_COLOR,
+            })
+            .chain(ticks),
+            true,
+        );
+    }
+    drawing
         .element("Vehicle", vehicle, true)
         .z_index(DRAWN_Z_INDEX)
 }

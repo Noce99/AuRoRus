@@ -9,7 +9,9 @@
 //
 // A trajectory is `/api/runs/<id>/trajectory`'s columns: parallel arrays
 // `t_s`, `lap`, `x_m`, `y_m`, `heading_rad`, `speed_mps`,
-// `steering_cmd_rad`, `lateral_m`, ... sorted by `t_s`.
+// `steering_cmd_rad`, `lateral_m`, ... sorted by `t_s` - plus, for a run
+// localization ran in, its estimate `est_x_m`, `est_y_m`, `est_heading_rad`
+// and its `loc_ms` and `loc_quality`, `null` where it had none.
 // ---------------------------------------------------------------------
 
 const TrackMath = (() => {
@@ -130,13 +132,91 @@ const TrackMath = (() => {
     return { s: best.s, segment: best.segment };
   }
 
+  /** Whether localization ran in `trajectory`'s run. */
+  function hasEstimate(trajectory) {
+    return Array.isArray(trajectory.est_x_m);
+  }
+
+  /** How far localization's estimate was off at sample `i`, as
+   *  `{position, heading}` (meters, radians) - `null` without an estimate
+   *  there. */
+  function estimateError(trajectory, i) {
+    if (!hasEstimate(trajectory)) return null;
+    const x = trajectory.est_x_m[i];
+    const y = trajectory.est_y_m[i];
+    const heading = trajectory.est_heading_rad[i];
+    if (x == null || y == null || heading == null) return null;
+    return {
+      position: Math.hypot(x - trajectory.x_m[i], y - trajectory.y_m[i]),
+      heading: wrapAngle(heading - trajectory.heading_rad[i]),
+    };
+  }
+
+  /** Localization's estimate at time `t`, as `{x, y, heading}` - the
+   *  latest sample at or before `t` (an estimate is never interpolated
+   *  across a gap) - or `null` without one there. */
+  function estimateAt(trajectory, t) {
+    if (!hasEstimate(trajectory)) return null;
+    const i = lastAtOrBefore(trajectory.t_s, t);
+    if (i < 0 || trajectory.est_x_m[i] == null) return null;
+    return { x: trajectory.est_x_m[i], y: trajectory.est_y_m[i], heading: trajectory.est_heading_rad[i] };
+  }
+
+  /** The `p`-quantile (0..1) of `values`, nearest rank - `null` if empty. */
+  function quantile(values, p) {
+    if (values.length === 0) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))];
+  }
+
+  /** How localization did over lap `lap` of `trajectory` - every lap
+   *  driven (`lap >= 1`) when `lap` is null: `{samples, coverage,
+   *  meanM, rmsM, maxM, maxHeadingRad, meanMs, p95Ms}`, with `coverage` the
+   *  fraction of the samples that had an estimate. `null` if localization
+   *  never ran, or the lap was never driven. */
+  function localizationStats(trajectory, lap = null) {
+    if (!hasEstimate(trajectory)) return null;
+    const errors = [];
+    const headings = [];
+    const ms = [];
+    let samples = 0;
+    for (let i = 0; i < trajectory.t_s.length; i++) {
+      const sampleLap = trajectory.lap[i];
+      if (lap === null ? sampleLap < 1 : sampleLap !== lap) continue;
+      samples += 1;
+      const error = estimateError(trajectory, i);
+      if (error) {
+        errors.push(error.position);
+        headings.push(Math.abs(error.heading));
+      }
+      const time = trajectory.loc_ms?.[i];
+      if (time != null) ms.push(time);
+    }
+    if (samples === 0) return null;
+    const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
+    return {
+      samples,
+      coverage: errors.length / samples,
+      meanM: mean(errors),
+      rmsM: errors.length ? Math.sqrt(mean(errors.map((e) => e * e))) : null,
+      maxM: errors.length ? Math.max(...errors) : null,
+      maxHeadingRad: headings.length ? Math.max(...headings) : null,
+      meanMs: mean(ms),
+      p95Ms: quantile(ms, 0.95),
+    };
+  }
+
   /** Lap `lap` of `trajectory` over the distance driven along `line`:
    *  `d` (meters from where the lap started, unwrapped across the line's
    *  own start) and, per sample, `t` (seconds into the lap), `speed`,
-   *  `lateral`, `steering`, `x`, `y`. Empty arrays if the lap was never
-   *  driven. */
+   *  `lateral`, `steering`, `x`, `y` - and localization's `posErr`
+   *  (meters), `headErr` (radians, signed), `locMs` and `locQuality`,
+   *  `null` where it had none. Empty arrays if the lap was never driven. */
   function lapProfile(trajectory, lap, line) {
-    const profile = { d: [], t: [], speed: [], lateral: [], steering: [], x: [], y: [] };
+    const profile = {
+      d: [], t: [], speed: [], lateral: [], steering: [], x: [], y: [],
+      posErr: [], headErr: [], locMs: [], locQuality: [],
+    };
     let hint = null;
     let startS = 0;
     let lastS = 0;
@@ -167,6 +247,11 @@ const TrackMath = (() => {
       profile.steering.push(trajectory.steering_cmd_rad[i]);
       profile.x.push(x);
       profile.y.push(y);
+      const error = estimateError(trajectory, i);
+      profile.posErr.push(error ? error.position : null);
+      profile.headErr.push(error ? error.heading : null);
+      profile.locMs.push(trajectory.loc_ms?.[i] ?? null);
+      profile.locQuality.push(trajectory.loc_quality?.[i] ?? null);
     }
     return profile;
   }
@@ -223,7 +308,10 @@ const TrackMath = (() => {
     return interpolate(distances, values, d);
   }
 
-  return { wrapAngle, lastAtOrBefore, interpolate, poseAt, lapStarts, referenceLine, project, lapProfile, monotone, timeByDistance, deltaTime, atDistance };
+  return {
+    wrapAngle, lastAtOrBefore, interpolate, poseAt, lapStarts, referenceLine, project, lapProfile, monotone,
+    timeByDistance, deltaTime, atDistance, hasEstimate, estimateError, estimateAt, quantile, localizationStats,
+  };
 })();
 
 if (typeof module !== "undefined") module.exports = TrackMath;

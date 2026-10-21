@@ -46,6 +46,11 @@ pub struct BenchmarkSummary {
     pub race_line: RaceLineRecord,
     pub algorithm: AlgorithmRecord,
     pub vehicle: VehicleRecord,
+    /// The localization that ran alongside - `None` when none did (or the
+    /// run predates recording it). Optional, so older summaries still read
+    /// without a [`FORMAT_VERSION`] bump.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub localization: Option<LocalizationRecord>,
     /// `None` until at least one lap was completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub results: Option<Results>,
@@ -108,6 +113,19 @@ pub struct AlgorithmRecord {
     pub name: String,
     /// Whether `parameters` all match its config file - if not, they were
     /// tuned in the UI and not saved.
+    pub saved_to_config: bool,
+    /// The values it ran with.
+    pub parameters: BTreeMap<String, f64>,
+}
+
+/// The localization algorithm that ran during a run - whose estimate is the
+/// trajectory's `est_*` columns.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LocalizationRecord {
+    /// Its API name, e.g. `particle_filter` - see
+    /// [`crate::topics::LocalizationAlgorithm::api_str`].
+    pub algorithm: String,
+    /// Whether `parameters` all match its config file.
     pub saved_to_config: bool,
     /// The values it ran with.
     pub parameters: BTreeMap<String, f64>,
@@ -255,6 +273,11 @@ pub(crate) mod tests {
                 saved_to_config: true,
                 parameters: BTreeMap::from([("max_speed_mps".to_string(), 4.5)]),
             },
+            localization: Some(LocalizationRecord {
+                algorithm: "particle_filter".to_string(),
+                saved_to_config: false,
+                parameters: BTreeMap::from([("num_particles".to_string(), 1500.0)]),
+            }),
             vehicle: VehicleRecord {
                 model: "bicycle".to_string(),
                 body_length_m: 0.45,
@@ -273,6 +296,17 @@ pub(crate) mod tests {
     fn a_summary_round_trips_through_toml() {
         let summary = summary();
         let text = toml::to_string_pretty(&summary).unwrap();
+        assert_eq!(toml::from_str::<BenchmarkSummary>(&text).unwrap(), summary);
+    }
+
+    #[test]
+    fn a_summary_without_localization_round_trips_and_omits_it() {
+        let summary = BenchmarkSummary {
+            localization: None,
+            ..summary()
+        };
+        let text = toml::to_string_pretty(&summary).unwrap();
+        assert!(!text.contains("[localization]"));
         assert_eq!(toml::from_str::<BenchmarkSummary>(&text).unwrap(), summary);
     }
 

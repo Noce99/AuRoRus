@@ -4,10 +4,11 @@
 //! running, on [`WebGuiConfig::bind_addr`]. Claims the writer slot for
 //! `human_vesc_command`, `map_selection`, `vehicle_model_selection`,
 //! `autonomous_algorithm_selection`, `autonomous_parameters`,
-//! `place_at_start`, `slam_command`, `slam_save`, `planning_parameters`,
+//! `place_at_start`, `slam_command`, `slam_save`, `localization_command`,
+//! `particle_filter_parameters`, `planning_parameters`,
 //! `planning_request` (see [`live_api`] and the per-subsystem
-//! [`vesc_api`], [`vehicle_model_api`], [`autonomous_api`], [`slam_api`]
-//! and [`planning_api`] next to it), `race_line_selection` (see
+//! [`vesc_api`], [`vehicle_model_api`], [`autonomous_api`], [`slam_api`],
+//! [`localization_api`] and [`planning_api`] next to it), `race_line_selection` (see
 //! [`race_lines_api`]), `opponent_requests` and `race_start` (see
 //! [`opponents_api`]);
 //! reads `map`, `vehicle_model_status`, `autonomous_algorithm_status`,
@@ -32,6 +33,7 @@ mod detector_api;
 mod draw_api;
 mod handlers;
 mod live_api;
+mod localization_api;
 mod map_edit_api;
 mod mapping_session_api;
 mod maps_api;
@@ -48,13 +50,14 @@ use crate::telemetry::TelemetryPoseSource;
 use crate::topics::{
     AUTONOMOUS_ALGORITHM_SELECTION_TOPIC_NAME, AUTONOMOUS_PARAMETERS_TOPIC_NAME,
     AutonomousAlgorithmSelection, AutonomousParameters, DETECTOR_PARAMETERS_TOPIC_NAME,
-    DetectorParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, MAP_SELECTION_TOPIC_NAME, MapSelection,
-    OPPONENT_REQUESTS_TOPIC_NAME, OpponentRequests, PLACE_AT_START_TOPIC_NAME,
-    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PlaceAtStart, PlanningParameters,
-    PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME, RACE_START_TOPIC_NAME, RaceLineSelection,
-    RaceStart, SIMULATED_IMU_PARAMETERS_TOPIC_NAME, SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME,
-    SLAM_COMMAND_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME, SLAM_SAVE_TOPIC_NAME,
-    SimulatedSensorParameters, SlamCommand, SlamParameters, SlamSaveRequest,
+    DetectorParameters, HUMAN_VESC_COMMAND_TOPIC_NAME, LOCALIZATION_COMMAND_TOPIC_NAME,
+    LocalizationCommand, MAP_SELECTION_TOPIC_NAME, MapSelection, OPPONENT_REQUESTS_TOPIC_NAME,
+    OpponentRequests, PARTICLE_FILTER_PARAMETERS_TOPIC_NAME, PLACE_AT_START_TOPIC_NAME,
+    PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, ParticleFilterParameters,
+    PlaceAtStart, PlanningParameters, PlanningRequest, RACE_LINE_SELECTION_TOPIC_NAME,
+    RACE_START_TOPIC_NAME, RaceLineSelection, RaceStart, SIMULATED_IMU_PARAMETERS_TOPIC_NAME,
+    SIMULATED_LIDAR_PARAMETERS_TOPIC_NAME, SLAM_COMMAND_TOPIC_NAME, SLAM_PARAMETERS_TOPIC_NAME,
+    SLAM_SAVE_TOPIC_NAME, SimulatedSensorParameters, SlamCommand, SlamParameters, SlamSaveRequest,
     VEHICLE_MODEL_PARAMETERS_TOPIC_NAME, VEHICLE_MODEL_SELECTION_TOPIC_NAME,
     VESC_PARAMETERS_TOPIC_NAME, VehicleModelParameters, VehicleModelSelection, VescCommand,
     VescParameters,
@@ -251,6 +254,16 @@ impl Executor for WebGui {
             SLAM_PARAMETERS_TOPIC_NAME,
             self.id,
             SlamParameters::default,
+        );
+        captain.claim_writer::<LocalizationCommand>(
+            LOCALIZATION_COMMAND_TOPIC_NAME,
+            self.id,
+            LocalizationCommand::default,
+        );
+        captain.claim_writer::<ParticleFilterParameters>(
+            PARTICLE_FILTER_PARAMETERS_TOPIC_NAME,
+            self.id,
+            ParticleFilterParameters::default,
         );
         captain.claim_writer::<PlanningParameters>(
             PLANNING_PARAMETERS_TOPIC_NAME,

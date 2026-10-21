@@ -282,17 +282,35 @@ in simulation it does not line up with the simulator's vehicle. See
 
 ![Localization panel](images/web_gui/localization.jpg)
 
-Finds where the car is on the selected map, by matching each LIDAR scan
-against it.
+Finds where the car is on the selected map, with one of two algorithms (see
+[SLAM](slam.md#localization)):
+
+- **Scan matching (SLAM)** matches each LIDAR scan against the map's walls.
+- **Particle filter** tracks a cloud of guesses at the pose, weighed by how
+  well each one explains the scan.
+
+The selector at the top picks one. It is locked while localizing: pause to
+switch, and Start again carries on from where the old algorithm had the car.
 
 - **Start** is only offered with a map selected, and not while SLAM holds a
   map it is building: clear or save that one first.
 - **Pause** keeps the last pose.
-- The details line shows the estimated pose and how the last match went.
+- **Set pose** restarts localization from a pose you give: click where the
+  car is on the map, then where it faces, as with the place-vehicle tool.
+  A right click cancels.
+- **Relocalize** (particle filter only) spreads the particles over the
+  whole track, for the filter to find the car with no idea where it is.
+- The details line shows the estimated pose, then either how the last match
+  went (scan matching), or the particle cloud's spread and how many
+  particles carry its weight (particle filter), and how long the last scan
+  took.
+- With the particle filter picked, its parameters are listed below, with
+  **Save parameters** and **Load from file** as in the other panels
+  (`config/localization/particle_filter.toml`).
 
-The estimated pose is drawn as a blue vehicle. Algorithms that follow a race
-line need this running when their `pose_source` is 0, which is what the real
-car uses.
+The estimated pose is drawn as a blue vehicle, with the particle filter's
+particles around it. Algorithms that follow a race line need localization
+running when their `pose_source` is 0, which is what the real car uses.
 
 ### Detector
 
@@ -379,6 +397,11 @@ once per combination of the maps, vehicle models and race lines ticked, and
 saves every run under `benchmarks/<map>/`.
 
 - Pick the algorithm, tick the combinations, and press **Start benchmark**.
+- **Localization** starts scan matching or the particle filter on every
+  run's map, and records its estimate next to the true pose, so
+  `benchmark_viewer` can compare them. Off leaves localization as it is. An
+  algorithm driving on the localized pose (`pose_source` 0) needs one
+  picked, or localization already running.
   The line under the lists says how many runs that makes and the worst-case
   duration.
 - Each run starts from the start/finish line with a countdown, like a race.
@@ -468,6 +491,7 @@ The topics `WebGui` writes:
 | `vesc_parameters` | The VESC panel |
 | `autonomous_algorithm_selection`, `autonomous_parameters` | The Autonomous Algos panel |
 | `slam_command`, `slam_save` | The Mapping and Localization panels |
+| `localization_command`, `particle_filter_parameters` | The Localization panel |
 | `slam_parameters` | The Mapping panel |
 | `detector_parameters` | The Detector panel |
 | `planning_parameters`, `planning_request` | The Planning panel |
@@ -597,6 +621,8 @@ Every route is in `src/web/gui/handlers.rs`. Bodies are JSON.
 | `POST /api/autonomous_parameter`, `/api/autonomous_parameters_save`, `/api/autonomous_parameters_load` | The selected algorithm's parameters |
 | `GET /api/slam`, `POST /api/slam_command`, `POST /api/slam_save` | Mapping and localization |
 | `POST /api/slam_parameter`, `/api/slam_parameters_save`, `/api/slam_parameters_load` | SLAM's parameters |
+| `GET /api/localization`, `POST /api/localization_algorithm`, `/api/localization_set_pose`, `/api/localization_relocalize` | The localization algorithm, Set pose and Relocalize |
+| `POST /api/particle_filter_parameter`, `/api/particle_filter_parameters_save`, `/api/particle_filter_parameters_load` | The particle filter's parameters |
 | `GET /api/mapping_session`, `POST /api/mapping_session` | The Record session toggle |
 | `GET /api/detector`, `POST /api/detector_parameter`, `/api/detector_parameters_save`, `/api/detector_parameters_load` | The detector |
 | `GET /api/planning`, `POST /api/planning_start`, `POST /api/planning_parameter`, `/api/planning_parameters_save`, `/api/planning_parameters_load` | The planner |

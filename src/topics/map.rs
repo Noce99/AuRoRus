@@ -1,11 +1,18 @@
 //! The map being driven and what is built from it: the selected map and race
-//! line, SLAM's map and commands, and race line planning.
+//! line, SLAM's map and commands, which localization runs, and race line
+//! planning.
 
+mod localization;
 mod planning;
 mod race_line;
 mod selected_map;
 mod slam;
 
+pub use localization::{
+    LOCALIZATION_COMMAND_TOPIC_NAME, LOCALIZATION_STATUS_TOPIC_NAME, LocalizationAlgorithm,
+    LocalizationCommand, LocalizationStatus, PARTICLE_FILTER_PARAMETERS_TOPIC_NAME,
+    ParticleFilterParameters,
+};
 pub use planning::{
     PLANNING_PARAMETERS_TOPIC_NAME, PLANNING_REQUEST_TOPIC_NAME, PLANNING_STATUS_TOPIC_NAME,
     PlanningObjective, PlanningOutcome, PlanningParameters, PlanningRequest, PlanningState,

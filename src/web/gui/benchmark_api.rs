@@ -18,7 +18,9 @@ use crate::Captain;
 use crate::benchmark::RunStatus;
 use crate::benchmark::layout::TIMING_LINE_FILE_NAME;
 use crate::environment::{CENTERLINE_FILE_NAME, map_folder, race_lines, read_info};
+use crate::localization::pose_source::POSE_LOCALIZATION;
 use crate::topics::{
+    LOCALIZATION_STATUS_TOPIC_NAME, LocalizationAlgorithm, LocalizationStatus,
     VEHICLE_MODEL_STATUS_TOPIC_NAME, VehicleModelKind, VehicleModelStatus, now_ms,
 };
 use crate::web::{bad_request, error_response, json_response, read_json};
@@ -51,6 +53,8 @@ pub(super) struct Plan {
     pub(super) algorithm: String,
     /// Whether the algorithm follows the race line.
     pub(super) uses_race_line: bool,
+    /// The localization started for every run - `None` leaves it alone.
+    pub(super) localization: Option<LocalizationAlgorithm>,
     pub(super) runs: Vec<RunSpec>,
 }
 
@@ -273,6 +277,10 @@ struct StartBody {
     /// algorithm that follows no race line.
     #[serde(default)]
     race_lines: HashMap<String, Vec<String>>,
+    /// The localization to run every run with - a
+    /// [`LocalizationAlgorithm::api_str`], or `null`/missing for none.
+    #[serde(default)]
+    localization: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -300,6 +308,26 @@ pub fn start(
     else {
         return bad_request(&format!("Unknown algorithm {:?}.", body.algorithm));
     };
+    let localization = match body.localization.as_deref() {
+        None => None,
+        Some(name) => match LocalizationAlgorithm::from_api_str(name) {
+            Some(algorithm) => Some(algorithm),
+            None => return bad_request(&format!("Unknown localization algorithm {name:?}.")),
+        },
+    };
+    let drives_on_localization = algorithm.parameters.iter().any(|parameter| {
+        parameter.name == "pose_source" && parameter.value == f64::from(POSE_LOCALIZATION)
+    });
+    // Localization started by hand carries on through the runs.
+    let localizing = captain
+        .try_topic::<LocalizationStatus>(LOCALIZATION_STATUS_TOPIC_NAME)
+        .is_some_and(|topic| topic.read().active);
+    if drives_on_localization && localization.is_none() && !localizing {
+        return bad_request(&format!(
+            "{} drives on the localized pose (pose_source) - pick a localization to run with.",
+            algorithm.label
+        ));
+    }
     let mut models = Vec::new();
     for model in &body.models {
         match VehicleModelKind::from_api_str(model) {
@@ -338,6 +366,7 @@ pub fn start(
     let plan = Plan {
         algorithm: algorithm.name,
         uses_race_line: algorithm.requires.race_line,
+        localization,
         runs,
     };
     state.pending = Some(plan.clone());
@@ -416,6 +445,8 @@ struct Status<'a> {
     running: bool,
     aborting: bool,
     algorithm: Option<&'a str>,
+    /// The localization every run starts, if any.
+    localization: Option<&'static str>,
     runs: usize,
     laps: u32,
     progress: Option<&'a Progress>,
@@ -437,6 +468,11 @@ pub fn status(benchmark: &Benchmark, setup: &BenchmarkSetup, config: &WebGuiConf
             running: state.running,
             aborting: state.abort,
             algorithm: state.plan.as_ref().map(|plan| plan.algorithm.as_str()),
+            localization: state
+                .plan
+                .as_ref()
+                .and_then(|plan| plan.localization)
+                .map(|algorithm| algorithm.api_str()),
             runs: state.plan.as_ref().map_or(0, |plan| plan.runs.len()),
             laps: config.benchmark_laps,
             progress: state.progress.as_ref(),

@@ -85,8 +85,17 @@
           <button class="bottom-tab" data-chart="delta">&Delta; time</button>
           <button class="bottom-tab" data-chart="lateral">Lateral</button>
           <button class="bottom-tab" data-chart="steering">Steering</button>
+          <button class="bottom-tab" data-chart="localization">Localization</button>
           <label id="reference-row">Reference
             <select id="reference-select" title="The run Δ time is measured against"></select>
+          </label>
+          <label id="loc-metric-row" hidden>Show
+            <select id="loc-metric-select" title="What of each run's localization to chart">
+              <option value="position">Position error [m]</option>
+              <option value="heading">Heading error [°]</option>
+              <option value="ms">Time per scan [ms]</option>
+              <option value="quality">Quality</option>
+            </select>
           </label>
           <span class="bottom-info" id="chart-info"></span>
         </nav>
@@ -151,6 +160,11 @@
         <canvas id="lap-chart"></canvas>
         <div class="bottom-tooltip" id="lap-chart-tooltip" hidden></div>
       </div>
+      <section id="loc-compare" hidden>
+        <h2>Localization</h2>
+        <p class="panel-hint" id="loc-compare-hint"></p>
+        <div id="loc-table-wrap"></div>
+      </section>
     </section>
 
     <section id="panel-parameters" class="panel-section" hidden>

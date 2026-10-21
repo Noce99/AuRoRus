@@ -14,6 +14,7 @@ const benchLapsEl = document.getElementById("bench-laps");
 const benchFolderEl = document.getElementById("bench-folder");
 const benchSetupEl = document.getElementById("bench-setup");
 const benchAlgorithmEl = document.getElementById("bench-algorithm");
+const benchLocalizationEl = document.getElementById("bench-localization");
 const benchMapsEl = document.getElementById("bench-maps");
 const benchModelsEl = document.getElementById("bench-models");
 const benchLinesEl = document.getElementById("bench-lines");
@@ -114,6 +115,11 @@ async function refreshBenchOptions() {
   const wanted = firstTime ? options.selected_algorithm : previous;
   if (wanted && options.algorithms.some((algorithm) => algorithm.name === wanted)) {
     benchAlgorithmEl.value = wanted;
+  }
+  // The localization running now, if any - else off.
+  if (firstTime) {
+    const localization = await fetchJSON("/api/localization").catch(() => null);
+    benchLocalizationEl.value = localization?.value.active ? localization.value.algorithm : "";
   }
   renderBenchSetup();
 }
@@ -306,6 +312,7 @@ benchStartBtn.addEventListener("click", async () => {
         maps,
         models: [...new Set(runs.map((run) => run.model))],
         race_lines: raceLines,
+        localization: benchLocalizationEl.value || null,
       }),
     });
     await pollBenchmark();
@@ -357,7 +364,8 @@ function renderBenchProgress(status) {
     benchBarFillEl.style.width = "0%";
     return;
   }
-  const lines = [`${status.algorithm} · ${describeRun(progress)}`];
+  const localization = status.localization ? ` with ${status.localization.replace("_", " ")}` : "";
+  const lines = [`${status.algorithm}${localization} · ${describeRun(progress)}`];
   if (progress.stage === "driving") {
     lines.push(
       `Elapsed ${formatDuration(progress.elapsed_s)} · this lap ${formatDuration(progress.lap_elapsed_s)} of ${formatDuration(progress.lap_timeout_s)} max`,

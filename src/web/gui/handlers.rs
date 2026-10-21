@@ -10,6 +10,7 @@ use super::debug_api;
 use super::detector_api;
 use super::draw_api;
 use super::live_api;
+use super::localization_api;
 use super::map_edit_api;
 use super::mapping_session_api::{self, MappingSession};
 use super::maps_api;
@@ -174,6 +175,25 @@ pub fn handle(
         (Method::Post, "/api/slam_parameters_save") => slam_api::save_slam_parameters(captain),
         (Method::Post, "/api/slam_parameters_load") => {
             slam_api::load_slam_parameters(captain, writer_id)
+        }
+        (Method::Get, "/api/localization") => localization_api::localization(captain),
+        (Method::Post, "/api/localization_algorithm") => {
+            localization_api::set_algorithm(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/localization_set_pose") => {
+            localization_api::set_pose(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/localization_relocalize") => {
+            localization_api::relocalize(captain, writer_id)
+        }
+        (Method::Post, "/api/particle_filter_parameter") => {
+            localization_api::set_parameter(&mut request, captain, writer_id)
+        }
+        (Method::Post, "/api/particle_filter_parameters_save") => {
+            localization_api::save_parameters(captain)
+        }
+        (Method::Post, "/api/particle_filter_parameters_load") => {
+            localization_api::load_parameters(captain, writer_id)
         }
         (Method::Get, "/api/detector") => detector_api::detector(captain),
         (Method::Post, "/api/detector_parameter") => {

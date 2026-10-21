@@ -38,6 +38,16 @@ pub struct TrajectoryRow {
     pub est_x_m: Option<f64>,
     pub est_y_m: Option<f64>,
     pub est_heading_rad: Option<f64>,
+    /// How long localization took on its latest scan, in milliseconds.
+    /// Missing from runs that predate it, as is `loc_quality`.
+    #[serde(default)]
+    pub loc_ms: Option<f64>,
+    /// How confident localization's latest estimate is, in its own terms:
+    /// scan matching's match response (`0` to `1`), the particle filter's
+    /// position spread (meters) - see
+    /// [`crate::topics::LocalizationStatus::quality`].
+    #[serde(default)]
+    pub loc_quality: Option<f64>,
 }
 
 /// Appends [`TrajectoryRow`]s to a new `trajectory.csv`.
@@ -96,6 +106,8 @@ mod tests {
                 est_x_m: None,
                 est_y_m: None,
                 est_heading_rad: None,
+                loc_ms: None,
+                loc_quality: None,
             },
             TrajectoryRow {
                 t_s: 0.025,
@@ -111,6 +123,8 @@ mod tests {
                 est_x_m: Some(1.09),
                 est_y_m: Some(-2.01),
                 est_heading_rad: Some(0.49),
+                loc_ms: Some(2.1),
+                loc_quality: Some(0.04),
             },
         ];
         let path = std::env::temp_dir().join(format!(
@@ -125,5 +139,26 @@ mod tests {
         let read = read_trajectory(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(read, rows);
+    }
+
+    #[test]
+    fn a_trajectory_without_the_localization_columns_still_reads() {
+        let path = std::env::temp_dir().join(format!(
+            "aurorus_benchmark_old_trajectory_{}.csv",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "t_s,lap,x_m,y_m,heading_rad,speed_mps,steering_cmd_rad,speed_cmd_mps,s_m,\
+             lateral_m,est_x_m,est_y_m,est_heading_rad\n\
+             0.5,1,1.0,2.0,0.1,3.0,0.0,3.0,4.0,0.1,1.01,2.0,0.1\n",
+        )
+        .unwrap();
+        let read = read_trajectory(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].est_x_m, Some(1.01));
+        assert_eq!(read[0].loc_ms, None);
+        assert_eq!(read[0].loc_quality, None);
     }
 }

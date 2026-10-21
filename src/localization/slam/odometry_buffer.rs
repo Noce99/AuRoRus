@@ -85,6 +85,13 @@ impl OdometryBuffer {
             .map(|(_, odometry)| odometry.reset_count)
     }
 
+    /// The newest pose held, if any.
+    pub fn latest_pose(&self) -> Option<Pose2> {
+        self.samples
+            .back()
+            .map(|(_, odometry)| Pose2::from_odometry(odometry))
+    }
+
     /// The pose at `at`, linearly interpolated between the two samples
     /// around it (heading along the shorter arc).
     pub fn pose_at(&self, at: Instant) -> PoseAt {

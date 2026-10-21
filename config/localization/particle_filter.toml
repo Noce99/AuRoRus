@@ -1,0 +1,78 @@
+# Configuration for the particle filter, the second localization backend of
+# `aurorus::localization::Slam` - a Rust port of UBM's particle_filter_cpp
+# ROS 2 node and of range_libc's CDDT ray caster. Parameter names follow the
+# node's, with units added; see documentation/slam.md#particle-filter.
+
+# Particles while tracking (UBM: 1500).
+num_particles = 1500
+# Field of view of the beams used, centered on the sensor's forward
+# direction, in radians - clamped to the sensor's own (UBM: 220 degrees).
+considered_lidar_fov_rad = 3.839724354387525
+# One beam in this many is used (UBM: 15 - about 60 of a Hokuyo's 881 beams
+# across 220 degrees).
+range_step = 15
+# Readings and ray casts are clamped to this, in meters (UBM: 10).
+max_range_m = 10.0
+# The ray caster: 0 is CDDT (fast, approximate - UBM's default), 1 is ray
+# marching (exact, slower).
+ray_cast_algo = 0
+# Directions CDDT casts along, over the full circle (UBM: 112).
+theta_discretization = 112
+
+# --- Beam model -----------------------------------------------------------
+
+# Mixture weights of a reading being short (off something not on the map),
+# max-range, uniform noise, or a hit near the predicted range (UBM: 0.01,
+# 0.07, 0.22, 0.75).
+ray_short_weight = 0.01
+ray_max_weight = 0.07
+ray_rand_weight = 0.22
+ray_hit_weight = 0.75
+# Standard deviation of a hit, in map pixels (UBM: 8 - 0.4 m at 0.05 m/px).
+ray_hit_sigma_px = 8.0
+# A scan's likelihood is raised to 1 / squash_factor, so one scan can't
+# collapse the cloud (UBM: 2.2).
+squash_factor = 2.2
+
+# --- Starting and moving --------------------------------------------------
+
+# Spread of a (re)started cloud around its pose (UBM: 0.5 m, 0.5 m, 0.4 rad).
+initial_pose_stddev_x_m = 0.5
+initial_pose_stddev_y_m = 0.5
+initial_pose_stddev_heading_rad = 0.4
+# Motion noise added on every scan the vehicle moved, in its own frame
+# (UBM added 0.15 m, 0.15 m and 0.2 rad on every odometry message, moving
+# or not)...
+motion_dispersion_stddev_x_m = 0.01
+motion_dispersion_stddev_y_m = 0.01
+motion_dispersion_stddev_heading_rad = 0.01
+# ... plus this much per meter driven, on x and y...
+motion_noise_per_m = 0.15
+# ... and this much per radian turned, on the heading.
+motion_noise_per_rad = 0.2
+# Resample once the effective sample size drops below this fraction of the
+# particles. 1 resamples on every scan, as UBM's node did.
+resample_threshold = 0.5
+
+# --- Global localization (Relocalize) -------------------------------------
+
+# Particles spread over the whole map's free space.
+global_num_particles = 100000
+# Converged, and back to num_particles, once the cloud's spread is below
+# this, in meters...
+global_converged_spread_m = 0.3
+# ... for this many scans in a row.
+global_converged_scans = 40
+# The squash factor while converging: larger than squash_factor, so one scan
+# can't settle it on a stretch of track that only looks like the right one.
+global_squash_factor = 8.0
+
+# --- Running --------------------------------------------------------------
+
+# Particles drawn on the web UI's canvas.
+draw_particles = 200
+# Threads casting rays, capped at the cores available. Leave cores to the
+# rest of the stack on the car.
+threads = 4
+# Seed of the noise, so a run can be repeated. Not live-tunable.
+seed = 0

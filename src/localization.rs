@@ -9,11 +9,17 @@
 
 mod dead_reckoning;
 pub mod mapping_session;
+mod particle_filter;
 pub(crate) mod pose_source;
 mod slam;
 mod vehicle_pose;
 
 pub use dead_reckoning::{DeadReckoning, DeadReckoningConfig, Integration};
+pub use particle_filter::{
+    ParticleFilterConfig, save_parameters as save_particle_filter_parameters,
+    saved_values as saved_particle_filter_values,
+    tunable_parameters as particle_filter_tunable_parameters,
+};
 pub use slam::{
     KeptScan, ProcessedScan, RebuildOutcome, Scores, Slam, SlamConfig, TrajectoryError, WallError,
     map_walls, rebuild, save_parameters as save_slam_parameters, saved_values as saved_slam_values,

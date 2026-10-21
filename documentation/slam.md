@@ -20,6 +20,11 @@ It does what Karto's `Mapper` does:
 The optimizer replaces slam_toolbox's Ceres solver. It's our own
 Levenberg-Marquardt, with the sparse linear algebra from the `faer` crate.
 
+To localize on a known map, `Slam` runs one of two backends: scan matching
+against the map's walls, or a [particle filter](#particle-filter) ported
+from UBM's `particle_filter_cpp` (`other_repos/ubm/particle_filter_cpp`),
+with range_libc's CDDT ray caster.
+
 ## Architecture
 
 ```mermaid
@@ -28,7 +33,8 @@ flowchart LR
     I["SimulatedImu"] -- "imu" --> D["DeadReckoning"]
     D -- "odometry (+ reset_count)" --> S
     W["WebGui"] -- "slam_command, slam_save, slam_parameters" --> S
-    S -- "slam_status" --> W
+    W -- "localization_command, particle_filter_parameters" --> S
+    S -- "slam_status, localization_status" --> W
     S -- "slam_map" --> X["(any consumer)"]
     S -- "draw/Slam" --> W
     M["MapServer"] -- "start_state" --> S
@@ -40,8 +46,9 @@ The diagram shows the simulation. On the real car, `HokuyoLidar` publishes
 `lidar_scan` and `Vesc` publishes `imu` instead; nothing else changes.
 
 - **Inputs:** `lidar_scan`, `odometry`, `slam_command`, `slam_save` and
-  `slam_parameters`,
-  plus `map` and `start_state` while localizing. SLAM never reads
+  `slam_parameters`, plus `map` and `start_state` while localizing, and
+  `localization_command` and `particle_filter_parameters` for the
+  localization backend. SLAM never reads
   `vehicle_status`, which is the simulator's ground truth. It only knows
   what a real car would know.
 - **`slam_status`:** the state SLAM is actually in, how many scans the map
@@ -52,6 +59,15 @@ The diagram shows the simulation. On the real car, `HokuyoLidar` publishes
   correction `map_to_odom` (see [Localization](#localization)). Also the
   value of every tunable parameter, and the `anchor`: where odometry was last
   reset in the world, i.e. where SLAM's frame sits on the true map.
+- **`localization_status`:** which localization algorithm runs (or will),
+  how long its latest scan took, a quality figure in its own terms (scan
+  matching's match response, the particle filter's spread in meters), the
+  particle filter's heading spread, effective sample size and particle
+  count, whether a global relocalization is still converging, and the
+  particle filter's parameters. Kept apart from `slam_status` and
+  `slam_command`, which mapping sessions and debug recordings store with
+  bincode: a field added to either would make every older recording
+  undecodable.
 - **`slam_map`:** the occupancy grid, in SLAM's own frame (see
   [Frames](#frames)). Each pixel is one of `SlamMap::FREE` (255),
   `SlamMap::OCCUPIED` (0) or `SlamMap::UNKNOWN` (128), plus the trajectory.
@@ -456,6 +472,26 @@ It localizes on the **selected map**, the one `MapServer` publishes on
 `map`, exactly as on the real car. In the simulator that's also the map the
 vehicle drives in, so any map works: a generated one, or one SLAM saved.
 
+### Picking the algorithm
+
+`localization_command` picks the backend: `scan_matching` (the default) or
+`particle_filter`. Both publish the same `slam_status` pose and
+`map_to_odom`, so every consumer of the localized pose (`pose_source`,
+`VehiclePose`, lap telemetry, benchmarks) works with either.
+
+- **Switching** only takes effect while SLAM isn't `localizing` - judged by
+  its previous tick, so a switch written together with Start still applies.
+  `web_gui` refuses a switch (409) while another algorithm runs. On the same
+  map and odometry, the new backend starts from the old one's
+  `map_to_odom`; otherwise from `start_state`.
+- **Set pose** (`set_pose` + a bumped `set_pose_requested`) restarts either
+  from a pose on the map: scan matching moves its `map_to_odom`, the
+  particle filter spreads a fresh cloud around it.
+- **Relocalize** (a bumped `relocalize_requested`) restarts the particle
+  filter from anywhere on the map. Scan matching ignores it.
+
+### Scan matching
+
 This isn't slam_toolbox's localization mode. That one loads a serialized
 pose graph and matches each scan against the stored scans nearby, linking
 it into the graph temporarily (Karto's `ProcessLocalization`). Here the map
@@ -478,13 +514,103 @@ is just the binary raster every map folder has (`localizer.rs`):
 
 The map is never changed. There's no global relocalization: odometry must
 start close to the truth (within the search window) and stay close enough
-between scans, as with slam_toolbox's localization.
+between scans, as with slam_toolbox's localization - use the particle
+filter's Relocalize for that.
 
 Measured on a generated track with IMU `noise_scale = 5`, the gap follower
 driving for 90 s: odometry drifted up to 8.4 m, while the localized pose
 (`map_to_odom` composed with the latest odometry) stayed within 5.6 cm and
 1.6° of the truth. Each match took about 11 ms in a release build. On the
 map SLAM saved of that track, the error stayed within 5 cm.
+
+### Particle filter
+
+`localization/particle_filter/` ports UBM's `particle_filter_cpp` ROS 2 node
+(Monte Carlo localization, as in MIT's racecar particle filter) and the ray
+caster it uses, range_libc's CDDT (`other_repos/ubm/range_libc`). No C++ is
+linked and nothing new is needed to build it.
+
+| Module | Ported from |
+|---|---|
+| `omap.rs` | range_libc's `OMap` (occupied: every pixel that isn't white) and `DistanceTransform` |
+| `cddt.rs` | range_libc's `CDDTCast`: LUT construction, `prune`, `calc_range` - faithfully, with its default compile flags |
+| `ray_marching.rs` | range_libc's `RayMarching`: exact, the reference CDDT is tested against, and selectable (`ray_cast_algo = 1`) |
+| `sensor_model.rs` | UBM's `get_ray_behaviour_sensor_model` and range_libc's `eval_sensor_model` |
+| `filter.rs` | UBM's `ParticleFilterNode` callbacks |
+
+On every scan, with odometry interpolated to the scan's time:
+
+1. **Motion:** each particle moves by odometry's motion since the last
+   scan, in its own frame, plus Gaussian noise of
+   `motion_dispersion_stddev_*` plus `motion_noise_per_m` per meter and
+   `motion_noise_per_rad` per radian. Standing still moves nothing.
+2. **Sensor:** every `range_step`th beam across `considered_lidar_fov_rad`
+   is cast from each particle's sensor position (the LIDAR's mount offset
+   included) with CDDT, and the readings are scored with the beam model: a
+   hit around the predicted range (`ray_hit_sigma_px`), a short reading, a
+   max-range one, or noise. The scan's likelihood, raised to
+   `1 / squash_factor`, multiplies each particle's weight.
+3. **Estimate:** the weighted mean pose (circular mean for the heading),
+   with the cloud's spread and effective sample size.
+4. **Resample** (low-variance) once the effective sample size falls below
+   `resample_threshold` of the particles.
+
+`map_to_odom` is the estimate composed with the inverse of odometry's pose
+at the scan, so between scans the pose follows odometry, as with scan
+matching. The cloud starts as a Gaussian of `initial_pose_stddev_*` around
+`start_state` (where odometry was last reset), a pose given with Set pose,
+or the old backend's pose when switching.
+
+**Relocalize** spreads `global_num_particles` particles uniformly over the
+map's free pixels, facing anywhere. While they converge, the likelihood is
+squashed harder (`global_squash_factor`), so one scan can't settle the cloud
+on a stretch of track that only looks like the right one. Once the spread
+stays under `global_converged_spread_m` for `global_converged_scans` scans
+in a row, the cloud drops back to `num_particles`.
+
+**What changed from the C++.** The algorithm is the same, but these bugs
+were fixed rather than ported:
+
+- The car-frame rotation of the odometry delta reused the already rotated
+  `delta_x` for `delta_y`.
+- The first delta after an initial pose mixed the map frame (the pose) with
+  the odom frame (odometry).
+- Heading deltas weren't wrapped, and the heading estimate was a linear
+  mean, which breaks across ±π.
+- Resampling searched the CDF per particle (O(N²)); it's now O(N).
+- Every odometry message resampled and re-weighted the cloud against the
+  latest scan, scored again and again. Now motion, weighting and resampling
+  happen once per scan, and resampling only when the weight has
+  concentrated.
+- Motion noise was added on every message, moving or not.
+- The scan's likelihood is computed with logarithms: range_libc's product
+  of probabilities underflows with many beams.
+- Readings the sensor couldn't make (`NaN`, below its minimum) count as
+  max-range ones; the considered field of view is clamped to the sensor's
+  rather than refused.
+
+CDDT is approximate: a LUT bin is a pixel wide, so a ray that grazes a wall
+stops at it up to a pixel and a half to the side, where ray marching slips
+past. It never sees through a wall (`cddt_agrees_with_ray_marching_but_for_grazing_rays`).
+
+**Measured** in `web_gui` on a generated track (1200 × 1200 px at 5 cm),
+with the default (UBM's) parameters, the gap follower driving, and the
+localized pose (`map_to_odom` composed with the latest odometry) compared
+with the ground truth every 0.2 s over 45 to 60 s, after the first quarter:
+
+| | Mean error | Max error | Max heading error | Per scan |
+|---|---|---|---|---|
+| Scan matching | 2.2 cm | 6.7 cm | 2.4° | 15.7 ms |
+| Particle filter (CDDT, 112 directions) | 4.2 cm | 21 cm | 1.9° | 2.2 ms |
+| Particle filter, `theta_discretization = 360` | 3.3 cm | 12 cm | 1.7° | 2.2 ms |
+| Particle filter, 360 directions, `range_step = 5` | 3.3 cm | 9.6 cm | 2.5° | 5.1 ms |
+
+On Vienna_2026_Quali: scan matching 2.1 cm mean, 5.1 cm max at 10.6 ms;
+the particle filter 4.5 cm mean, 8.9 cm max at 2.1 ms. Relocalize found the
+car within 2 s on both tracks (100 000 particles take about 120 ms a scan
+while converging) and was back to 1500 particles within 10 s. The
+benchmark viewer compares them over whole laps, see
+[benchmark_viewer](benchmark_viewer.md#localization).
 
 ## What's next
 
@@ -506,5 +632,6 @@ map SLAM saved of that track, the error stayed within 5 cm.
 - **Asynchronous optimization.** A long session with several laps grows the
   graph. Optimizing on a separate thread, as slam_toolbox's async mode does
   with its map updates, would keep scan matching on schedule.
-- **Global relocalization:** finding the vehicle on the map with no idea
-  where it is (slam_toolbox doesn't do this either).
+- **Particle filter tuning:** UBM's defaults are kept. A finer CDDT
+  (`theta_discretization`) is free at run time and cuts the error; the
+  motion noise is untested on the real car.

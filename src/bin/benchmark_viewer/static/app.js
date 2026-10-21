@@ -38,6 +38,7 @@ window.Viewer = {
     trails: "full",
     ghosts: true,
     labels: true,
+    estimates: true,
   },
 
   run(id) {
@@ -175,6 +176,12 @@ const FILTER_GROUPS = [
     label: "Race line",
     value: (summary) => (summary.race_line.used_by_algorithm ? summary.race_line.method : "none"),
     labelOf: (value) => (value === "none" ? "none (timed on the centerline)" : value.replace(/_/g, " ")),
+  },
+  {
+    key: "localization",
+    label: "Localization",
+    value: (summary) => summary.localization?.algorithm ?? "none",
+    labelOf: (value) => (value === "none" ? "none" : localizationLabel(value)),
   },
   {
     key: "status",
@@ -453,7 +460,17 @@ function renderRunList() {
             el("span", { text: `${summary.algorithm.name} · ${summary.vehicle.model}` }),
             el("span", { className: `run-status ${summary.status}`, text: STATUS_LABELS[summary.status] ?? summary.status }),
           ]),
-          el("div", { className: "run-sub", text: `${summary.map.name} · ${lineLabel(summary.race_line)} · ${formatDate(summary.started_at)}` }),
+          el("div", {
+            className: "run-sub",
+            text: [
+              summary.map.name,
+              lineLabel(summary.race_line),
+              summary.localization ? `localized by ${localizationLabel(summary.localization.algorithm)}` : null,
+              formatDate(summary.started_at),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }),
           el("div", {
             className: "run-sub",
             text: [`${summary.laps.length}/${summary.laps_requested} laps`, ...numbers.filter(Boolean)]
@@ -493,11 +510,26 @@ const lapChartWrapEl = document.getElementById("lap-chart-wrap");
 const lapChartEl = document.getElementById("lap-chart");
 const lapChartTooltipEl = document.getElementById("lap-chart-tooltip");
 const lapChartLegendEl = document.getElementById("lap-chart-legend");
+const locCompareEl = document.getElementById("loc-compare");
+const locCompareHintEl = document.getElementById("loc-compare-hint");
+const locTableWrapEl = document.getElementById("loc-table-wrap");
+
+/** A localization algorithm's API name, in words. */
+function localizationLabel(algorithm) {
+  return { scan_matching: "scan matching", particle_filter: "particle filter" }[algorithm] ?? algorithm;
+}
 let lapChartHover = null;
 
 function legend(container, runs) {
   container.replaceChildren(
-    ...runs.map((run) => el("span", { className: "legend-item" }, [swatch(run.color), el("span", { text: `${run.label} ${run.summary.algorithm.name} · ${run.summary.vehicle.model}` })])),
+    ...runs.map((run) => {
+      const { summary } = run;
+      const localization = summary.localization ? ` + ${localizationLabel(summary.localization.algorithm)}` : "";
+      return el("span", { className: "legend-item" }, [
+        swatch(run.color),
+        el("span", { text: `${run.label} ${summary.algorithm.name}${localization} · ${summary.vehicle.model}` }),
+      ]);
+    }),
   );
 }
 
@@ -541,7 +573,66 @@ function renderCompare() {
   });
   lapTableWrapEl.replaceChildren(el("table", { className: "lap-table" }, [el("thead", {}, [header]), el("tbody", {}, rows)]));
   drawLapChart();
+  renderLocalizationCompare();
 }
+
+/** How each replayed run's localization did - on the lap the charts show,
+ *  and over every lap - from their trajectories (`TrackMath`), the best
+ *  value of each column highlighted. Only the runs on the track shown are
+ *  loaded, so only they're listed. */
+function renderLocalizationCompare() {
+  const selected = Viewer.selected();
+  const withLocalization = selected.filter((run) => run.summary.localization);
+  locCompareEl.hidden = withLocalization.length === 0;
+  if (withLocalization.length === 0) return;
+
+  const loaded = Replay.runs.filter((run) => run.summary.localization);
+  const missing = withLocalization.length - loaded.length;
+  locCompareHintEl.textContent = [
+    "How far each run's localized pose was from the true one, and how long a scan took to process.",
+    missing > 0 ? `${missing} run${missing === 1 ? "" : "s"} on another track not listed - pick it under the map.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const columns = [
+    { title: "Mean", value: (stats) => stats.meanM, format: (v) => `${(v * 100).toFixed(1)} cm`, better: "low" },
+    { title: "RMS", value: (stats) => stats.rmsM, format: (v) => `${(v * 100).toFixed(1)} cm`, better: "low" },
+    { title: "Max", value: (stats) => stats.maxM, format: (v) => `${(v * 100).toFixed(1)} cm`, better: "low" },
+    { title: "Max heading", value: (stats) => stats.maxHeadingRad, format: (v) => `${((v * 180) / Math.PI).toFixed(1)}°`, better: "low" },
+    { title: "Mean ms", value: (stats) => stats.meanMs, format: (v) => v.toFixed(1), better: "low" },
+    { title: "p95 ms", value: (stats) => stats.p95Ms, format: (v) => v.toFixed(1), better: "low" },
+    { title: "Coverage", value: (stats) => stats.coverage, format: (v) => `${(v * 100).toFixed(0)} %`, better: "high" },
+  ];
+  const header = el("tr", {}, [el("th", { text: "Run" }), el("th", { text: "Algorithm" }), ...columns.map((c) => el("th", { text: c.title }))]);
+  const rows = [];
+  for (const [scope, lap] of [[`Lap ${Replay.lap}`, Replay.lap], ["All laps", null]]) {
+    rows.push(el("tr", { className: "section" }, [el("th", { colspan: columns.length + 2, text: scope })]));
+    const entries = loaded.map((run) => ({ run, stats: TrackMath.localizationStats(run.trajectory, lap) }));
+    const best = columns.map((column) => {
+      const values = entries.map(({ stats }) => (stats ? column.value(stats) : null)).filter((v) => v != null);
+      if (values.length < 2) return null;
+      return column.better === "low" ? Math.min(...values) : Math.max(...values);
+    });
+    for (const { run, stats } of entries) {
+      const title = el("th", { className: "run-cell" }, [swatch(run.color), el("span", { text: run.label })]);
+      rows.push(
+        el("tr", {}, [
+          title,
+          el("td", { text: localizationLabel(run.summary.localization.algorithm) }),
+          ...columns.map((column, i) => {
+            const value = stats ? column.value(stats) : null;
+            if (value == null) return el("td", { className: "empty", text: "–" });
+            return el("td", { className: value === best[i] ? "best" : "", text: column.format(value) });
+          }),
+        ]),
+      );
+    }
+  }
+  locTableWrapEl.replaceChildren(el("table", { className: "lap-table" }, [el("thead", {}, [header]), el("tbody", {}, rows)]));
+}
+
+window.addEventListener("viewer:replay", renderLocalizationCompare);
 
 /** Lap number on x, lap time on y, one line per selected run. */
 function drawLapChart() {
@@ -647,14 +738,15 @@ function renderParameters() {
     }),
   ]);
   const rows = [];
-  const section = (title, values) => {
-    const names = [...new Set(runs.flatMap((run) => Object.keys(values(run.summary))))].sort();
-    const shown = names.filter((name) => showAllParamsEl.checked || differs(runs.map((run) => values(run.summary)[name])));
+  // `among`: the runs the values are compared across - by default all.
+  const section = (title, values, among = runs) => {
+    const names = [...new Set(among.flatMap((run) => Object.keys(values(run.summary))))].sort();
+    const shown = names.filter((name) => showAllParamsEl.checked || differs(among.map((run) => values(run.summary)[name])));
     rows.push(el("tr", { className: "section" }, [el("th", { colspan: runs.length + 1, text: `${title}${shown.length === 0 ? " - all the same" : ""}` })]));
     for (const name of shown) {
-      const cells = runs.map((run) => values(run.summary)[name]);
+      const cells = runs.map((run) => (among.includes(run) ? values(run.summary)[name] : undefined));
       rows.push(
-        el("tr", { className: differs(cells) ? "differs" : "" }, [
+        el("tr", { className: differs(among.map((run) => values(run.summary)[name])) ? "differs" : "" }, [
           el("th", { text: name }),
           ...cells.map((value) => el("td", { text: value === undefined ? "–" : String(Number(value.toPrecision(6))) })),
         ]),
@@ -671,11 +763,22 @@ function renderParameters() {
   rows.push(texts("vehicle model", (s) => s.vehicle.model));
   rows.push(texts("map", (s) => s.map.name));
   rows.push(texts("race line", (s) => lineLabel(s.race_line)));
+  rows.push(texts("localization", (s) => (s.localization ? localizationLabel(s.localization.algorithm) : "none")));
   rows.push(texts("saved", (s) => (s.algorithm.saved_to_config && s.vehicle.saved_to_config ? "yes" : "no")));
   rows.push(texts("commit", (s) => `${s.code.commit?.slice(0, 7) ?? "?"}${s.code.dirty ? "+" : ""}`));
   section("Algorithm", (s) => s.algorithm.parameters);
   section("Vehicle model", (s) => s.vehicle.parameters);
   section("Actuator limits", (s) => s.vehicle.limits);
+  // One section per localization algorithm, compared among its own runs:
+  // the two algorithms share no parameter.
+  const localizations = [...new Set(runs.map((run) => run.summary.localization?.algorithm).filter(Boolean))].sort();
+  for (const algorithm of localizations) {
+    section(
+      `Localization: ${localizationLabel(algorithm)}`,
+      (s) => s.localization?.parameters ?? {},
+      runs.filter((run) => run.summary.localization?.algorithm === algorithm),
+    );
+  }
   paramTableWrapEl.replaceChildren(el("table", { className: "param-table" }, [el("thead", {}, [header]), el("tbody", {}, rows)]));
 }
 
@@ -691,6 +794,7 @@ const LAYER_TOGGLES = [
   ["raceLines", "Race lines"],
   ["ghosts", "Vehicles"],
   ["labels", "Labels (#n)"],
+  ["estimates", "Localization estimate"],
 ];
 
 function renderLayers() {

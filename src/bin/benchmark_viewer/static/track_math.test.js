@@ -91,6 +91,45 @@ const tests = {
     const wobbly = { d: [0, 1, 2, 1.9, 3, 4], t: [0, 1, 2, 2.1, 3, 4] };
     assert.deepStrictEqual(T.deltaTime(wobbly, wobbly), [0, 0, 0, 0, 0, 0]);
   },
+
+  "localization stats measure the estimate against the truth"() {
+    const run = circleRun();
+    // Localization from lap 1's second sample on, always 0.1 m outward
+    // and 0.05 rad ahead, taking 2 ms per scan - but on lap 2 an outlier.
+    run.est_x_m = run.x_m.map((x, i) => (i === 0 ? null : x * (R + 0.1) / R));
+    run.est_y_m = run.y_m.map((y, i) => (i === 0 ? null : y * (R + 0.1) / R));
+    run.est_heading_rad = run.heading_rad.map((h, i) => (i === 0 ? null : T.wrapAngle(h + 0.05)));
+    run.loc_ms = run.t_s.map((_, i) => (i === 0 ? null : 2));
+    run.loc_quality = run.t_s.map(() => null);
+    const lap2 = run.lap.indexOf(2);
+    run.est_x_m[lap2] += 1;
+
+    const lap1 = T.localizationStats(run, 1);
+    near(lap1.meanM, 0.1, 1e-9, "lap 1 mean error");
+    near(lap1.maxM, 0.1, 1e-9, "lap 1 max error");
+    near(lap1.maxHeadingRad, 0.05, 1e-9, "lap 1 heading error");
+    near(lap1.coverage, 1 - 1 / lap1.samples, 1e-12, "lap 1 coverage");
+    near(lap1.meanMs, 2, 1e-12, "lap 1 time");
+    assert(T.localizationStats(run, 2).maxM > 0.9, "the outlier is lap 2's");
+    const all = T.localizationStats(run);
+    assert.strictEqual(all.samples, run.t_s.length);
+    assert(all.rmsM > all.meanM, "the outlier weighs more in the RMS");
+    assert.strictEqual(T.localizationStats(run, 3), null);
+    assert.strictEqual(T.localizationStats(circleRun(), 1), null);
+
+    const profile = T.lapProfile(run, 1, circleLine());
+    assert.strictEqual(profile.posErr[0], null);
+    near(profile.posErr[5], 0.1, 1e-9, "profile error");
+    near(profile.headErr[5], 0.05, 1e-9, "profile heading error");
+    assert.strictEqual(T.estimateAt(run, 0), null);
+    near(T.estimateAt(run, 0.03).x, run.est_x_m[1], 1e-12, "estimate at a time");
+  },
+
+  "quantile picks by nearest rank"() {
+    assert.strictEqual(T.quantile([], 0.5), null);
+    assert.strictEqual(T.quantile([5, 1, 3, 2, 4], 0.5), 3);
+    assert.strictEqual(T.quantile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.95), 10);
+  },
 };
 
 let failed = 0;

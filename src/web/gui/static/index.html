@@ -242,12 +242,29 @@
 
     <section id="panel-localization" class="panel-section" hidden>
       <h1>Localization</h1>
+      <select id="localization-algorithm" title="The algorithm that localizes the car on the selected map">
+        <option value="scan_matching">Scan matching (SLAM)</option>
+        <option value="particle_filter">Particle filter</option>
+      </select>
       <p id="localization-state"></p>
       <div id="localization-controls">
         <button type="button" id="localization-start-btn" data-state="localizing" title="Start or resume localizing on the selected map">&#9654; Start</button>
         <button type="button" id="localization-pause-btn" data-state="localization_paused" title="Pause, keeping the pose">&#10074;&#10074; Pause</button>
+        <button type="button" id="localization-set-pose-btn" title="Restart from a pose: click where the car is on the map, then where it faces. Right click cancels.">Set pose</button>
+        <button type="button" id="localization-relocalize-btn" title="Spread the particles over the whole map and let the filter find the car">Relocalize</button>
       </div>
       <p id="localization-details"></p>
+      <p id="localization-error" class="error"></p>
+      <div id="particle-filter-settings" hidden>
+        <h2 class="parameter-group-title">Particle filter parameters</h2>
+        <p class="parameter-description">Applied from the next scan, keeping the particles. A change to the particle count restarts the cloud around the current estimate.</p>
+        <div id="particle-filter-parameters" class="parameter-list" hidden></div>
+        <div id="particle-filter-save" class="parameter-save" hidden>
+          <button type="button" id="particle-filter-save-btn" class="parameter-save-btn" title="Write these values into the particle filter's config file">Save parameters</button>
+          <button type="button" id="particle-filter-load-btn" class="parameter-load-btn" title="Use the values in the particle filter's config file again, dropping unsaved changes">Load from file</button>
+          <p id="particle-filter-save-status"></p>
+        </div>
+      </div>
     </section>
 
     <section id="panel-detector" class="panel-section" hidden>
@@ -326,6 +343,13 @@
       <div id="bench-setup">
         <label id="bench-algorithm-row">Algorithm
           <select id="bench-algorithm"></select>
+        </label>
+        <label id="bench-localization-row" title="Localization started on every run's map, whose estimate is recorded next to the true pose - needed by an algorithm driving on the localized pose">Localization
+          <select id="bench-localization">
+            <option value="">Off</option>
+            <option value="scan_matching">Scan matching (SLAM)</option>
+            <option value="particle_filter">Particle filter</option>
+          </select>
         </label>
         <details id="bench-maps" class="bench-group">
           <summary>
