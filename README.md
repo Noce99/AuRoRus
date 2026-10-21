@@ -81,6 +81,7 @@ Each one prints its full list of options with `--help`.
 | [`benchmark_viewer`](#benchmark_viewer) | Compare and replay recorded benchmark runs | <http://localhost:1997> |
 | [`car_calibration`](#car_calibration) | Guided calibration of a car's hardware | <http://localhost:1996> |
 | [`mapping_lab`](#mapping_lab) | Build maps from a recorded mapping session with other SLAM parameters, and compare them | <http://localhost:1995> |
+| [`localization_lab`](#localization_lab) | Localize a recorded drive again with every localization algorithm and odometry, and compare their error and cost lap by lap | <http://localhost:1994> |
 | [`probe`](#probe) | Test one piece of the car's hardware on its own | - |
 | [`benchmark_communication_time`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure topic read/write latency | - |
 | [`benchmark_data_freshness`](#benchmark_communication_time-and-benchmark_data_freshness) | Measure how stale the data readers see is | - |
@@ -145,6 +146,22 @@ See [Mapping lab](documentation/mapping_lab.md).
 ```sh
 ./target/release/mapping_lab                                  # pick a session on the page
 ./target/release/mapping_lab --file mapping_sessions/lap.mapping
+```
+
+### `localization_lab`
+
+Localizes the drives `web_gui` records (the Localization panel's Record
+session) again, with every localization algorithm and odometry - scan
+matching, the particle filter, odometry alone, each with its own parameters
+- and compares them on the very same drive: their trajectories on the map
+over the ground truth, their error and time per scan along each lap, and a
+table of scores per lap. On the car, any run can be the reference instead of
+the ground truth. The chosen parameters are saved into
+`config/localization/`. See [Localization lab](documentation/localization_lab.md).
+
+```sh
+./target/release/localization_lab                                            # pick a session on the page
+./target/release/localization_lab --file localization_sessions/laps.localization
 ```
 
 ### `car_calibration`
@@ -244,6 +261,7 @@ loaded at startup.
 | [Planning](documentation/planning.md) | How the race line is planned for a map |
 | [SLAM](documentation/slam.md) | Mapping a track and localizing on a known map, by scan matching or with a particle filter |
 | [Mapping lab](documentation/mapping_lab.md) | Recording mapping sessions and building their maps again offline with other parameters |
+| [Localization lab](documentation/localization_lab.md) | Recording localization sessions and comparing localization algorithms on the same drive |
 | [Detector](documentation/detector.md) | Finding and tracking an opponent by comparing the LIDAR scan with the map |
 | [Vehicle models](src/simulation/vehicle_models/README.md) | The simulator's vehicle dynamics models |
 | [Car calibration](documentation/car_calibration.md) | Calibrating a real car and the car file it produces |

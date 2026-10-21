@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AuRoRus Localization Lab</title>
+<link rel="stylesheet" href="/base.css" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <div id="main-row">
+    <div id="sidebar-toggle">
+      <button id="sidebar-toggle-btn" title="Show/hide the session" aria-label="Show/hide the session">&#9664;</button>
+    </div>
+
+    <aside id="sidebar">
+      <h1>Session</h1>
+      <div id="session-picker">
+        <select id="session-select" title="Localization sessions recorded by web_gui's Localization panel"></select>
+        <button type="button" id="session-load-btn" title="Load this session - its saved runs come back with it">Load</button>
+      </div>
+      <p id="session-status" class="sidebar-note"></p>
+      <dl id="session-info" hidden>
+        <dt>Length</dt><dd id="session-duration"></dd>
+        <dt>Scans</dt><dd id="session-scans"></dd>
+        <dt>Recorded on</dt><dd id="session-source"></dd>
+        <dt>Map</dt><dd id="session-map"></dd>
+        <dt>Driven by</dt><dd id="session-driver"></dd>
+      </dl>
+      <p id="session-warning" hidden></p>
+
+      <h1>Scoring</h1>
+      <label class="menu-row">Race line
+        <select id="race-line-select" title="The race line laps are counted along"></select>
+      </label>
+      <label class="menu-row">Reference
+        <select id="reference-select" title="What every run's error is measured against"></select>
+      </label>
+      <p id="context-status" class="sidebar-note"></p>
+
+      <nav id="panel-nav">
+        <button class="panel-nav-btn selected" data-panel="runs">Runs</button>
+        <button class="panel-nav-btn" data-panel="compare">Compare</button>
+        <button class="panel-nav-btn" data-panel="draft">Draft</button>
+        <button class="panel-nav-btn" data-panel="layers">Layers</button>
+      </nav>
+    </aside>
+
+    <div id="center-column">
+      <main id="canvas-area">
+        <canvas id="map-canvas"></canvas>
+
+        <div id="status-bar">
+          <span id="status-map-name"></span>
+          <span id="status-vertical-size"></span>
+          <span id="status-speed"></span>
+        </div>
+
+        <div id="zoom-controls">
+          <button id="home-btn" title="Center on the map" aria-label="Home">&#8962;</button>
+          <input id="zoom-slider" type="range" min="0" max="1000" value="500" step="1" orient="vertical" />
+        </div>
+      </main>
+
+      <section id="charts-panel">
+        <div id="charts-toolbar">
+          <label>Lap <select id="lap-select" title="The lap shown on the map and in the charts"></select></label>
+          <button type="button" id="play-btn" title="Play the shown runs at real time">&#9654;</button>
+          <input type="range" id="time-slider" min="0" max="1" step="0.01" value="0" title="The time the vehicles are drawn at - or click a chart" />
+          <span id="time-label"></span>
+          <span id="charts-hint" class="panel-hint"></span>
+        </div>
+        <div id="charts-grid">
+          <div class="chart-wrap"><canvas data-chart="position"></canvas></div>
+          <div class="chart-wrap"><canvas data-chart="cross"></canvas></div>
+          <div class="chart-wrap"><canvas data-chart="heading"></canvas></div>
+          <div class="chart-wrap"><canvas data-chart="drift"></canvas></div>
+          <div class="chart-wrap"><canvas data-chart="cost"></canvas></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="right-panel-toggle">
+      <button id="right-panel-toggle-btn" title="Show/hide details" aria-label="Show/hide details">&#9654;</button>
+    </div>
+
+    <aside id="right-panel">
+      <section id="panel-runs" class="panel-section">
+        <h1>Runs</h1>
+        <button type="button" id="run-btn" class="primary-btn" title="Localize the session with the draft pipeline (see Draft)">&#9654; Run the draft</button>
+        <p id="draft-label" class="panel-hint"></p>
+        <p id="run-status" class="panel-hint"></p>
+        <p class="panel-hint">Tick <b>Show</b> on up to 8 runs to draw them on the map and in the charts, each in its own color; the reference is pink. The best value of each score among the shown runs is in green. Runs are saved next to the session and come back with it.</p>
+        <ul id="run-list"></ul>
+      </section>
+
+      <section id="panel-compare" class="panel-section" hidden>
+        <h1>Compare</h1>
+        <label class="menu-row">Score
+          <select id="compare-score" title="The score the table shows"></select>
+        </label>
+        <p class="panel-hint">Every finished run, per lap. Lap 0 runs up to the first crossing of the start/finish line. The best of each column is in green.</p>
+        <div id="compare-table-wrap"><table id="compare-table"></table></div>
+      </section>
+
+      <section id="panel-draft" class="panel-section" hidden>
+        <h1>Draft</h1>
+        <p class="panel-hint">The pipeline the next run localizes with. It starts as what the session was recorded with.</p>
+        <label class="menu-row">Odometry
+          <select id="draft-odometry" title="The recorded odometry, or the recorded IMU integrated again offline">
+            <option value="recorded">As recorded</option>
+            <option value="euler">Integrated again: Euler</option>
+            <option value="midpoint">Integrated again: midpoint</option>
+            <option value="rk4">Integrated again: RK4</option>
+          </select>
+        </label>
+        <label class="menu-row">Algorithm
+          <select id="draft-algorithm" title="What corrects odometry - or nothing, to score odometry alone">
+            <option value="scan_matching">Scan matching (SLAM)</option>
+            <option value="particle_filter">Particle filter</option>
+            <option value="none">None: odometry alone</option>
+          </select>
+        </label>
+        <div class="button-row">
+          <button type="button" id="draft-run-btn" class="primary-btn" title="Localize the session with this pipeline">&#9654; Run</button>
+          <button type="button" id="draft-reset-btn" title="Go back to what the session was recorded with">Reset to session</button>
+        </div>
+
+        <div id="scan-matching-settings" hidden>
+          <h2 class="parameter-group-title">Scan matching parameters</h2>
+          <div id="scan-matching-parameters" class="parameter-list" hidden></div>
+          <div id="scan-matching-save" class="parameter-save" hidden>
+            <button type="button" class="parameter-save-btn" title="Write these values into config/localization/slam.toml - what web_gui starts with">Save to slam.toml</button>
+            <button type="button" class="parameter-load-btn" title="Set the draft to the values in config/localization/slam.toml">Load from slam.toml</button>
+            <p></p>
+          </div>
+        </div>
+
+        <div id="particle-filter-settings" hidden>
+          <h2 class="parameter-group-title">Particle filter parameters</h2>
+          <div id="particle-filter-parameters" class="parameter-list" hidden></div>
+          <div id="particle-filter-save" class="parameter-save" hidden>
+            <button type="button" class="parameter-save-btn" title="Write these values into config/localization/particle_filter.toml - what web_gui starts with">Save to particle_filter.toml</button>
+            <button type="button" class="parameter-load-btn" title="Set the draft to the values in config/localization/particle_filter.toml">Load from particle_filter.toml</button>
+            <p></p>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-layers" class="panel-section" hidden>
+        <h1>Layers</h1>
+        <ul id="layer-list"></ul>
+      </section>
+    </aside>
+  </div>
+</div>
+<script src="/map_view.js"></script>
+<script src="/draw_layers.js"></script>
+<script src="/parameter_panel.js"></script>
+<script src="/chart.js"></script>
+<script src="/charts.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

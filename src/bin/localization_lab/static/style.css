@@ -1,0 +1,421 @@
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#main-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---------- sidebar: the session ---------- */
+
+#sidebar {
+  width: 260px;
+  flex: 0 0 auto;
+  background: #1b1f24;
+  border-right: 1px solid #303640;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 8px;
+  transition: margin-left 0.18s ease;
+  overflow-y: auto;
+}
+
+#sidebar h1 {
+  font-size: 15px;
+  margin: 4px 0 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9aa4b2;
+}
+
+#session-picker {
+  display: flex;
+  gap: 6px;
+}
+
+#session-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#session-select {
+  font: inherit;
+  font-size: 13px;
+  background: #22272e;
+  color: #e8e8e8;
+  border: 1px solid #303640;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.sidebar-note,
+.panel-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #9aa4b2;
+  line-height: 1.35;
+}
+
+.sidebar-note.error,
+.panel-hint.error,
+.run-stats.error {
+  color: #f59e0b;
+}
+
+#session-info {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: 13px;
+}
+
+#session-info[hidden] {
+  display: none;
+}
+
+#session-info dt {
+  color: #9aa4b2;
+}
+
+#session-info dd {
+  margin: 0;
+  color: #cdd3db;
+  overflow-wrap: anywhere;
+}
+
+#panel-nav {
+  margin-top: 14px;
+}
+
+/* ---------- runs ---------- */
+
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.button-row button {
+  flex: 1 1 0;
+}
+
+.primary-btn {
+  background: #3f6dc9;
+  border-color: #3f6dc9;
+  color: #fff;
+}
+
+#run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run {
+  background: #22272e;
+  border: 1px solid #303640;
+  border-left: 4px solid #303640;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.run.shown {
+  border-left-color: var(--run-color);
+}
+
+.run-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.run-state {
+  font-weight: 400;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+.run-state[data-state="done"] {
+  color: #7fd18b;
+}
+
+.run-state[data-state="failed"] {
+  color: #f59e0b;
+}
+
+.run-changes {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #e8e8e8;
+  overflow-wrap: anywhere;
+}
+
+.run-stats {
+  margin: 0;
+  font-size: 12px;
+  color: #9aa4b2;
+  line-height: 1.35;
+}
+
+.run-progress {
+  width: 100%;
+  accent-color: #3f6dc9;
+}
+
+.run-progress[hidden],
+.run-actions button[hidden],
+.run-actions label[hidden] {
+  display: none;
+}
+
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.run-actions button {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.primary-btn:hover {
+  background: #4a7bd8;
+}
+
+.run-scores {
+  margin: 2px 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.run-scores[hidden] {
+  display: none;
+}
+
+.run-scores dt {
+  color: #9aa4b2;
+}
+
+.run-scores dd {
+  margin: 0;
+  color: #cdd3db;
+}
+
+.run-scores dd.best {
+  color: #7fd18b;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#compare-score,
+#race-line-select,
+#reference-select,
+#draft-odometry,
+#draft-algorithm,
+#lap-select {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 13px;
+  background: #22272e;
+  color: #e8e8e8;
+  border: 1px solid #303640;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+
+/* ---------- localization lab ---------- */
+
+#session-warning {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e0a458;
+  background: rgba(224, 164, 88, 0.12);
+  border: 1px solid rgba(224, 164, 88, 0.45);
+  border-radius: 6px;
+}
+
+#session-warning[hidden] {
+  display: none;
+}
+
+.menu-row select {
+  min-width: 0;
+}
+
+.run-head .run-id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--run-color, transparent);
+  border: 1px solid #5b636e;
+}
+
+.run:not(.shown) .run-swatch {
+  background: transparent;
+}
+
+.run-changes:empty,
+.run-tags:empty,
+.run-stats:empty {
+  display: none;
+}
+
+.run-tags {
+  font-size: 12px;
+  color: #ff6ec7;
+}
+
+.run-actions label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.run {
+  cursor: default;
+}
+
+/* The charts under the map. */
+#charts-panel {
+  flex: 0 0 300px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #1b1f24;
+  border-top: 1px solid #303640;
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+#charts-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#charts-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#play-btn {
+  padding: 4px 10px;
+}
+
+#time-slider {
+  flex: 1 1 auto;
+  accent-color: #ff6ec7;
+}
+
+#time-label {
+  font-variant-numeric: tabular-nums;
+  min-width: 70px;
+}
+
+#charts-hint {
+  flex: 0 1 auto;
+}
+
+#charts-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chart-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: #14181c;
+  border: 1px solid #303640;
+  border-radius: 6px;
+}
+
+.chart-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* Wider while the table is shown. */
+#right-panel:has(#panel-compare:not([hidden])) {
+  width: 520px;
+}
+
+#compare-table-wrap {
+  overflow-x: auto;
+}
+
+#compare-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+#compare-table th,
+#compare-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #303640;
+  text-align: right;
+  white-space: nowrap;
+}
+
+#compare-table th:first-child,
+#compare-table td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+#compare-table th {
+  color: #9aa4b2;
+  font-weight: 600;
+}
+
+#compare-table td.best {
+  color: #7fd18b;
+}

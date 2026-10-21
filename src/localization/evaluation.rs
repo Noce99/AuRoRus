@@ -70,7 +70,7 @@ pub struct Pipeline {
 pub type TimedPose = Timed<[f64; 3]>;
 
 /// One scan an [`Evaluation`] processed.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScanStep {
     /// When it was taken, in microseconds since the session started.
     pub t_us: u64,
