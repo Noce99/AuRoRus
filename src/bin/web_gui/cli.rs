@@ -13,6 +13,9 @@ const DEFAULT_DEBUGS_ROOT: &str = "debugs";
 const DEFAULT_BENCHMARKS_ROOT: &str = "benchmarks";
 /// Default folder the Mapping panel records sessions into.
 const DEFAULT_MAPPING_SESSIONS_ROOT: &str = aurorus::web::gui::DEFAULT_MAPPING_SESSIONS_ROOT;
+/// Default folder the Localization panel records sessions into.
+const DEFAULT_LOCALIZATION_SESSIONS_ROOT: &str =
+    aurorus::web::gui::DEFAULT_LOCALIZATION_SESSIONS_ROOT;
 /// Default recording rate for `--debug`, in Hz, when `--debug_frequency` isn't given.
 const DEFAULT_DEBUG_FREQUENCY_HZ: f64 = aurorus::DEFAULT_DEBUG_FREQUENCY_HZ;
 
@@ -25,6 +28,7 @@ pub struct Config {
     pub benchmarks_root: PathBuf,
     /// Folder the Mapping panel records sessions into.
     pub mapping_sessions_root: PathBuf,
+    pub localization_sessions_root: PathBuf,
     /// The fully resolved `.debug` file path to record to, or `None` if
     /// `--debug` wasn't given at all. See [`resolve_debug_output`]. Recording
     /// starts right away, as if started from the Debug panel.
@@ -83,6 +87,9 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
          --mapping-sessions-root DIR\n  \
          \x20                    folder the Mapping panel records sessions into\n  \
          \x20                    (default: {DEFAULT_MAPPING_SESSIONS_ROOT:?})\n  \
+         --localization-sessions-root DIR\n  \
+         \x20                    folder the Localization panel records sessions into\n  \
+         \x20                    (default: {DEFAULT_LOCALIZATION_SESSIONS_ROOT:?})\n  \
          --debug [PATH]        start recording every written topic to a .debug session file right\n  \
          \x20                    away, until stopped from the Debug panel, a restart, or Ctrl+C -\n  \
          \x20                    no PATH: {DEFAULT_DEBUGS_ROOT:?}/<generated name>.debug\n  \
@@ -107,6 +114,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
     let mut config_dir = PathBuf::from(aurorus::config::DEFAULT_CONFIG_ROOT);
     let mut benchmarks_root = PathBuf::from(DEFAULT_BENCHMARKS_ROOT);
     let mut mapping_sessions_root = PathBuf::from(DEFAULT_MAPPING_SESSIONS_ROOT);
+    let mut localization_sessions_root = PathBuf::from(DEFAULT_LOCALIZATION_SESSIONS_ROOT);
     let mut debug_arg = DebugCliArg::Disabled;
     let mut debug_frequency_hz = DEFAULT_DEBUG_FREQUENCY_HZ;
     let mut sim = false;
@@ -135,6 +143,11 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
             }
             "--mapping-sessions-root" => {
                 mapping_sessions_root = args.next().map(PathBuf::from).unwrap_or_else(|| {
+                    fail(format!("Missing value for {flag}"));
+                })
+            }
+            "--localization-sessions-root" => {
+                localization_sessions_root = args.next().map(PathBuf::from).unwrap_or_else(|| {
                     fail(format!("Missing value for {flag}"));
                 })
             }
@@ -174,6 +187,7 @@ pub fn parse_config(args: impl Iterator<Item = String>) -> Config {
         debugs_root: PathBuf::from(DEFAULT_DEBUGS_ROOT),
         benchmarks_root,
         mapping_sessions_root,
+        localization_sessions_root,
         debug_output: resolve_debug_output(debug_arg),
         debug_frequency_hz,
         sim,

@@ -621,6 +621,40 @@ while converging) and was back to 1500 particles within 10 s. The
 benchmark viewer compares them over whole laps, see
 [benchmark_viewer](benchmark_viewer.md#localization).
 
+## Localization sessions
+
+The Localization panel's **Start recording** and **Stop & save** buttons
+record the drive as it runs, for [`localization_lab`](localization_lab.md)
+to localize it again offline with every algorithm and compare them on the
+very same drive. A session is a `.localization` file under
+`localization_sessions/` (`web_gui --localization-sessions-root` to change
+it), read by the same code as a mapping session
+(`src/localization/session.rs`):
+
+- **The same topics as a mapping session but `slam_command`**: `lidar_scan`,
+  `odometry`, `imu` (to integrate odometry again with other settings),
+  `start_state`, `place_at_start`, `vehicle_geometry`, and `vehicle_status`
+  in simulation, the ground truth the estimates are scored against. Polled
+  at 1 kHz, as a mapping session is.
+- **The `session_info` record** (kind `localization`) holds, besides the
+  car, the map and SLAM's parameters, what localization ran with: the
+  algorithm and the particle filter's parameters, where live localization
+  had odometry's frame on the map if it was localizing (`map_to_odom`), the
+  autonomous algorithm driving (none for a human) and whether it drove on
+  localization's pose, and the race line selected, to count laps along.
+- **The map is embedded** (`session_map`), as in a mapping session. A map
+  must be selected to record.
+- **One session, one drive.** Recording only stops on its own when
+  odometry is reset - the vehicle placed, a map selected - since a session
+  holds a single odometry frame, and on a restart.
+
+**A fair drive.** A localization's estimate is only compared fairly on a
+drive that didn't depend on it. In simulation, while the autonomous
+algorithm driving takes its pose from localization (`pose_source` 0), the
+panel warns, before and while recording, and the session records it. Drive
+by hand or on the ground truth (`pose_source` 1) instead. On the car there
+is no ground truth, so no warning.
+
 ## What's next
 
 - **Drift in tight turns.** On a recorded 62 s simulated drive on

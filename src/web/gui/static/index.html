@@ -255,6 +255,17 @@
       </div>
       <p id="localization-details"></p>
       <p id="localization-error" class="error"></p>
+      <div id="localization-session">
+        <h2 class="parameter-group-title">Record session</h2>
+        <p class="parameter-description">Records the car's drive as it is running now - lidar scans, IMU, odometry and, in simulation, the true pose - with a copy of the selected map, into a .localization file. Open it in the <b>localization_lab</b> binary to localize that same drive again with every algorithm and compare them. Placing the vehicle or selecting a map stops it.</p>
+        <p id="localization-session-warning" hidden></p>
+        <input type="text" id="localization-session-name" placeholder="Session name (blank: date and time)" title="Name of the .localization file - a taken name gets _2, _3, ..." />
+        <div id="localization-session-controls">
+          <button type="button" id="localization-session-start-btn" title="Start recording the drive into a localization session">&#9679; Start recording</button>
+          <button type="button" id="localization-session-stop-btn" title="Stop recording and save the session">&#9632; Stop &amp; save</button>
+        </div>
+        <p id="localization-session-status"></p>
+      </div>
       <div id="particle-filter-settings" hidden>
         <h2 class="parameter-group-title">Particle filter parameters</h2>
         <p class="parameter-description">Applied from the next scan, keeping the particles. A change to the particle count restarts the cloud around the current estimate.</p>

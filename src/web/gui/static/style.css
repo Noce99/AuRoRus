@@ -316,6 +316,45 @@
   color: #f59e0b;
 }
 
+#localization-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#localization-session-controls {
+  display: flex;
+  gap: 8px;
+}
+
+#localization-session-controls button {
+  flex: 1;
+}
+
+#localization-session-warning {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e0a458;
+  background: rgba(224, 164, 88, 0.12);
+  border: 1px solid rgba(224, 164, 88, 0.45);
+  border-radius: 6px;
+}
+
+#localization-session-status {
+  margin: 0;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+#localization-session-status.recording {
+  color: #ef4444;
+}
+
+#localization-session-status.error {
+  color: #f59e0b;
+}
+
 #slam-controls,
 #localization-controls,
 #algorithm-controls,
@@ -476,6 +515,7 @@
 #localization-algorithm,
 #slam-save-name,
 #slam-session-name,
+#localization-session-name,
 #debug-name,
 #debug-frequency {
   flex: 0 0 auto;

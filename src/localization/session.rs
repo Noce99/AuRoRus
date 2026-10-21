@@ -150,10 +150,6 @@ pub struct LocalizationInfo {
     /// `crate::localization::particle_filter_tunable_parameters`).
     #[serde(default)]
     pub particle_filter_parameters: BTreeMap<String, f64>,
-    /// Dead reckoning's integration method, as its config names it
-    /// (`euler`, `midpoint`, `rk4`).
-    #[serde(default)]
-    pub integration: Option<String>,
     /// Where live localization had odometry's frame on the map when
     /// recording started, `[x_m, y_m, heading_rad]` - `None` if it wasn't
     /// localizing.

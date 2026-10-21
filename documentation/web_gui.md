@@ -312,6 +312,25 @@ The estimated pose is drawn as a blue vehicle, with the particle filter's
 particles around it. Algorithms that follow a race line need localization
 running when their `pose_source` is 0, which is what the real car uses.
 
+**Record session** records the car's drive as it runs now - lidar scans,
+IMU, odometry and, in simulation, the true pose - with a copy of the
+selected map, into `localization_sessions/<name>.localization`. It records
+the sensors, not any localization's estimate: open the file in
+[`localization_lab`](localization_lab.md) to localize the same drive again
+with every algorithm and compare them. Localization doesn't need to be
+running to record.
+
+- **Start recording** needs a map selected; a blank name is the date and
+  time, and a taken one gets `_2`, `_3`, ...
+- **Stop & save** ends it. Placing the vehicle or selecting a map (anything
+  that resets odometry) stops it on its own, and the status says so.
+- In simulation, a warning shows while the autonomous algorithm driving
+  takes its pose from localization (`pose_source` 0): that drive depends on
+  the localization running, so it isn't a fair comparison. Drive by hand,
+  or set `pose_source` to the ground truth.
+- The panel's button gets a red dot while recording. See
+  [SLAM](slam.md#localization-sessions) for what's recorded.
+
 ### Detector
 
 ![Detector panel](images/web_gui/detector.jpg)
@@ -462,7 +481,7 @@ flowchart LR
     W -- "reads topics" --> C
     W -- "writes its own topics" --> C
     E -- "read and write topics" --> C
-    W -- "reads and writes files" --> D["maps/, config/, debugs/,\nmapping_sessions/, benchmarks/"]
+    W -- "reads and writes files" --> D["maps/, config/, debugs/,\nmapping_sessions/,\nlocalization_sessions/, benchmarks/"]
 ```
 
 The GUI is one executor among the others, `WebGui` (`src/web/gui.rs`). It is
@@ -624,6 +643,7 @@ Every route is in `src/web/gui/handlers.rs`. Bodies are JSON.
 | `GET /api/localization`, `POST /api/localization_algorithm`, `/api/localization_set_pose`, `/api/localization_relocalize` | The localization algorithm, Set pose and Relocalize |
 | `POST /api/particle_filter_parameter`, `/api/particle_filter_parameters_save`, `/api/particle_filter_parameters_load` | The particle filter's parameters |
 | `GET /api/mapping_session`, `POST /api/mapping_session` | The Record session toggle |
+| `GET /api/localization_session`, `POST /api/localization_session/start`, `/api/localization_session/stop` | The Localization panel's session recording |
 | `GET /api/detector`, `POST /api/detector_parameter`, `/api/detector_parameters_save`, `/api/detector_parameters_load` | The detector |
 | `GET /api/planning`, `POST /api/planning_start`, `POST /api/planning_parameter`, `/api/planning_parameters_save`, `/api/planning_parameters_load` | The planner |
 | `GET /api/opponents`, `POST /api/opponents`, `POST /api/opponents/delete`, `POST /api/race/start` | Opponents and races |
@@ -657,7 +677,7 @@ curl "localhost:1999/api/topic?name=vehicle_status"
 | `src/web/gui/live_api.rs` | Config, map selection, WASD, place at start, restart, read-outs |
 | `src/web/gui/maps_api.rs`, `map_edit_api.rs` | Maps on disk: list, generate, import, edit |
 | `src/web/gui/draw_api.rs`, `topics_api.rs` | The drawings, and the generic topic inspector |
-| `src/web/gui/autonomous_api.rs`, `vehicle_model_api.rs`, `simulation_api.rs`, `vesc_api.rs`, `slam_api.rs`, `detector_api.rs`, `planning_api.rs`, `race_lines_api.rs`, `opponents_api.rs`, `debug_api.rs` | One file per panel |
+| `src/web/gui/autonomous_api.rs`, `vehicle_model_api.rs`, `simulation_api.rs`, `vesc_api.rs`, `slam_api.rs`, `localization_api.rs`, `localization_session_api.rs`, `mapping_session_api.rs`, `detector_api.rs`, `planning_api.rs`, `race_lines_api.rs`, `opponents_api.rs`, `debug_api.rs` | One file per panel |
 | `src/web/gui/benchmark_api.rs`, `benchmark_orchestrator.rs` | The Benchmark panel, and the thread that drives its runs |
 | `src/web/gui/static/` | The page: `index.html`, `style.css`, `app.js`, `benchmark.js` |
 | `src/web/*.js`, `src/web/base.css` | The frontend shared with `replay_web_gui` |

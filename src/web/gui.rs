@@ -34,6 +34,7 @@ mod draw_api;
 mod handlers;
 mod live_api;
 mod localization_api;
+mod localization_session_api;
 mod map_edit_api;
 mod mapping_session_api;
 mod maps_api;
@@ -133,10 +134,15 @@ pub struct BenchmarkSetup {
 /// [`WebGui::with_mapping_sessions_root`] says otherwise.
 pub const DEFAULT_MAPPING_SESSIONS_ROOT: &str = "mapping_sessions";
 
+/// Folder localization sessions are recorded into, unless
+/// [`WebGui::with_localization_sessions_root`] says otherwise.
+pub const DEFAULT_LOCALIZATION_SESSIONS_ROOT: &str = "localization_sessions";
+
 /// Serves the map browser/generator web UI. Reads and writes map folders
 /// under `maps_root` directly off disk, records debug sessions into
-/// `debugs_root`, and mapping sessions into a folder of their own (see
-/// [`WebGui::with_mapping_sessions_root`]).
+/// `debugs_root`, and mapping and localization sessions into folders of
+/// their own (see [`WebGui::with_mapping_sessions_root`] and
+/// [`WebGui::with_localization_sessions_root`]).
 pub struct WebGui {
     id: u16,
     name: String,
@@ -147,6 +153,8 @@ pub struct WebGui {
     recorder: DebugRecorder,
     /// Kept across restarts like `recorder`.
     mapping_session: mapping_session_api::MappingSession,
+    /// Kept across restarts like `recorder`.
+    localization_session: localization_session_api::LocalizationSession,
     benchmark_setup: BenchmarkSetup,
     /// Kept across restarts like `recorder`, so the Benchmark panel still
     /// shows the last results.
@@ -177,6 +185,9 @@ impl WebGui {
             mapping_session: mapping_session_api::MappingSession::new(
                 DEFAULT_MAPPING_SESSIONS_ROOT,
             ),
+            localization_session: localization_session_api::LocalizationSession::new(
+                DEFAULT_LOCALIZATION_SESSIONS_ROOT,
+            ),
             benchmark_setup,
             benchmark: benchmark_api::Benchmark::default(),
             config,
@@ -188,6 +199,13 @@ impl WebGui {
     /// [`DEFAULT_MAPPING_SESSIONS_ROOT`].
     pub fn with_mapping_sessions_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.mapping_session = mapping_session_api::MappingSession::new(root);
+        self
+    }
+
+    /// Records localization sessions into `root` instead of
+    /// [`DEFAULT_LOCALIZATION_SESSIONS_ROOT`].
+    pub fn with_localization_sessions_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.localization_session = localization_session_api::LocalizationSession::new(root);
         self
     }
 
@@ -320,6 +338,7 @@ impl Executor for WebGui {
             root: &self.debugs_root,
             recorder: &self.recorder,
             mapping_session: &self.mapping_session,
+            localization_session: &self.localization_session,
         };
         let benchmarks = handlers::Benchmarks {
             setup: &self.benchmark_setup,
@@ -341,6 +360,9 @@ impl Executor for WebGui {
             scope.spawn(|| benchmark_orchestrator::run_orchestrator(&orchestrator));
             scope.spawn(|| {
                 mapping_session_api::run_controller(captain, id, &self.mapping_session, car_name)
+            });
+            scope.spawn(|| {
+                localization_session_api::run_controller(captain, id, &self.localization_session)
             });
             for _ in 0..self.config.worker_threads {
                 let server = server.clone();
@@ -381,6 +403,7 @@ impl Executor for WebGui {
         );
         fresh.benchmark = self.benchmark.clone();
         fresh.mapping_session = self.mapping_session.clone();
+        fresh.localization_session = self.localization_session.clone();
         fresh.car_name = self.car_name.clone();
         Box::new(fresh)
     }

@@ -121,6 +121,7 @@ fn main() {
         web_gui_config,
     );
     web_gui = web_gui.with_mapping_sessions_root(config.mapping_sessions_root.clone());
+    web_gui = web_gui.with_localization_sessions_root(config.localization_sessions_root.clone());
     if let Some(car) = hardware {
         web_gui = web_gui.on_car(&car.name);
     }

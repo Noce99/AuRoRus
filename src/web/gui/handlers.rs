@@ -11,6 +11,7 @@ use super::detector_api;
 use super::draw_api;
 use super::live_api;
 use super::localization_api;
+use super::localization_session_api::{self, LocalizationSession};
 use super::map_edit_api;
 use super::mapping_session_api::{self, MappingSession};
 use super::maps_api;
@@ -27,13 +28,15 @@ use crate::{Captain, DebugRecorder};
 use std::path::Path;
 use tiny_http::{Method, Request, ResponseBox};
 
-/// What the recording routes need: the Debug panel's (see [`debug_api`])
-/// and the Mapping panel's sessions (see [`mapping_session_api`]).
+/// What the recording routes need: the Debug panel's (see [`debug_api`]),
+/// the Mapping panel's sessions (see [`mapping_session_api`]) and the
+/// Localization panel's (see [`localization_session_api`]).
 pub struct Debug<'a> {
     /// Folder debug recordings go into.
     pub root: &'a Path,
     pub recorder: &'a DebugRecorder,
     pub mapping_session: &'a MappingSession,
+    pub localization_session: &'a LocalizationSession,
 }
 
 /// What the Benchmark panel's routes need - see [`benchmark_api`].
@@ -177,6 +180,18 @@ pub fn handle(
             slam_api::load_slam_parameters(captain, writer_id)
         }
         (Method::Get, "/api/localization") => localization_api::localization(captain),
+        (Method::Get, "/api/localization_session") => {
+            localization_session_api::status(captain, debug.localization_session)
+        }
+        (Method::Post, "/api/localization_session/start") => localization_session_api::start(
+            &mut request,
+            captain,
+            debug.localization_session,
+            car_name,
+        ),
+        (Method::Post, "/api/localization_session/stop") => {
+            localization_session_api::stop(captain, debug.localization_session)
+        }
         (Method::Post, "/api/localization_algorithm") => {
             localization_api::set_algorithm(&mut request, captain, writer_id)
         }

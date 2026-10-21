@@ -223,6 +223,7 @@ as the executables run and are specific to one machine.
 | `debugs/` | `.debug` session files recorded by `web_gui`, played back by `replay_web_gui` |
 | `benchmarks/` | Benchmark runs recorded by `web_gui`, read by `benchmark_viewer` |
 | `mapping_sessions/` | `.mapping` session files recorded by `web_gui`, read by `mapping_lab` |
+| `localization_sessions/` | `.localization` session files recorded by `web_gui`, read by `localization_lab` |
 | `CAR_NAME` | One line naming the car this machine drives; without it, `web_gui` simulates |
 | `config/calibration/history/` | Each car's older calibrations, kept when `car_calibration` saves a new one |
 | `other_repos/` | Local clones of third-party projects kept for reference |

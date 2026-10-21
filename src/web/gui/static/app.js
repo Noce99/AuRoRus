@@ -587,6 +587,89 @@ async function pollSlamSession() {
   renderSlamSession(await fetchJSON("/api/mapping_session"));
 }
 
+// Localization panel's Record session: started and stopped by hand, it
+// records the drive (not any localization's estimate) for localization_lab.
+// The server stops it on its own when odometry is reset - see
+// `localization_session_api.rs`.
+const localizationNavBtn = document.querySelector('.panel-nav-btn[data-panel="localization"]');
+const localizationSessionWarningEl = document.getElementById("localization-session-warning");
+const localizationSessionNameEl = document.getElementById("localization-session-name");
+const localizationSessionStartBtn = document.getElementById("localization-session-start-btn");
+const localizationSessionStopBtn = document.getElementById("localization-session-stop-btn");
+const localizationSessionStatusEl = document.getElementById("localization-session-status");
+
+/** Shows why a Start or Stop failed. */
+function showLocalizationSessionError(message) {
+  localizationSessionStatusEl.className = "error";
+  localizationSessionStatusEl.textContent = message;
+}
+
+localizationSessionStartBtn.addEventListener("click", () => {
+  localizationSessionStartBtn.disabled = true;
+  fetchJSON("/api/localization_session/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: localizationSessionNameEl.value.trim() }),
+  })
+    .then(() => pollLocalizationSession())
+    .catch((err) => showLocalizationSessionError(`Couldn't record: ${err.message}`));
+});
+
+localizationSessionStopBtn.addEventListener("click", () => {
+  localizationSessionStopBtn.disabled = true;
+  fetchJSON("/api/localization_session/stop", { method: "POST" })
+    .then(() => pollLocalizationSession())
+    .catch((err) => showLocalizationSessionError(`Couldn't stop: ${err.message}`));
+});
+
+/** Shows the current or last session, and the warning, from
+ *  `/api/localization_session`. */
+function renderLocalizationSession(session) {
+  const recording = session.recording;
+  const isRecording = recording.state === "recording" || recording.state === "saving";
+  localizationNavBtn.classList.toggle("recording", recording.state === "recording");
+  localizationSessionWarningEl.hidden = session.warning === null;
+  localizationSessionWarningEl.textContent = session.warning ?? "";
+  localizationSessionNameEl.disabled = isRecording;
+  localizationSessionStartBtn.disabled = isRecording || !session.map_selected;
+  localizationSessionStopBtn.disabled = recording.state !== "recording";
+
+  const details = () => {
+    const parts = [
+      formatDuration(recording.duration_s),
+      `${recording.samples.toLocaleString()} sample${recording.samples === 1 ? "" : "s"}`,
+    ];
+    if (session.file_size_bytes !== null) parts.push(formatBytes(session.file_size_bytes));
+    let text = `${recording.path} - ${parts.join(" · ")}.`;
+    if (recording.missed_writes > 0) {
+      text += ` ${recording.missed_writes.toLocaleString()} write${recording.missed_writes === 1 ? "" : "s"} missed.`;
+    }
+    return text;
+  };
+
+  localizationSessionStatusEl.className = "";
+  if (isRecording) {
+    localizationSessionStatusEl.className = "recording";
+    localizationSessionStatusEl.textContent =
+      recording.state === "saving" ? `Saving ${recording.path}...` : `Recording ${details()}`;
+  } else if (session.error !== null) {
+    showLocalizationSessionError(`Couldn't record: ${session.error}`);
+  } else if (recording.state === "failed") {
+    showLocalizationSessionError(`Recording failed: ${recording.error}`);
+  } else if (recording.state === "saved") {
+    const stopped = session.stopped_because ? `Stopped: ${session.stopped_because} ` : "";
+    localizationSessionStatusEl.textContent = `${stopped}Last session: ${details()}`;
+  } else {
+    localizationSessionStatusEl.textContent = session.map_selected
+      ? `Saved under ${session.folder}/.`
+      : "Select a map to record a session on.";
+  }
+}
+
+async function pollLocalizationSession() {
+  renderLocalizationSession(await fetchJSON("/api/localization_session"));
+}
+
 /** Shows how SLAM handled this tab's pending save request, once it has. */
 function showSlamSaveOutcome(outcome) {
   if (pendingSlamSave === null || !outcome || outcome.requested !== pendingSlamSave) return;
@@ -3308,6 +3391,7 @@ startPolling(pollLiveMap, SELECTION_POLL_MS);
 startPolling(pollAlgorithms, SELECTION_POLL_MS);
 startPolling(pollSlam, SELECTION_POLL_MS);
 startPolling(pollSlamSession, SELECTION_POLL_MS);
+startPolling(pollLocalizationSession, SELECTION_POLL_MS);
 startPolling(pollDetector, SELECTION_POLL_MS);
 startPolling(pollPlanning, SELECTION_POLL_MS);
 startPolling(pollRaceLines, SELECTION_POLL_MS);
