@@ -274,7 +274,7 @@ cargo doc --no-deps --open
 ```
 
 ## Credits
-The whole project was vibe coded by me ([@Noce99](https://github.com/Noce99)), using as a reference the (non-public) ROS2 repository of the University of Bologna's 1:10 scale autonomous driving team. I have led the team since 2024: at the RoboRacer Autonomous Racing Competition at IEEE ICRA 2025 in Atlanta it took first place with one car, `philly`, running the Frenet overtaking ([watch the final](https://youtube.com/shorts/cEtLJ8aXSXk)), and at ICRA 2026 in Vienna it took second and third place with two cars: `philly` with the Frenet overtaking and `tom` with the MPC.
+The whole project was written by me ([@Noce99](https://github.com/Noce99)) with AI-assisted development, using as a reference the (non-public) ROS2 repository of the University of Bologna's 1:10 scale autonomous driving team. I have led the team since 2024: at the RoboRacer Autonomous Racing Competition at IEEE ICRA 2025 in Atlanta it took first place with one car, `philly`, running the Frenet overtaking ([watch the final](https://youtube.com/shorts/cEtLJ8aXSXk)), and at ICRA 2026 in Vienna it took second and third place in the Master Cup with two cars: `philly` with the Frenet overtaking and `tom` with the MPC.
 
 <table>
   <tr>
@@ -283,7 +283,7 @@ The whole project was vibe coded by me ([@Noce99](https://github.com/Noce99)), u
   </tr>
   <tr>
     <td align="center"><em>Atlanta, ICRA 2025: first place in the RoboRacer competition</em></td>
-    <td align="center"><em>Vienna, ICRA 2026: second and third place</em></td>
+    <td align="center"><em>Vienna, ICRA 2026: second and third place in the Master Cup</em></td>
   </tr>
 </table>
 
